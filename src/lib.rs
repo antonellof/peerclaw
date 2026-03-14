@@ -4,6 +4,7 @@
 //! collaborate, share resources, and transact using a native token economy.
 
 pub mod bootstrap;
+pub mod channel;
 pub mod cli;
 pub mod config;
 pub mod db;
