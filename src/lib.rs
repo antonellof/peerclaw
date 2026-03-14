@@ -12,6 +12,7 @@ pub mod identity;
 pub mod job;
 pub mod node;
 pub mod p2p;
+pub mod proxy;
 pub mod wallet;
 
 // Re-export commonly used types
