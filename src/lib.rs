@@ -15,6 +15,7 @@ pub mod job;
 pub mod node;
 pub mod p2p;
 pub mod proxy;
+pub mod runtime;
 pub mod wallet;
 pub mod wasm;
 
@@ -24,4 +25,5 @@ pub use executor::{ExecutorConfig, ResourceMonitor, TaskExecutor};
 pub use identity::NodeIdentity;
 pub use inference::{InferenceConfig, InferenceEngine};
 pub use node::Node;
+pub use runtime::Runtime;
 pub use wallet::{Wallet, WalletConfig};

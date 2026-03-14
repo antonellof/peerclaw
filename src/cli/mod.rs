@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod network;
 pub mod serve;
+pub mod test;
 pub mod tool;
 pub mod wallet;
 
@@ -45,6 +46,9 @@ pub enum Command {
         #[command(subcommand)]
         cmd: tool::ToolCommand,
     },
+
+    /// Test distributed execution
+    Test(test::TestArgs),
 
     /// Print version information
     Version,

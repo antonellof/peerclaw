@@ -42,6 +42,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Tool { cmd } => {
             peerclawd::cli::tool::run(cmd).await?;
         }
+        Command::Test(args) => {
+            peerclawd::cli::test::run(args).await?;
+        }
         Command::Version => {
             println!("peerclawd {}", env!("CARGO_PKG_VERSION"));
         }
