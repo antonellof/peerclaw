@@ -8,7 +8,9 @@ pub mod channel;
 pub mod cli;
 pub mod config;
 pub mod db;
+pub mod executor;
 pub mod identity;
+pub mod inference;
 pub mod job;
 pub mod node;
 pub mod p2p;
@@ -17,6 +19,8 @@ pub mod wallet;
 
 // Re-export commonly used types
 pub use config::Config;
+pub use executor::{ExecutorConfig, ResourceMonitor, TaskExecutor};
 pub use identity::NodeIdentity;
+pub use inference::{InferenceConfig, InferenceEngine};
 pub use node::Node;
 pub use wallet::{Wallet, WalletConfig};
