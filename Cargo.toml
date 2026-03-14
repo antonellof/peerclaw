@@ -1,0 +1,113 @@
+[package]
+name = "peerclawd"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Decentralized P2P AI agent network"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = "0.3"
+
+# P2P networking
+libp2p = { version = "0.54", features = [
+    "tokio",
+    "noise",
+    "tcp",
+    "quic",
+    "mdns",
+    "kad",
+    "gossipsub",
+    "request-response",
+    "identify",
+    "macros",
+    "serde",
+    "yamux",
+] }
+
+# HTTP/Web
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors", "fs"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmp-serde = "1"
+toml = "0.8"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Configuration
+dotenvy = "0.15"
+
+# Crypto
+ed25519-dalek = { version = "2", features = ["serde", "rand_core"] }
+blake3 = "1"
+rand = "0.8"
+hex = "0.4"
+
+# System info
+num_cpus = "1"
+
+# Database
+redb = "2"
+
+# WASM sandbox
+wasmtime = { version = "28", features = ["component-model"] }
+wasmtime-wasi = "28"
+
+# LLM inference (optional, feature-gated)
+candle-core = { version = "0.8", optional = true }
+candle-nn = { version = "0.8", optional = true }
+candle-transformers = { version = "0.8", optional = true }
+hf-hub = { version = "0.3", optional = true }
+tokenizers = { version = "0.20", optional = true }
+
+# Core types
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Async traits
+async-trait = "0.1"
+
+# Templates for web UI
+askama = "0.12"
+
+# Paths
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = "0.4"
+pretty_assertions = "1"
+
+[features]
+default = ["local-inference"]
+local-inference = [
+    "dep:candle-core",
+    "dep:candle-nn",
+    "dep:candle-transformers",
+    "dep:hf-hub",
+    "dep:tokenizers",
+]
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1
