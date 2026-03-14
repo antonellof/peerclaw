@@ -25,6 +25,15 @@ pub struct Config {
 
     /// Agent configuration
     pub agent: AgentConfig,
+
+    /// Inference engine configuration
+    pub inference: InferenceConfig,
+
+    /// Task executor configuration
+    pub executor: ExecutorConfig,
+
+    /// WASM sandbox configuration
+    pub wasm: WasmConfig,
 }
 
 impl Default for Config {
@@ -35,6 +44,9 @@ impl Default for Config {
             resources: ResourcesConfig::default(),
             database: DatabaseConfig::default(),
             agent: AgentConfig::default(),
+            inference: InferenceConfig::default(),
+            executor: ExecutorConfig::default(),
+            wasm: WasmConfig::default(),
         }
     }
 }
@@ -188,6 +200,96 @@ impl Default for AgentConfig {
             max_agents: 10,
             default_model: "llama-3.2-3b".to_string(),
             tool_timeout_secs: 60,
+        }
+    }
+}
+
+/// Inference engine configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceConfig {
+    /// Directory for model storage
+    pub models_dir: PathBuf,
+    /// Maximum models to keep loaded
+    pub max_loaded_models: usize,
+    /// Maximum memory for models in MB
+    pub max_memory_mb: u32,
+    /// Number of GPU layers to offload (-1 = auto, 0 = CPU only)
+    pub gpu_layers: i32,
+    /// Context size for inference
+    pub context_size: u32,
+    /// Batch size for inference
+    pub batch_size: u32,
+    /// Enable P2P model download
+    pub enable_p2p_download: bool,
+}
+
+impl Default for InferenceConfig {
+    fn default() -> Self {
+        Self {
+            models_dir: bootstrap::base_dir().join("models"),
+            max_loaded_models: 3,
+            max_memory_mb: 16_000, // 16 GB
+            gpu_layers: -1,        // Auto
+            context_size: 4096,
+            batch_size: 512,
+            enable_p2p_download: true,
+        }
+    }
+}
+
+/// Task executor configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutorConfig {
+    /// CPU utilization threshold for local execution (0.0 - 1.0)
+    pub local_utilization_threshold: f64,
+    /// Utilization threshold above which to offload
+    pub offload_threshold: f64,
+    /// Allow offloading tasks to network peers
+    pub allow_network_offload: bool,
+    /// Maximum concurrent inference tasks
+    pub max_concurrent_inference: u32,
+    /// Maximum concurrent WASM tasks
+    pub max_concurrent_wasm: u32,
+    /// Maximum web response size in bytes
+    pub max_web_response_size: usize,
+    /// Default web timeout in seconds
+    pub default_web_timeout_secs: u32,
+}
+
+impl Default for ExecutorConfig {
+    fn default() -> Self {
+        Self {
+            local_utilization_threshold: 0.8,
+            offload_threshold: 0.9,
+            allow_network_offload: true,
+            max_concurrent_inference: 2,
+            max_concurrent_wasm: 10,
+            max_web_response_size: 10 * 1024 * 1024, // 10 MB
+            default_web_timeout_secs: 30,
+        }
+    }
+}
+
+/// WASM sandbox configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmConfig {
+    /// Directory for WASM tools
+    pub tools_dir: PathBuf,
+    /// Maximum memory per execution in MB
+    pub max_memory_mb: u32,
+    /// Default fuel limit
+    pub default_fuel_limit: u64,
+    /// Default timeout in seconds
+    pub timeout_secs: u32,
+}
+
+impl Default for WasmConfig {
+    fn default() -> Self {
+        Self {
+            tools_dir: bootstrap::base_dir().join("tools"),
+            max_memory_mb: 256,
+            default_fuel_limit: 100_000_000,
+            timeout_secs: 60,
         }
     }
 }
