@@ -22,6 +22,7 @@
 //! Local    Network
 //! ```
 
+pub mod remote;
 pub mod resource;
 pub mod router;
 pub mod task;

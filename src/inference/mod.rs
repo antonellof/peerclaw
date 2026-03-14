@@ -19,6 +19,8 @@
 //! ```
 
 pub mod cache;
+pub mod distribution;
+pub mod gguf;
 pub mod model;
 
 use std::path::{Path, PathBuf};
@@ -28,6 +30,11 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 
 pub use cache::{CacheError, LoadedModel, ModelCache, ModelHandle};
+pub use distribution::{
+    DistributionError, DownloadProgress, ModelAnnouncement, ModelDistributor,
+    ModelDistributionMessage, ModelMetadata, CHUNK_SIZE,
+};
+pub use gguf::{AsyncGgufEngine, GgufBackend, GgufConfig, GgufEngine, GgufError, GgufModelHandle, GgufModelInfo};
 pub use model::{ModelArchitecture, ModelId, ModelInfo, ModelRequirements, Quantization};
 
 /// Inference engine for running LLM models.
