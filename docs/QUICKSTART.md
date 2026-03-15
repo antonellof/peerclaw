@@ -1,6 +1,6 @@
-# PeerClaw'd Quickstart Guide
+# PeerClaw Quickstart Guide
 
-Get up and running with PeerClaw'd in minutes.
+Get up and running with PeerClaw in minutes.
 
 ## Installation
 
@@ -8,20 +8,20 @@ Get up and running with PeerClaw'd in minutes.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourorg/peerclawd.git
-cd peerclawd
+git clone https://github.com/yourorg/peerclaw.git
+cd peerclaw
 
 # Build release binary
 cargo build --release
 
-# Binary is at ./target/release/peerclawd
+# Binary is at ./target/release/peerclaw
 ```
 
 ### Verify Installation
 
 ```bash
-./target/release/peerclawd version
-# peerclawd 0.1.0
+./target/release/peerclaw version
+# peerclaw 0.1.0
 ```
 
 ## Quick Start
@@ -31,14 +31,14 @@ cargo build --release
 Every peer needs an identity (Ed25519 keypair). Create one:
 
 ```bash
-peerclawd wallet create
+peerclaw wallet create
 ```
 
 Output:
 ```
 ✓ Wallet created successfully!
   Address: 12D3KooWQL62BcJz9zqRNRnDkKfYiHSdSUG5n7LZ4xRZBPPDT9at
-  Keyfile: ~/.peerclawd/identity.key
+  Keyfile: ~/.peerclaw/identity.key
   Balance: 0.000000 PCLAW
 ```
 
@@ -47,12 +47,12 @@ Output:
 Start your peer node to join the network:
 
 ```bash
-peerclawd serve
+peerclaw serve
 ```
 
 Output:
 ```
-INFO  Starting PeerClaw'd node...
+INFO  Starting PeerClaw node...
 INFO  Peer ID: 12D3KooWQL62BcJz9zqRNRnDkKfYiHSdSUG5n7LZ4xRZBPPDT9at
 INFO  Listening on /ip4/0.0.0.0/tcp/0
 INFO  Node running. Press Ctrl+C to stop.
@@ -61,7 +61,7 @@ INFO  Node running. Press Ctrl+C to stop.
 ### 3. Check Wallet Balance
 
 ```bash
-peerclawd wallet balance
+peerclaw wallet balance
 ```
 
 Output:
@@ -83,22 +83,22 @@ To test P2P features locally, run multiple nodes with separate data directories:
 
 ```bash
 # Create directory and wallet for Node A
-mkdir -p /tmp/peerclawd-node-a
-PEERCLAWD_HOME=/tmp/peerclawd-node-a peerclawd wallet create
+mkdir -p /tmp/peerclaw-node-a
+PEERCLAWD_HOME=/tmp/peerclaw-node-a peerclaw wallet create
 
 # Start Node A
-PEERCLAWD_HOME=/tmp/peerclawd-node-a peerclawd serve
+PEERCLAWD_HOME=/tmp/peerclaw-node-a peerclaw serve
 ```
 
 ### Terminal 2 - Node B
 
 ```bash
 # Create directory and wallet for Node B
-mkdir -p /tmp/peerclawd-node-b
-PEERCLAWD_HOME=/tmp/peerclawd-node-b peerclawd wallet create
+mkdir -p /tmp/peerclaw-node-b
+PEERCLAWD_HOME=/tmp/peerclaw-node-b peerclaw wallet create
 
 # Start Node B
-PEERCLAWD_HOME=/tmp/peerclawd-node-b peerclawd serve
+PEERCLAWD_HOME=/tmp/peerclaw-node-b peerclaw serve
 ```
 
 The nodes will automatically discover each other via mDNS on the local network.
@@ -109,73 +109,73 @@ The nodes will automatically discover each other via mDNS on the local network.
 
 ```bash
 # Create new wallet
-peerclawd wallet create
+peerclaw wallet create
 
 # Show wallet info
-peerclawd wallet info
+peerclaw wallet info
 
 # Check balance
-peerclawd wallet balance
+peerclaw wallet balance
 
 # Send tokens
-peerclawd wallet send <RECIPIENT_ADDRESS> <AMOUNT>
+peerclaw wallet send <RECIPIENT_ADDRESS> <AMOUNT>
 
 # View transaction history
-peerclawd wallet history
+peerclaw wallet history
 
 # Stake tokens as resource provider
-peerclawd wallet stake <AMOUNT>
+peerclaw wallet stake <AMOUNT>
 
 # Unstake tokens
-peerclawd wallet unstake <AMOUNT>
+peerclaw wallet unstake <AMOUNT>
 
 # Show active escrows
-peerclawd wallet escrows
+peerclaw wallet escrows
 ```
 
 ### Network Commands
 
 ```bash
 # Show network status
-peerclawd network status
+peerclaw network status
 
 # List connected peers
-peerclawd network peers
+peerclaw network peers
 
 # Force peer discovery
-peerclawd network discover
+peerclaw network discover
 ```
 
 ### Node Commands
 
 ```bash
 # Start node with default settings
-peerclawd serve
+peerclaw serve
 
 # Start with web UI enabled
-peerclawd serve --web
+peerclaw serve --web
 
 # Start with GPU resources advertised
-peerclawd serve --gpu
+peerclaw serve --gpu
 
 # Start with storage contribution
-peerclawd serve --storage 50GB
+peerclaw serve --storage 50GB
 ```
 
 ### Agent Commands
 
 ```bash
 # Run an agent from spec file
-peerclawd agent run agent.toml
+peerclaw agent run agent.toml
 
 # List running agents
-peerclawd agent list
+peerclaw agent list
 
 # View agent logs
-peerclawd agent logs <AGENT_ID>
+peerclaw agent logs <AGENT_ID>
 
 # Stop an agent
-peerclawd agent stop <AGENT_ID>
+peerclaw agent stop <AGENT_ID>
 ```
 
 ## Configuration
@@ -184,14 +184,14 @@ peerclawd agent stop <AGENT_ID>
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PEERCLAWD_HOME` | Base directory for data | `~/.peerclawd` |
+| `PEERCLAWD_HOME` | Base directory for data | `~/.peerclaw` |
 | `PEERCLAWD_WEB_ENABLED` | Enable web dashboard | `false` |
 | `PEERCLAWD_WEB_ADDR` | Web server address | `127.0.0.1:8080` |
 | `PEERCLAWD_BOOTSTRAP` | Bootstrap peer addresses | (empty) |
 
 ### Config File
 
-Create `~/.peerclawd/config.toml`:
+Create `~/.peerclaw/config.toml`:
 
 ```toml
 [p2p]
@@ -214,7 +214,7 @@ advertise_gpu = false
 
 [database]
 # Database file path
-path = "~/.peerclawd/data/peerclawd.redb"
+path = "~/.peerclaw/data/peerclaw.redb"
 ```
 
 ## Example: Agent Configuration
@@ -254,7 +254,7 @@ repl = true
 Run the agent:
 
 ```bash
-peerclawd agent run agent.toml
+peerclaw agent run agent.toml
 ```
 
 ## Troubleshooting
@@ -263,7 +263,7 @@ peerclawd agent run agent.toml
 
 Check if another instance is running:
 ```bash
-ps aux | grep peerclawd
+ps aux | grep peerclaw
 ```
 
 ### Peers not discovering each other
@@ -276,7 +276,7 @@ ps aux | grep peerclawd
 
 Reset the database:
 ```bash
-rm -rf ~/.peerclawd/data/peerclawd.redb
+rm -rf ~/.peerclaw/data/peerclaw.redb
 ```
 
 ## Next Steps
@@ -287,4 +287,4 @@ rm -rf ~/.peerclawd/data/peerclawd.redb
 
 ---
 
-*PeerClaw'd v0.1 - Quickstart Guide*
+*PeerClaw v0.1 - Quickstart Guide*

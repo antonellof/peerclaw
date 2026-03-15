@@ -1,4 +1,4 @@
-# PeerClaw'd — Token Economy Specification
+# PeerClaw — Token Economy Specification
 
 > **Document:** Token Economy & Wallet Architecture  
 > **Version:** 0.1-draft  
@@ -8,7 +8,7 @@
 
 ## Overview
 
-The PeerClaw'd token (**PCLAW**) is the native utility token that powers every transaction in the network. It is not a speculative asset — it is fuel. Agents spend PCLAW to consume resources, peers earn PCLAW by providing them, and the entire economy is designed to reach a sustainable equilibrium where resource prices reflect real supply and demand.
+The PeerClaw token (**PCLAW**) is the native utility token that powers every transaction in the network. It is not a speculative asset — it is fuel. Agents spend PCLAW to consume resources, peers earn PCLAW by providing them, and the entire economy is designed to reach a sustainable equilibrium where resource prices reflect real supply and demand.
 
 Every entity in the network — whether a human-operated peer node or an autonomous AI agent — has a wallet. No wallet, no participation.
 
@@ -21,13 +21,13 @@ Every entity in the network — whether a human-operated peer node or an autonom
 A wallet is created automatically when a peer starts or an agent is deployed. Each wallet is an Ed25519 keypair stored locally, with the public key serving as the wallet address.
 
 ```
-$ peerclawd wallet create
+$ peerclaw wallet create
 ✓ Wallet created
   Address:  pclaw1q7x9k3m2f8v... (Bech32-encoded Ed25519 pubkey)
-  Keyfile:  ~/.peerclawd/wallet/default.key
+  Keyfile:  ~/.peerclaw/wallet/default.key
   Balance:  0.000000 PCLAW
 
-$ peerclawd wallet balance
+$ peerclaw wallet balance
   Available:   1,250.00 PCLAW
   In escrow:     180.00 PCLAW  (3 active jobs)
   Staked:      5,000.00 PCLAW  (resource provider bond)
@@ -60,12 +60,12 @@ Operator Wallet (pclaw1master...)
 Wallets are configured in the peer/agent TOML config:
 
 ```toml
-# ~/.peerclawd/config.toml — Peer-level wallet config
+# ~/.peerclaw/config.toml — Peer-level wallet config
 
 [wallet]
-keyfile = "~/.peerclawd/wallet/default.key"
+keyfile = "~/.peerclaw/wallet/default.key"
 auto_backup = true
-backup_path = "~/.peerclawd/wallet/backups/"
+backup_path = "~/.peerclaw/wallet/backups/"
 
 [wallet.spending]
 # Maximum tokens this peer can spend per day (across all agents)
@@ -201,7 +201,7 @@ Peers that misbehave lose staked tokens:
 
 ### Pricing Model
 
-All resource pricing in PeerClaw'd follows a **local order book** model. There is no global fixed price — each peer sets its own rates, and agents choose based on price, latency, and reputation.
+All resource pricing in PeerClaw follows a **local order book** model. There is no global fixed price — each peer sets its own rates, and agents choose based on price, latency, and reputation.
 
 ```
 Agent Request:
@@ -254,7 +254,7 @@ These are network-average costs at launch. Actual prices vary by peer:
 
 | Property | Value |
 |---|---|
-| **Name** | PeerClaw'd Token |
+| **Name** | PeerClaw Token |
 | **Symbol** | PCLAW |
 | **Total Maximum Supply** | 1,000,000,000 (1 billion) |
 | **Decimals** | 6 (smallest unit: 0.000001 PCLAW = 1 μPCLAW) |
@@ -331,13 +331,13 @@ However, to bootstrap liquidity and fund development:
 
 ### Exchange Architecture
 
-While PeerClaw'd is decentralized, token acquisition needs an accessible on-ramp. The project operates a **first-party exchange portal** alongside third-party DEX listings:
+While PeerClaw is decentralized, token acquisition needs an accessible on-ramp. The project operates a **first-party exchange portal** alongside third-party DEX listings:
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
 │                    Token Acquisition Channels                  │
 ├─────────────────┬──────────────────┬──────────────────────────┤
-│  PeerClaw'd     │  Decentralized   │  Peer-to-Peer            │
+│  PeerClaw     │  Decentralized   │  Peer-to-Peer            │
 │  Exchange       │  Exchanges       │  (OTC)                   │
 │  (First-Party)  │  (Third-Party)   │                          │
 │                 │                  │                          │
@@ -348,7 +348,7 @@ While PeerClaw'd is decentralized, token acquisition needs an accessible on-ramp
 
 ### First-Party Exchange Portal
 
-The PeerClaw'd Exchange is a web application (hosted at `exchange.peerclawd.dev`) that enables fiat-to-PCLAW purchases:
+The PeerClaw Exchange is a web application (hosted at `exchange.peerclaw.dev`) that enables fiat-to-PCLAW purchases:
 
 **Purchase flow:**
 
@@ -385,7 +385,7 @@ User                    Exchange Portal              Settlement Layer
 **Integrated CLI purchase:**
 
 ```
-$ peerclawd wallet buy 1000
+$ peerclaw wallet buy 1000
   Current price:   $0.10 / PCLAW
   Total cost:      $100.00 USD + $3.20 fees
   Payment method:  Stripe (card ending 4242)
@@ -411,7 +411,7 @@ $ peerclawd wallet buy 1000
 
 **Phase 1 (Launch):**
 - Uniswap v3 (Ethereum L2 — Arbitrum or Base)
-- PeerClaw'd Substrate DEX (native chain)
+- PeerClaw Substrate DEX (native chain)
 
 **Phase 2 (6 months post-launch):**
 - CEX listings: target Tier-2 exchanges (Gate.io, MEXC, KuCoin)
@@ -428,19 +428,19 @@ $ peerclawd wallet buy 1000
 
 ```toml
 # ═══════════════════════════════════════════════════════════════
-# PeerClaw'd Node Configuration — Wallet & Economy Section
-# File: ~/.peerclawd/config.toml
+# PeerClaw Node Configuration — Wallet & Economy Section
+# File: ~/.peerclaw/config.toml
 # ═══════════════════════════════════════════════════════════════
 
 # ── Wallet Identity ────────────────────────────────────────────
 [wallet]
-keyfile = "~/.peerclawd/wallet/default.key"
+keyfile = "~/.peerclaw/wallet/default.key"
 # Display name (optional, shown in peer listings)
 alias = "antonello-bari-node"
 
 # Backup settings
 auto_backup = true
-backup_path = "~/.peerclawd/wallet/backups/"
+backup_path = "~/.peerclaw/wallet/backups/"
 max_backups = 10
 
 # ── Spending Controls ──────────────────────────────────────────
@@ -510,7 +510,7 @@ models = [                               # Pre-loaded models available for jobs
 
 [resources.storage]
 enabled = true
-path = "/data/peerclawd/storage"
+path = "/data/peerclaw/storage"
 capacity_gb = 100                        # Dedicate 100 GB for distributed storage
 min_free_gb = 20                         # Stop accepting chunks if disk free < 20GB
 
@@ -648,4 +648,4 @@ Over time, the declining emission + deflationary burns creates a **net-deflation
 
 ---
 
-*PeerClaw'd Token Economy — Draft v0.1 — March 2026*
+*PeerClaw Token Economy — Draft v0.1 — March 2026*

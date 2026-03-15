@@ -19,8 +19,8 @@
 .env.local
 .env.*.local
 
-# PeerClaw'd data directory (local development)
-.peerclawd/
+# PeerClaw data directory (local development)
+.peerclaw/
 
 # Test artifacts
 *.log

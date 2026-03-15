@@ -5,6 +5,7 @@
 
 pub mod bootstrap;
 pub mod channel;
+pub mod channels;
 pub mod cli;
 pub mod config;
 pub mod db;
@@ -12,17 +13,21 @@ pub mod executor;
 pub mod identity;
 pub mod inference;
 pub mod job;
+pub mod mcp;
 pub mod messaging;
 pub mod node;
 pub mod p2p;
 pub mod proxy;
+pub mod routines;
 pub mod runtime;
+pub mod safety;
 pub mod skills;
 pub mod tools;
 pub mod vector;
 pub mod wallet;
 pub mod wasm;
 pub mod web;
+pub mod workspace;
 
 // Re-export commonly used types
 pub use config::Config;
@@ -33,5 +38,10 @@ pub use node::Node;
 pub use runtime::Runtime;
 pub use skills::{SkillRegistry, LoadedSkill, SkillTrust};
 pub use tools::{Tool, ToolRegistry, ToolContext, ToolOutput, ToolError};
+pub use safety::{SafetyLayer, SafetyConfig, LeakDetector, Sanitizer};
 pub use vector::{VectorStore, VectorStoreConfig, SearchResult};
 pub use wallet::{Wallet, WalletConfig};
+pub use workspace::{Workspace, WorkspaceConfig};
+pub use channels::{Channel, ChannelManager, IncomingMessage, OutgoingResponse};
+pub use routines::{RoutineEngine, RoutineConfig, Routine, Heartbeat};
+pub use mcp::{McpManager, McpConfig, McpClient};

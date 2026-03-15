@@ -46,12 +46,12 @@ heartbeat = { interval = "5m", task = "check_status" }
 ## Deploy an Agent
 
 ```bash
-peerclawd agent run agent.toml
+peerclaw agent run agent.toml
 ```
 
 ## Agent Channels
 
-- **REPL**: `peerclawd agent attach <id>`
+- **REPL**: `peerclaw agent attach <id>`
 - **Webhooks**: HTTP triggers
 - **WebSocket**: Real-time streaming
 - **P2P Direct**: Agent-to-agent over GossipSub

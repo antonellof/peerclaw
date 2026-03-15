@@ -2,10 +2,10 @@
 
 ## Single Binary Design
 
-PeerClaw'd ships as a single statically-linked binary that operates in multiple modes. Every peer runs the same binary — roles (resource provider, agent host, gateway) are determined at runtime.
+PeerClaw ships as a single statically-linked binary that operates in multiple modes. Every peer runs the same binary — roles (resource provider, agent host, gateway) are determined at runtime.
 
 ```
-peerclawd
+peerclaw
 ├── serve          # Start a peer node
 │   ├── --gpu              # Advertise GPU resources
 │   ├── --web <addr>       # Enable web UI
@@ -24,7 +24,7 @@ peerclawd
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    peerclawd binary                       │
+│                    peerclaw binary                       │
 │                                                          │
 │  ┌─────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
 │  │ P2P     │  │ Task     │  │ Inference│  │ Job      │ │

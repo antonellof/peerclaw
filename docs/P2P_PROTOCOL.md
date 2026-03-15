@@ -28,10 +28,10 @@
 
 | Topic | Purpose |
 |-------|---------|
-| `peerclawd/jobs/requests` | Job request broadcasts |
-| `peerclawd/jobs/bids` | Bid announcements |
-| `peerclawd/jobs/status` | Job status updates, results |
-| `peerclawd/models/announce` | Model availability |
+| `peerclaw/jobs/requests` | Job request broadcasts |
+| `peerclaw/jobs/bids` | Bid announcements |
+| `peerclaw/jobs/status` | Job status updates, results |
+| `peerclaw/models/announce` | Model availability |
 
 ## Job Protocol
 

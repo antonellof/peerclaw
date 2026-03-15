@@ -1,10 +1,10 @@
-# PeerClaw'd
+# PeerClaw
 
 **Decentralized P2P AI Agent Network**
 
 > One binary. Distributed intelligence. Token-powered autonomy.
 
-PeerClaw'd is a peer-to-peer network where AI agents collaborate, share compute resources, and transact using a native token economy. Think **BitTorrent meets AI inference** — every peer contributes compute and earns tokens, while agents spend tokens to execute tasks across the network.
+PeerClaw is a peer-to-peer network where AI agents collaborate, share compute resources, and transact using a native token economy. Think **BitTorrent meets AI inference** — every peer contributes compute and earns tokens, while agents spend tokens to execute tasks across the network.
 
 **Ships as a single static binary.** No containers, no orchestrators, no cloud dependencies.
 
@@ -32,7 +32,7 @@ PeerClaw'd is a peer-to-peer network where AI agents collaborate, share compute 
 - **Payment channels** - Efficient micro-payments between peers
 
 ### CLI Experience
-- **Ollama-style commands** - `peerclawd run llama-3.2-3b`
+- **Ollama-style commands** - `peerclaw run llama-3.2-3b`
 - **Claude-Code slash commands** - `/help`, `/model`, `/settings`, `/status`
 - **Interactive chat** - Conversation history, settings persistence
 - **Model management** - Download, list, remove models
@@ -62,18 +62,18 @@ PeerClaw'd is a peer-to-peer network where AI agents collaborate, share compute 
 ### Install
 
 ```bash
-git clone https://github.com/yourusername/peerclawd.git
-cd peerclawd
+git clone https://github.com/yourusername/peerclaw.git
+cd peerclaw
 cargo build --release
 ```
 
 ### Download a Model
 
 ```bash
-mkdir -p ~/.peerclawd/models
+mkdir -p ~/.peerclaw/models
 
 # Llama 3.2 1B (~770MB) - fast, good for testing
-curl -L -o ~/.peerclawd/models/llama-3.2-1b-instruct-q4_k_m.gguf \
+curl -L -o ~/.peerclaw/models/llama-3.2-1b-instruct-q4_k_m.gguf \
   "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
 ```
 
@@ -81,13 +81,13 @@ curl -L -o ~/.peerclawd/models/llama-3.2-1b-instruct-q4_k_m.gguf \
 
 ```bash
 # Interactive chat (Ollama-style)
-./target/release/peerclawd run llama-3.2-1b
+./target/release/peerclaw run llama-3.2-1b
 
 # Full-featured chat with slash commands
-./target/release/peerclawd chat
+./target/release/peerclaw chat
 
 # Start peer node with web dashboard
-./target/release/peerclawd serve --web 127.0.0.1:8080
+./target/release/peerclaw serve --web 127.0.0.1:8080
 ```
 
 ---
@@ -97,9 +97,9 @@ curl -L -o ~/.peerclawd/models/llama-3.2-1b-instruct-q4_k_m.gguf \
 ### Chat & Inference
 
 ```bash
-peerclawd run <model>              # Interactive chat
-peerclawd run <model> "prompt"     # Single query
-peerclawd chat                     # Chat with slash commands
+peerclaw run <model>              # Interactive chat
+peerclaw run <model> "prompt"     # Single query
+peerclaw chat                     # Chat with slash commands
 
 # Slash commands
 /help                              # Show all commands
@@ -114,25 +114,25 @@ peerclawd chat                     # Chat with slash commands
 ### Models
 
 ```bash
-peerclawd models list              # List downloaded models
-peerclawd models download <model>  # Download from HuggingFace
-peerclawd pull <model>             # Alias for download
+peerclaw models list              # List downloaded models
+peerclaw models download <model>  # Download from HuggingFace
+peerclaw pull <model>             # Alias for download
 ```
 
 ### Network
 
 ```bash
-peerclawd serve                    # Start peer node
-peerclawd serve --web 0.0.0.0:8080 # With web dashboard
-peerclawd serve --provider         # Accept jobs from network
-peerclawd peers list               # Show connected peers
+peerclaw serve                    # Start peer node
+peerclaw serve --web 0.0.0.0:8080 # With web dashboard
+peerclaw serve --provider         # Accept jobs from network
+peerclaw peers list               # Show connected peers
 ```
 
 ### Testing
 
 ```bash
-peerclawd test inference           # Test local inference
-peerclawd test cluster --nodes 3   # Spawn test cluster
+peerclaw test inference           # Test local inference
+peerclaw test cluster --nodes 3   # Spawn test cluster
 ```
 
 ---
@@ -140,7 +140,7 @@ peerclawd test cluster --nodes 3   # Spawn test cluster
 ## OpenAI API
 
 ```bash
-peerclawd serve --web 127.0.0.1:8080
+peerclaw serve --web 127.0.0.1:8080
 ```
 
 ```python

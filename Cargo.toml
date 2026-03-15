@@ -105,6 +105,8 @@ base64 = "0.22"
 regex = "1"
 serde_yaml = "0.9"
 which = "7"
+url = "2"
+cron = "0.13"
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run multiple PeerClaw'd agents for distributed testing
+# Run multiple PeerClaw agents for distributed testing
 
 set -e
 
@@ -7,13 +7,13 @@ NUM_AGENTS=${1:-3}
 DURATION=${2:-30}
 BASE_PORT=9000
 
-echo "=== PeerClaw'd Multi-Agent Test ==="
+echo "=== PeerClaw Multi-Agent Test ==="
 echo "Agents: $NUM_AGENTS"
 echo "Duration: ${DURATION}s"
 echo ""
 
 # Build release if needed
-if [ ! -f target/release/peerclawd ]; then
+if [ ! -f target/release/peerclaw ]; then
     echo "Building release binary..."
     cargo build --release
 fi
@@ -51,8 +51,8 @@ for i in $(seq 0 $((NUM_AGENTS - 1))); do
     echo "Starting agent $i on port $PORT..."
 
     PEERCLAWD_HOME="$AGENT_DIR" \
-    RUST_LOG=peerclawd=info \
-    ./target/release/peerclawd serve \
+    RUST_LOG=peerclaw=info \
+    ./target/release/peerclaw serve \
         --listen "$LISTEN" \
         $BOOTSTRAP \
         > "$AGENT_DIR/output.log" 2>&1 &
