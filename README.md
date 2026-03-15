@@ -65,14 +65,53 @@ Chat commands:
 - `/clear` - Clear conversation history
 - `quit` or `exit` - Exit chat
 
-### Test Distributed Execution
+### Model Setup
+
+PeerClaw'd uses GGUF format models for local inference. Download a model to get started:
 
 ```bash
+# Create models directory
+mkdir -p ~/.peerclawd/models
+
+# Download a quantized model (Llama 3.2 1B, ~770MB)
+curl -L -o ~/.peerclawd/models/llama-3.2-1b-instruct-q4_k_m.gguf \
+  "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+
+# Or download a larger model for better quality (Llama 3.2 3B, ~2GB)
+curl -L -o ~/.peerclawd/models/llama-3.2-3b-instruct-q4_k_m.gguf \
+  "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+```
+
+### Test Commands
+
+```bash
+# Test local inference
+./target/release/peerclawd test inference --model llama-3.2-1b --prompt "Hello!" --max-tokens 50
+
+# Test web fetch
+./target/release/peerclawd test fetch --url https://example.com
+
 # Run all local tests (inference, web fetch)
 ./target/release/peerclawd test all
 
-# Test with multiple agents
-./target/release/peerclawd test distributed --agents 4 --duration 30
+# Test distributed execution with multiple nodes
+./target/release/peerclawd test distributed --agents 3 --duration 30
+```
+
+### Multi-Node Testing
+
+Run a distributed test with multiple peers:
+
+```bash
+# Terminal 1: Start main node
+./target/release/peerclawd serve --web 127.0.0.1:8080
+
+# Terminal 2: Start provider node (connects to main)
+./target/release/peerclawd serve --bootstrap /ip4/127.0.0.1/tcp/9000 --provider
+
+# Terminal 3: Submit a job from main node's web UI at http://127.0.0.1:8080
+# Or use the chat command to trigger distributed inference
+./target/release/peerclawd chat --distributed
 ```
 
 ### Web Dashboard
@@ -193,7 +232,7 @@ PeerClaw'd is written entirely in **Rust**. The choice is non-negotiable for thi
 | **Hashing** | `blake3` | Content-addressed storage, Merkle tree construction, integrity verification |
 | **Database / State** | `redb` | Embedded key-value store (pure Rust, ACID, zero-config). Local state, wallet, peer cache, agent metadata |
 | **Alternative DB** | `sled` or `rocksdb` | If higher write throughput needed for transaction logs |
-| **AI Inference** | `llama-cpp-rs` / `candle` | Local inference engine. `candle` for pure-Rust GPU inference (CUDA/Metal), `llama-cpp-rs` for GGUF model support |
+| **AI Inference** | `llama-cpp-2` / `candle` | Local inference engine. `llama-cpp-2` for GGUF model support with Metal/CUDA GPU acceleration, `candle` for pure-Rust GPU inference |
 | **GPU Compute** | `wgpu` | Cross-platform GPU abstraction (Vulkan/Metal/DX12) for inference acceleration |
 | **CLI** | `clap` | Command-line argument parsing with subcommands, shell completions, man page generation |
 | **Logging** | `tracing` + `tracing-subscriber` | Structured logging with span-based context, async-aware. JSON output for machine consumption |
@@ -572,11 +611,13 @@ $ peerclawd serve --web :8080
 - [x] WASM sandbox runtime for tool execution (wasmtime)
 - [x] Local `redb` state store for wallet, peer cache, agent metadata
 - [x] Ed25519 identity generation and message signing
-- [x] Inference module with GGUF model support (llama_cpp)
+- [x] Inference module with GGUF model support (llama-cpp-2 with Metal/CUDA)
 - [x] Smart task routing (local vs network execution)
 - [x] Job marketplace protocol (request → bid → accept → execute → settle)
 - [x] Interactive AI chat CLI (`peerclawd chat`)
 - [x] Web dashboard with network topology visualization
+- [x] Distributed job execution with auto-accept and escrow
+- [x] Real-time resource monitoring and GPU offloading
 
 ### Phase 2 — Economy (`v0.2`)
 - [ ] Token wallet with local accounting and peer-to-peer payment channels

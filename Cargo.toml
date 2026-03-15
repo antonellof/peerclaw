@@ -75,7 +75,8 @@ hf-hub = { version = "0.3", optional = true }
 tokenizers = { version = "0.20", optional = true }
 
 # GGUF inference via llama.cpp (optional)
-llama_cpp = { version = "0.1", optional = true }
+# Using llama-cpp-2 for better compatibility and active maintenance
+llama-cpp-2 = { version = "0.1", optional = true }
 
 # Core types
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -107,7 +108,7 @@ local-inference = [
     "dep:candle-transformers",
     "dep:hf-hub",
     "dep:tokenizers",
-    "dep:llama_cpp",
+    "dep:llama-cpp-2",
 ]
 metal = []  # Apple Silicon GPU (future)
 cuda = []   # Nvidia GPU (future)

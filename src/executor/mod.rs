@@ -36,6 +36,8 @@ pub use resource::{MonitorConfig, ResourceMonitor, ResourceState, TaskType};
 pub use router::{PeerFilter, RouterConfig, RoutingDecision, TaskRouter};
 pub use task::*;
 
+use crate::inference::gguf::{GgufConfig, GgufEngine, GgufModelHandle};
+use crate::inference::GenerateRequest;
 use crate::job::JobManager;
 use crate::p2p::Network;
 
@@ -46,6 +48,10 @@ pub struct TaskExecutor {
     job_manager: Option<Arc<RwLock<JobManager>>>,
     network: Option<Arc<RwLock<Network>>>,
     config: ExecutorConfig,
+    /// GGUF inference engine
+    gguf_engine: Arc<RwLock<GgufEngine>>,
+    /// Currently loaded model handle
+    loaded_model: Arc<RwLock<Option<GgufModelHandle>>>,
 }
 
 impl TaskExecutor {
@@ -57,12 +63,18 @@ impl TaskExecutor {
     ) -> Self {
         let router = TaskRouter::new(resource_monitor.clone(), router_config);
 
+        // Initialize GGUF inference engine
+        let gguf_config = GgufConfig::default();
+        let gguf_engine = GgufEngine::new(gguf_config);
+
         Self {
             router,
             resource_monitor,
             job_manager: None,
             network: None,
             config,
+            gguf_engine: Arc::new(RwLock::new(gguf_engine)),
+            loaded_model: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -204,28 +216,121 @@ impl TaskExecutor {
         self.execute_local(task_id, task, start).await
     }
 
-    /// Execute inference locally.
+    /// Execute inference locally using GGUF model.
     async fn execute_inference_local(
         &self,
         task: InferenceTask,
     ) -> Result<TaskData, ExecutorError> {
-        // TODO: Implement via inference module
-        // For now, return a placeholder
+        // Convert chat messages to prompt string
+        let prompt = task.messages.iter()
+            .map(|msg| match msg.role {
+                MessageRole::System => format!("System: {}\n", msg.content),
+                MessageRole::User => format!("User: {}\n", msg.content),
+                MessageRole::Assistant => format!("Assistant: {}\n", msg.content),
+            })
+            .collect::<String>() + "Assistant:";
+
         tracing::info!(
             model = %task.model,
             max_tokens = task.max_tokens,
-            "Would execute inference locally"
+            prompt_len = prompt.len(),
+            "Executing inference locally with GGUF model"
         );
 
-        // Placeholder response
+        // Find model file
+        let model_filename = format!("{}.gguf", task.model.to_lowercase().replace(" ", "-"));
+        let model_path = self.config.models_dir.join(&model_filename);
+
+        // If exact match doesn't exist, try to find a matching model
+        let actual_path = if model_path.exists() {
+            model_path
+        } else {
+            // Look for any gguf file that contains the model name
+            let mut found_path = None;
+            if let Ok(entries) = std::fs::read_dir(&self.config.models_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map_or(false, |e| e == "gguf") {
+                        let filename = path.file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("");
+                        // Match if filename contains any part of requested model name
+                        if filename.to_lowercase().contains(&task.model.to_lowercase().replace("-", "").replace(" ", ""))
+                           || task.model.to_lowercase().replace("-", "").replace(" ", "").contains(&filename.to_lowercase().replace("-", "").replace(" ", "")) {
+                            found_path = Some(path);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // If still not found, try to use first available model
+            if found_path.is_none() {
+                if let Ok(entries) = std::fs::read_dir(&self.config.models_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().map_or(false, |e| e == "gguf") {
+                            found_path = Some(path);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            match found_path {
+                Some(p) => p,
+                None => {
+                    return Err(ExecutorError::InferenceError(format!(
+                        "Model not found: {}. No GGUF models in {}",
+                        task.model,
+                        self.config.models_dir.display()
+                    )));
+                }
+            }
+        };
+
+        tracing::info!(
+            model_path = %actual_path.display(),
+            "Loading model for inference"
+        );
+
+        // Load model if needed
+        let engine = self.gguf_engine.read().await;
+
+        let model_handle = engine.load(&actual_path)
+            .map_err(|e| ExecutorError::InferenceError(format!("Failed to load model: {}", e)))?;
+
+        // Generate text
+        let request = GenerateRequest {
+            model: task.model.clone(),
+            prompt,
+            max_tokens: task.max_tokens,
+            temperature: task.temperature,
+            top_p: 0.9,
+            stop_sequences: task.stop_sequences.clone(),
+        };
+
+        let response = engine.generate(&model_handle, &request)
+            .map_err(|e| ExecutorError::InferenceError(format!("Generation failed: {}", e)))?;
+
+        tracing::info!(
+            tokens = response.tokens_generated,
+            tps = format!("{:.1}", response.tokens_per_second),
+            "Inference complete"
+        );
+
+        // Convert inference::FinishReason to executor::task::FinishReason
+        let finish_reason = match response.finish_reason {
+            crate::inference::FinishReason::Stop => FinishReason::Stop,
+            crate::inference::FinishReason::Length => FinishReason::Length,
+            crate::inference::FinishReason::ContentFilter => FinishReason::ContentFilter,
+        };
+
         Ok(TaskData::Inference(InferenceResult {
-            text: format!(
-                "[Inference placeholder - model: {}, tokens requested: {}]",
-                task.model, task.max_tokens
-            ),
-            tokens_generated: 0,
-            tokens_per_second: 0.0,
-            finish_reason: FinishReason::Stop,
+            text: response.text,
+            tokens_generated: response.tokens_generated,
+            tokens_per_second: response.tokens_per_second,
+            finish_reason,
         }))
     }
 

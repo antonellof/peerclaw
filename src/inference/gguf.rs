@@ -81,9 +81,7 @@ pub struct GgufModelHandle {
 /// Internal model representation.
 #[cfg(feature = "local-inference")]
 struct GgufModelInner {
-    // This would hold the actual llama.cpp model reference
-    // For now it's a placeholder since llama_cpp crate API varies
-    _marker: std::marker::PhantomData<()>,
+    model: LlamaModelWrapper,
 }
 
 impl GgufModelHandle {
@@ -237,20 +235,41 @@ impl GgufBackend for PlaceholderBackend {
 
 /// Real llama.cpp backend (only compiled with local-inference feature).
 ///
-/// This implementation uses the llama_cpp crate for actual GGUF model loading
-/// and inference. The API may vary between llama_cpp versions, so this serves
-/// as a template that needs adjustment based on the actual crate version.
+/// This implementation uses the llama-cpp-2 crate for actual GGUF model loading
+/// and inference.
 #[cfg(feature = "local-inference")]
 pub struct LlamaCppBackend {
     config: GgufConfig,
-    // Would hold the actual llama.cpp backend state
+    backend: llama_cpp_2::llama_backend::LlamaBackend,
 }
+
+#[cfg(feature = "local-inference")]
+use llama_cpp_2::model::LlamaModel;
+#[cfg(feature = "local-inference")]
+use llama_cpp_2::model::params::LlamaModelParams;
+#[cfg(feature = "local-inference")]
+use llama_cpp_2::context::params::LlamaContextParams;
+#[cfg(feature = "local-inference")]
+use llama_cpp_2::llama_batch::LlamaBatch;
+#[cfg(feature = "local-inference")]
+use llama_cpp_2::sampling::LlamaSampler;
+#[cfg(feature = "local-inference")]
+use llama_cpp_2::model::AddBos;
+
+/// Wrapper to hold the actual llama.cpp model.
+#[cfg(feature = "local-inference")]
+pub struct LlamaModelWrapper {
+    model: LlamaModel,
+}
+
+#[cfg(feature = "local-inference")]
+// SAFETY: LlamaModel is thread-safe according to llama.cpp documentation
+unsafe impl Send for LlamaModelWrapper {}
+unsafe impl Sync for LlamaModelWrapper {}
 
 #[cfg(feature = "local-inference")]
 impl LlamaCppBackend {
     pub fn new(config: GgufConfig) -> Result<Self, GgufError> {
-        // Initialize llama.cpp backend
-        // The actual initialization depends on the llama_cpp crate version
         tracing::info!(
             n_gpu_layers = config.n_gpu_layers,
             n_ctx = config.n_ctx,
@@ -258,7 +277,10 @@ impl LlamaCppBackend {
             "Initializing llama.cpp backend"
         );
 
-        Ok(Self { config })
+        let backend = llama_cpp_2::llama_backend::LlamaBackend::init()
+            .map_err(|e| GgufError::LoadFailed(format!("Failed to init backend: {:?}", e)))?;
+
+        Ok(Self { config, backend })
     }
 }
 
@@ -269,18 +291,15 @@ impl GgufBackend for LlamaCppBackend {
             return Err(GgufError::FileNotFound(path.display().to_string()));
         }
 
-        tracing::info!(path = ?path, "Loading GGUF model");
+        tracing::info!(path = ?path, "Loading GGUF model with llama-cpp-2");
         let start = Instant::now();
 
-        // Note: The actual llama_cpp API varies between versions.
-        // This is structured to be easily replaced with real llama.cpp calls.
-        //
-        // Example with llama_cpp 0.1.x:
-        // ```
-        // use llama_cpp::LlamaModel;
-        // let model = LlamaModel::load_from_file(path, Default::default())
-        //     .map_err(|e| GgufError::LoadFailed(e.to_string()))?;
-        // ```
+        // Create model params
+        let model_params = LlamaModelParams::default()
+            .with_n_gpu_layers(config.n_gpu_layers as u32);
+
+        let model = LlamaModel::load_from_file(&self.backend, path, &model_params)
+            .map_err(|e| GgufError::LoadFailed(format!("{:?}", e)))?;
 
         let id = path
             .file_stem()
@@ -288,7 +307,6 @@ impl GgufBackend for LlamaCppBackend {
             .unwrap_or("unknown")
             .to_string();
 
-        // Estimate memory usage from file size
         let memory_mb = std::fs::metadata(path)
             .map(|m| (m.len() / (1024 * 1024)) as u32)
             .unwrap_or(4096);
@@ -297,14 +315,14 @@ impl GgufBackend for LlamaCppBackend {
             model_id = %id,
             memory_mb = memory_mb,
             elapsed_ms = start.elapsed().as_millis(),
-            "Model loaded (placeholder - enable actual llama.cpp binding)"
+            "Model loaded successfully"
         );
 
         Ok(GgufModelHandle {
             id,
             path: path.to_path_buf(),
             inner: Some(GgufModelInner {
-                _marker: std::marker::PhantomData,
+                model: LlamaModelWrapper { model },
             }),
             memory_mb,
         })
@@ -317,52 +335,128 @@ impl GgufBackend for LlamaCppBackend {
     ) -> Result<GenerateResponse, GgufError> {
         let start = Instant::now();
 
-        tracing::debug!(
+        tracing::info!(
             model_id = %model.id,
             prompt_len = request.prompt.len(),
             max_tokens = request.max_tokens,
             temperature = request.temperature,
-            "Generating completion"
+            "Generating completion with llama-cpp-2"
         );
 
-        // Real implementation would:
-        // 1. Create a context from the model
-        // 2. Tokenize the prompt
-        // 3. Run inference in a loop
-        // 4. Sample tokens using temperature/top_p
-        // 5. Detokenize the output
-        //
-        // Example structure (API varies by llama_cpp version):
-        // ```
-        // let ctx = model.create_context(n_ctx)?;
-        // let tokens = ctx.tokenize(&request.prompt)?;
-        // let mut output = String::new();
-        // for _ in 0..request.max_tokens {
-        //     let next_token = ctx.sample(temperature, top_p)?;
-        //     output.push_str(&ctx.detokenize(next_token)?);
-        // }
-        // ```
+        let inner = model.inner.as_ref()
+            .ok_or_else(|| GgufError::GenerationFailed("Model not loaded".to_string()))?;
 
-        let text = format!(
-            "[llama.cpp backend ready - model: {}, implement actual inference]",
-            model.id,
+        // Create context params
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(Some(std::num::NonZeroU32::new(self.config.n_ctx).unwrap()))
+            .with_n_batch(self.config.n_batch)
+            .with_n_threads(self.config.n_threads as i32)
+            .with_n_threads_batch(self.config.n_threads as i32);
+
+        // Create context
+        let mut ctx = inner.model.model.new_context(&self.backend, ctx_params)
+            .map_err(|e| GgufError::GenerationFailed(format!("Failed to create context: {:?}", e)))?;
+
+        // Tokenize the prompt
+        let tokens = inner.model.model.str_to_token(&request.prompt, AddBos::Always)
+            .map_err(|e| GgufError::TokenizationFailed(format!("{:?}", e)))?;
+
+        tracing::debug!(
+            token_count = tokens.len(),
+            "Tokenized prompt"
         );
+
+        // Create batch and add prompt tokens
+        let mut batch = LlamaBatch::new(512, 1);
+
+        for (i, token) in tokens.iter().enumerate() {
+            let is_last = i == tokens.len() - 1;
+            batch.add(*token, i as i32, &[0], is_last)
+                .map_err(|e| GgufError::GenerationFailed(format!("Failed to add token to batch: {:?}", e)))?;
+        }
+
+        // Decode the prompt
+        ctx.decode(&mut batch)
+            .map_err(|e| GgufError::GenerationFailed(format!("Failed to decode prompt: {:?}", e)))?;
+
+        let ttfb = start.elapsed();
+
+        // Set up sampler
+        let mut sampler = LlamaSampler::chain_simple([
+            LlamaSampler::dist(1234),
+            LlamaSampler::greedy(),
+        ]);
+
+        // Generate tokens
+        let mut output = String::new();
+        let mut token_count = 0u32;
+        let mut n_cur = tokens.len();
+
+        while token_count < request.max_tokens {
+            // Sample next token
+            let new_token = sampler.sample(&ctx, (batch.n_tokens() - 1) as i32);
+            sampler.accept(new_token);
+
+            // Check for end of sequence
+            if inner.model.model.is_eog_token(new_token) {
+                break;
+            }
+
+            // Decode token to text using bytes
+            // Args: token, buffer_size, special (decode specials), lstrip
+            if let Ok(bytes) = inner.model.model.token_to_piece_bytes(new_token, 256, false, None) {
+                if let Ok(s) = std::str::from_utf8(&bytes) {
+                    output.push_str(s);
+                }
+            }
+
+            token_count += 1;
+
+            // Prepare for next token
+            batch.clear();
+            batch.add(new_token, n_cur as i32, &[0], true)
+                .map_err(|e| GgufError::GenerationFailed(format!("Failed to add token: {:?}", e)))?;
+
+            // Decode
+            ctx.decode(&mut batch)
+                .map_err(|e| GgufError::GenerationFailed(format!("Failed to decode: {:?}", e)))?;
+
+            n_cur += 1;
+        }
 
         let elapsed = start.elapsed();
+        let tokens_per_second = if elapsed.as_secs_f64() > 0.0 {
+            token_count as f64 / elapsed.as_secs_f64()
+        } else {
+            0.0
+        };
+
+        tracing::info!(
+            model_id = %model.id,
+            tokens = token_count,
+            tps = format!("{:.1}", tokens_per_second),
+            elapsed_ms = elapsed.as_millis(),
+            "Generation complete"
+        );
+
+        let finish_reason = if token_count >= request.max_tokens {
+            FinishReason::Length
+        } else {
+            FinishReason::Stop
+        };
 
         Ok(GenerateResponse {
-            text,
-            tokens_generated: 0,
-            tokens_per_second: 0.0,
-            time_to_first_token_ms: elapsed.as_millis() as u64,
+            text: output,
+            tokens_generated: token_count,
+            tokens_per_second,
+            time_to_first_token_ms: ttfb.as_millis() as u64,
             total_time_ms: elapsed.as_millis() as u64,
-            finish_reason: FinishReason::Stop,
+            finish_reason,
             model_id: model.id.clone(),
         })
     }
 
     fn model_info(&self, _model: &GgufModelHandle) -> GgufModelInfo {
-        // Would extract from actual GGUF metadata
         GgufModelInfo {
             n_params: 0,
             n_ctx: self.config.n_ctx,
