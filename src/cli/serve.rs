@@ -265,14 +265,37 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
 
                 // Update job counts and list
                 let job_manager = runtime.job_manager.read().await;
+                let pending = job_manager.pending_requests().await;
                 let active = job_manager.active_jobs().await;
                 let completed = job_manager.completed_jobs(100).await;
 
-                *state.active_jobs.write().await = active.len();
+                *state.active_jobs.write().await = pending.len() + active.len();
                 *state.completed_jobs.write().await = completed.len();
 
                 // Build job list for display
                 let mut job_list = Vec::new();
+
+                // Add pending requests (awaiting bids)
+                for req in &pending {
+                    let requester_id = &req.requester_id;
+                    let bids = job_manager.bids_count(&req.id).await;
+                    job_list.push(WebJobInfo {
+                        id: req.id.to_string(),
+                        job_type: format!("{}", req.resource_type),
+                        status: format!("Pending ({} bids)", bids),
+                        provider: None,
+                        requester: if requester_id.len() > 8 {
+                            format!("...{}", &requester_id[requester_id.len().saturating_sub(8)..])
+                        } else {
+                            requester_id.clone()
+                        },
+                        price_micro: req.max_budget,
+                        created_at: req.created_at.timestamp() as u64,
+                        location: Some("Awaiting bids".to_string()),
+                    });
+                }
+
+                // Add active jobs (being executed)
                 for job in &active {
                     let provider_id = &job.bid.bidder_id;
                     let requester_id = &job.request.requester_id;
@@ -284,9 +307,11 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         requester: format!("...{}", &requester_id[requester_id.len().saturating_sub(8)..]),
                         price_micro: job.bid.price,
                         created_at: job.created_at.timestamp() as u64,
-                        location: None,
+                        location: Some("Network".to_string()),
                     });
                 }
+
+                // Add completed jobs
                 for job in &completed {
                     let provider_id = &job.bid.bidder_id;
                     let requester_id = &job.request.requester_id;
@@ -298,7 +323,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         requester: format!("...{}", &requester_id[requester_id.len().saturating_sub(8)..]),
                         price_micro: job.bid.price,
                         created_at: job.created_at.timestamp() as u64,
-                        location: None,
+                        location: Some("Network".to_string()),
                     });
                 }
                 *state.job_list.write().await = job_list;
@@ -371,6 +396,7 @@ async fn handle_job_submit(
     payload: String,
 ) -> JobSubmitResponse {
     use crate::job::{ResourceType, JobRequest};
+    use crate::job::network::{JobMessage, JobRequestMessage, serialize_message, topics};
     use crate::wallet::to_micro;
 
     tracing::info!("Web UI job submission: type={}, budget={}", job_type, budget);
@@ -406,23 +432,38 @@ async fn handle_job_submit(
     .with_requester(runtime.local_peer_id.to_string())
     .with_payload(payload.into_bytes());
 
-    // Submit to job manager
-    match runtime.job_manager.write().await.create_request(request).await {
-        Ok(job_id) => {
-            tracing::info!("Job submitted: {}", job_id);
-            JobSubmitResponse {
-                success: true,
-                job_id: Some(job_id.to_string()),
-                error: None,
+    let job_id = request.id.clone();
+
+    // Store request locally
+    if let Err(e) = runtime.job_manager.write().await.create_request(request.clone()).await {
+        tracing::error!("Job creation failed: {}", e);
+        return JobSubmitResponse {
+            success: false,
+            job_id: None,
+            error: Some(e.to_string()),
+        };
+    }
+
+    // Broadcast to network via GossipSub
+    let msg = JobMessage::Request(JobRequestMessage::new(request, runtime.identity.peer_id()));
+    match serialize_message(&msg) {
+        Ok(data) => {
+            let mut network = runtime.network.write().await;
+            if let Err(e) = network.publish(topics::JOB_REQUESTS, data) {
+                tracing::warn!("Failed to broadcast job: {}", e);
+                // Continue anyway - job is stored locally
+            } else {
+                tracing::info!("Job {} broadcast to network", job_id);
             }
         }
         Err(e) => {
-            tracing::error!("Job submission failed: {}", e);
-            JobSubmitResponse {
-                success: false,
-                job_id: None,
-                error: Some(e.to_string()),
-            }
+            tracing::warn!("Failed to serialize job message: {}", e);
         }
+    }
+
+    JobSubmitResponse {
+        success: true,
+        job_id: Some(job_id.to_string()),
+        error: None,
     }
 }

@@ -298,6 +298,19 @@ impl JobManager {
         let start = len.saturating_sub(limit);
         jobs[start..].to_vec()
     }
+
+    /// Get pending job requests (awaiting bids).
+    pub async fn pending_requests(&self) -> Vec<JobRequest> {
+        self.requests.read().await.values().cloned().collect()
+    }
+
+    /// Get bids count for a pending request.
+    pub async fn bids_count(&self, job_id: &JobId) -> usize {
+        self.bids.read().await
+            .get(job_id)
+            .map(|b| b.len())
+            .unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
