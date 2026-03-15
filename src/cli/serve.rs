@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use crate::bootstrap;
 use crate::config::Config;
 use crate::db::Database;
-use crate::executor::task::{ExecutionTask, InferenceTask, TaskData};
+use crate::executor::task::{ExecutionTask, ExecutionLocation, InferenceTask, TaskData};
 use crate::identity::NodeIdentity;
 use crate::job::PricingStrategy;
 use crate::p2p::NetworkEvent;
@@ -218,26 +218,34 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                 .with_max_tokens(request.max_tokens)
                 .with_temperature(request.temperature);
 
+            let local_peer_id = runtime.local_peer_id.to_string();
             let response = match runtime.execute_task(ExecutionTask::Inference(task)).await {
                 Ok(result) => {
+                    let provider_peer_id = match &result.location {
+                        ExecutionLocation::Local => Some(local_peer_id.clone()),
+                        ExecutionLocation::Remote { peer_id, .. } => Some(peer_id.clone()),
+                    };
                     match &result.data {
                         TaskData::Inference(r) => InferenceResponse {
                             text: r.text.clone(),
                             tokens_generated: r.tokens_generated,
                             tokens_per_second: r.tokens_per_second as f32,
                             location: format!("{:?}", result.location),
+                            provider_peer_id,
                         },
                         TaskData::Error(e) => InferenceResponse {
                             text: format!("Error: {}", e),
                             tokens_generated: 0,
                             tokens_per_second: 0.0,
                             location: "error".to_string(),
+                            provider_peer_id: None,
                         },
                         _ => InferenceResponse {
                             text: "Unexpected response type".to_string(),
                             tokens_generated: 0,
                             tokens_per_second: 0.0,
                             location: "error".to_string(),
+                            provider_peer_id: None,
                         },
                     }
                 }
@@ -246,6 +254,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                     tokens_generated: 0,
                     tokens_per_second: 0.0,
                     location: "error".to_string(),
+                    provider_peer_id: None,
                 },
             };
 

@@ -1,6 +1,8 @@
-//! `peerclawd test` command - Test distributed execution.
+//! `peerclawd test` command - Test distributed execution and cluster operations.
 
 use clap::{Args, Subcommand};
+use std::collections::HashMap;
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -58,6 +60,29 @@ pub enum TestCommand {
         #[arg(long, default_value = "30")]
         duration: u64,
     },
+
+    /// Spawn a test cluster with multiple peer nodes
+    Cluster {
+        /// Number of nodes to spawn
+        #[arg(long, default_value = "3")]
+        nodes: u32,
+
+        /// Base port for web UI (nodes get port, port+1, port+2, etc.)
+        #[arg(long, default_value = "8080")]
+        base_web_port: u16,
+
+        /// Base port for P2P (nodes get p2p_port, p2p_port+1, etc.)
+        #[arg(long, default_value = "9000")]
+        base_p2p_port: u16,
+
+        /// Run a test inference job after cluster is ready
+        #[arg(long)]
+        run_test_job: bool,
+
+        /// Keep cluster running (wait for Ctrl+C)
+        #[arg(long)]
+        keep_alive: bool,
+    },
 }
 
 pub async fn run(args: TestArgs) -> anyhow::Result<()> {
@@ -76,6 +101,9 @@ pub async fn run(args: TestArgs) -> anyhow::Result<()> {
         }
         TestCommand::Distributed { agents, duration } => {
             run_distributed_test(agents, duration).await
+        }
+        TestCommand::Cluster { nodes, base_web_port, base_p2p_port, run_test_job, keep_alive } => {
+            run_cluster(nodes, base_web_port, base_p2p_port, run_test_job, keep_alive).await
         }
     }
 }
@@ -341,4 +369,228 @@ async fn run_agent(agent_num: u32, base_dir: std::path::PathBuf, duration_secs: 
         tasks_received,
         final_balance,
     })
+}
+
+// ============================================================================
+// Cluster Testing
+// ============================================================================
+
+/// Information about a running cluster node
+struct ClusterNode {
+    index: u32,
+    child: Child,
+    web_addr: String,
+    p2p_addr: String,
+    peer_id: Option<String>,
+    base_dir: std::path::PathBuf,
+}
+
+/// Run a test cluster with multiple peer nodes
+async fn run_cluster(
+    nodes: u32,
+    base_web_port: u16,
+    base_p2p_port: u16,
+    run_test_job: bool,
+    keep_alive: bool,
+) -> anyhow::Result<()> {
+    println!("\x1b[1m=== PeerClaw'd Cluster Test ===\x1b[0m");
+    println!("Spawning {} nodes...\n", nodes);
+
+    // Get current executable path
+    let exe_path = std::env::current_exe()?;
+
+    // Create temp directory for cluster
+    let cluster_dir = std::env::temp_dir().join(format!("peerclawd_cluster_{}", std::process::id()));
+    std::fs::create_dir_all(&cluster_dir)?;
+
+    let mut cluster_nodes: Vec<ClusterNode> = Vec::new();
+
+    // First node address (bootstrap)
+    let bootstrap_addr = format!("/ip4/127.0.0.1/tcp/{}", base_p2p_port);
+
+    // Spawn nodes
+    for i in 0..nodes {
+        let web_port = base_web_port + i as u16;
+        let p2p_port = base_p2p_port + i as u16;
+        let web_addr = format!("127.0.0.1:{}", web_port);
+        let p2p_addr = format!("/ip4/127.0.0.1/tcp/{}", p2p_port);
+
+        let node_dir = cluster_dir.join(format!("node_{}", i));
+        std::fs::create_dir_all(&node_dir)?;
+
+        // Build command arguments
+        let mut cmd = Command::new(&exe_path);
+        cmd.arg("serve")
+            .arg("--web")
+            .arg(&web_addr)
+            .arg("--listen")
+            .arg(&p2p_addr)
+            .arg("--provider")
+            .env("PEERCLAWD_BASE_DIR", &node_dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        // Connect to bootstrap node (except for first node)
+        if i > 0 {
+            cmd.arg("--bootstrap").arg(&bootstrap_addr);
+        }
+
+        let child = cmd.spawn()?;
+
+        println!("  Node {} starting: web={} p2p={}", i, web_addr, p2p_addr);
+
+        cluster_nodes.push(ClusterNode {
+            index: i,
+            child,
+            web_addr: format!("http://{}", web_addr),
+            p2p_addr,
+            peer_id: None,
+            base_dir: node_dir,
+        });
+
+        // Small delay between spawns
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    // Wait for nodes to be ready
+    println!("\nWaiting for nodes to be ready...");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // Poll status endpoints to get peer IDs
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()?;
+
+    for node in &mut cluster_nodes {
+        let url = format!("{}/api/status", node.web_addr);
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(json) = resp.json::<serde_json::Value>().await {
+                    if let Some(peer_id) = json.get("peer_id").and_then(|v| v.as_str()) {
+                        node.peer_id = Some(peer_id.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Display cluster status
+    println!("\n\x1b[1m=== Cluster Status ===\x1b[0m\n");
+    println!("{:<6} {:<20} {:<30} {:<10}",
+             "Node", "Web URL", "Peer ID", "Status");
+    println!("{}", "-".repeat(70));
+
+    for node in &cluster_nodes {
+        let peer_id_display = node.peer_id.as_ref()
+            .map(|id| {
+                if id.len() > 20 {
+                    format!("{}...{}", &id[..8], &id[id.len()-8..])
+                } else {
+                    id.clone()
+                }
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        let status = if node.peer_id.is_some() {
+            "\x1b[32mReady\x1b[0m"
+        } else {
+            "\x1b[33mStarting\x1b[0m"
+        };
+
+        println!("{:<6} {:<20} {:<30} {}",
+                 node.index, node.web_addr, peer_id_display, status);
+    }
+    println!();
+
+    // Check connections
+    println!("Checking peer connections...");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    for node in &cluster_nodes {
+        let url = format!("{}/api/peers", node.web_addr);
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(peers) = resp.json::<Vec<serde_json::Value>>().await {
+                    println!("  Node {}: {} connected peers", node.index, peers.len());
+                }
+            }
+            _ => {
+                println!("  Node {}: \x1b[33mUnable to check peers\x1b[0m", node.index);
+            }
+        }
+    }
+    println!();
+
+    // Run test job if requested
+    if run_test_job {
+        println!("\x1b[1m=== Running Test Job ===\x1b[0m\n");
+
+        // Submit a job to the first node
+        if let Some(first_node) = cluster_nodes.first() {
+            let url = format!("{}/api/chat", first_node.web_addr);
+
+            println!("Submitting inference request to Node 0...");
+
+            let payload = serde_json::json!({
+                "message": "Hello from cluster test! Respond with a single word.",
+                "model": "llama-3.2-3b",
+                "max_tokens": 50
+            });
+
+            match client.post(&url).json(&payload).send().await {
+                Ok(resp) => {
+                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                        println!("\nResponse received:");
+                        if let Some(response) = json.get("response").and_then(|v| v.as_str()) {
+                            println!("  Text: {}", response);
+                        }
+                        if let Some(tokens) = json.get("tokens").and_then(|v| v.as_u64()) {
+                            println!("  Tokens: {}", tokens);
+                        }
+                        if let Some(provider) = json.get("provider_peer_id").and_then(|v| v.as_str()) {
+                            let short = if provider.len() > 16 {
+                                format!("{}...{}", &provider[..8], &provider[provider.len()-8..])
+                            } else {
+                                provider.to_string()
+                            };
+                            println!("  \x1b[36mExecuted by: {}\x1b[0m", short);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("\x1b[31mTest job failed: {}\x1b[0m", e);
+                }
+            }
+            println!();
+        }
+    }
+
+    // Keep alive or shutdown
+    if keep_alive {
+        println!("\x1b[33mCluster running. Press Ctrl+C to stop.\x1b[0m\n");
+        println!("Web dashboards available at:");
+        for node in &cluster_nodes {
+            println!("  Node {}: {}", node.index, node.web_addr);
+        }
+        println!();
+
+        // Wait for Ctrl+C
+        tokio::signal::ctrl_c().await?;
+        println!("\n\x1b[33mShutting down cluster...\x1b[0m");
+    } else {
+        println!("\x1b[32mCluster test complete.\x1b[0m\n");
+    }
+
+    // Cleanup: kill all child processes
+    for mut node in cluster_nodes {
+        let _ = node.child.kill();
+        let _ = node.child.wait();
+    }
+
+    // Remove temp directory
+    let _ = std::fs::remove_dir_all(&cluster_dir);
+
+    println!("Cluster shutdown complete.");
+    Ok(())
 }

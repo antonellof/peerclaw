@@ -921,7 +921,7 @@
         const chatSend = document.getElementById('chat-send');
         const modelSelect = document.getElementById('model-select');
 
-        function addMessage(content, type) {
+        function addMessage(content, type, metadata = null) {
             // Remove empty state if present
             const emptyState = chatMessages.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
@@ -929,6 +929,22 @@
             const msg = document.createElement('div');
             msg.className = `chat-message ${type}`;
             msg.textContent = content;
+
+            // Add metadata (tokens, peer info) for assistant messages
+            if (metadata && type === 'assistant') {
+                const meta = document.createElement('div');
+                meta.style.cssText = 'font-size: 0.65rem; color: var(--text-secondary); margin-top: 0.5rem; font-style: italic;';
+                let metaText = `${metadata.tokens} tokens, ${metadata.tokens_per_second.toFixed(1)} tok/s`;
+                if (metadata.provider_peer_id) {
+                    const shortPeer = metadata.provider_peer_id.length > 16
+                        ? metadata.provider_peer_id.slice(0, 8) + '...' + metadata.provider_peer_id.slice(-8)
+                        : metadata.provider_peer_id;
+                    metaText += ` | Executed by: ${shortPeer}`;
+                }
+                meta.textContent = metaText;
+                msg.appendChild(meta);
+            }
+
             chatMessages.appendChild(msg);
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
@@ -973,7 +989,11 @@
                 if (data.response.startsWith('Error:')) {
                     addMessage(data.response, 'error');
                 } else {
-                    addMessage(data.response, 'assistant');
+                    addMessage(data.response, 'assistant', {
+                        tokens: data.tokens || 0,
+                        tokens_per_second: data.tokens_per_second || 0,
+                        provider_peer_id: data.provider_peer_id
+                    });
                 }
             } catch (error) {
                 hideTypingIndicator();
@@ -1043,8 +1063,30 @@
                 const statusClass = job.status.toLowerCase().includes('progress') || job.status.toLowerCase() === 'pending'
                     ? 'running' : 'completed';
                 const price = (job.price_micro / 1000000).toFixed(6);
-                const provider = job.provider || 'Local';
-                const location = job.location || (provider === 'Local' ? 'Local' : 'Network');
+
+                // Format provider peer ID
+                let providerDisplay = 'Pending';
+                let isLocal = false;
+                if (job.provider) {
+                    if (localPeerId && job.provider.includes(localPeerId.slice(-8))) {
+                        providerDisplay = 'Local (You)';
+                        isLocal = true;
+                    } else if (job.provider.length > 16) {
+                        providerDisplay = job.provider.slice(0, 8) + '...' + job.provider.slice(-8);
+                    } else {
+                        providerDisplay = job.provider;
+                    }
+                }
+
+                // Format requester
+                let requesterDisplay = job.requester || 'Unknown';
+                if (localPeerId && requesterDisplay.includes(localPeerId.slice(-8))) {
+                    requesterDisplay = 'You';
+                } else if (requesterDisplay.length > 16) {
+                    requesterDisplay = requesterDisplay.slice(0, 8) + '...' + requesterDisplay.slice(-8);
+                }
+
+                const location = job.location || (isLocal ? 'Local' : 'Network');
 
                 return `
                     <div class="job-item">
@@ -1052,7 +1094,8 @@
                             <div class="job-type">${job.job_type}</div>
                             <div class="job-id">${job.id.substring(0, 20)}...</div>
                             <div class="job-meta">
-                                Provider: ${provider} | Requester: ${job.requester}
+                                <span style="color: ${isLocal ? 'var(--accent)' : 'var(--success)'}">Provider: ${providerDisplay}</span>
+                                | Requester: ${requesterDisplay}
                             </div>
                             <div class="job-price">${price} PCLAW</div>
                             <div class="job-location">Executed: ${location}</div>

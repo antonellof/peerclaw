@@ -60,10 +60,20 @@ cargo build --release
 ./target/release/peerclawd chat --distributed
 ```
 
-Chat commands:
+Chat commands (Claude-Code style):
+- `/help` - Show all available commands
 - `/status` - Show runtime status (peer ID, balance, resources)
+- `/model <name>` - Switch to a different model
+- `/temperature <n>` - Set temperature (0.0-2.0)
+- `/max-tokens <n>` - Set max tokens per response
+- `/settings` - Open interactive settings menu
+- `/history` - Show conversation summary
+- `/export <path>` - Export conversation to file
+- `/distributed on|off` - Toggle distributed mode
 - `/clear` - Clear conversation history
-- `quit` or `exit` - Exit chat
+- `/quit` or `exit` - Exit chat
+
+Settings are persisted to `~/.peerclawd/chat_settings.json`.
 
 ### Model Setup
 
@@ -96,6 +106,87 @@ curl -L -o ~/.peerclawd/models/llama-3.2-3b-instruct-q4_k_m.gguf \
 
 # Test distributed execution with multiple nodes
 ./target/release/peerclawd test distributed --agents 3 --duration 30
+```
+
+### Multi-Peer Cluster Testing
+
+Spawn a test cluster with multiple peer nodes to test distributed job execution:
+
+```bash
+# Start a 3-node cluster
+./target/release/peerclawd test cluster --nodes 3
+
+# Start cluster and run a test inference job
+./target/release/peerclawd test cluster --nodes 3 --run-test-job
+
+# Keep cluster running for manual testing (Ctrl+C to stop)
+./target/release/peerclawd test cluster --nodes 3 --keep-alive
+
+# Custom ports
+./target/release/peerclawd test cluster --nodes 5 --base-web-port 9000 --base-p2p-port 10000
+```
+
+The cluster command:
+- Spawns N separate peer node processes
+- Auto-connects nodes via bootstrap
+- Displays status table with peer IDs
+- Shows which peer executed each job
+
+### OpenAI-Compatible API
+
+PeerClaw'd provides OpenAI-compatible endpoints for easy integration with existing tools and SDKs:
+
+```bash
+# Start a node with web API
+./target/release/peerclawd serve --web 127.0.0.1:8080
+```
+
+**Endpoints:**
+- `POST /v1/chat/completions` - Chat completions (with SSE streaming support)
+- `GET /v1/models` - List available models
+- `POST /v1/embeddings` - Embeddings (coming soon)
+
+**Python Example:**
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="unused"  # No auth required
+)
+
+# Non-streaming
+response = client.chat.completions.create(
+    model="llama-3.2-3b",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+print(response.choices[0].message.content)
+
+# Streaming
+stream = client.chat.completions.create(
+    model="llama-3.2-3b",
+    messages=[{"role": "user", "content": "Tell me a story"}],
+    stream=True
+)
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
+
+**curl Example:**
+```bash
+# Non-streaming
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "llama-3.2-3b", "messages": [{"role": "user", "content": "Hello!"}]}'
+
+# Streaming
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "llama-3.2-3b", "messages": [{"role": "user", "content": "Hello!"}], "stream": true}'
+
+# List models
+curl http://localhost:8080/v1/models
 ```
 
 ### Multi-Node Testing
@@ -619,9 +710,13 @@ $ peerclawd serve --web :8080
 - [x] Distributed job execution with auto-accept and escrow
 - [x] Real-time resource monitoring and GPU offloading
 
-### Phase 2 — Economy (`v0.2`)
-- [ ] Token wallet with local accounting and peer-to-peer payment channels
-- [ ] Job broadcast, bidding, and escrow (HTLC) protocol
+### Phase 2 — Economy (`v0.2`) ✅ IMPLEMENTED
+- [x] Token wallet with local accounting and peer-to-peer payment channels
+- [x] Job broadcast, bidding, and escrow (HTLC) protocol
+- [x] Claude-Code-style CLI with slash commands and persistent settings
+- [x] Multi-peer cluster testing (`peerclawd test cluster`)
+- [x] OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`)
+- [x] Peer ID tracking across jobs and chat responses
 - [ ] HTTP 402 web access proxy layer
 - [ ] Distributed storage with BLAKE3 content-addressed chunking
 - [ ] Reputation system (uptime, delivery rate, verification pass rate)
@@ -664,4 +759,4 @@ PeerClaw'd reimagines AI infrastructure as a **commons** — a decentralized net
 
 ---
 
-*Draft v0.2 — March 2026*
+*Version 0.2 — March 2026*

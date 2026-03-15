@@ -1,15 +1,253 @@
-//! `peerclawd chat` command - Interactive AI chat.
+//! `peerclawd chat` command - Interactive AI chat with Claude-Code-style commands.
 
 use clap::Args;
+use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::bootstrap;
 use crate::config::Config;
 use crate::db::Database;
-use crate::executor::task::{ExecutionTask, InferenceTask, TaskData};
+use crate::executor::task::{ExecutionTask, ExecutionLocation, InferenceTask, TaskData};
 use crate::identity::NodeIdentity;
 use crate::runtime::Runtime;
+
+// ============================================================================
+// Chat Settings (Persistent)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatSettings {
+    pub model: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
+    pub system_prompt: String,
+    pub distributed: bool,
+}
+
+impl Default for ChatSettings {
+    fn default() -> Self {
+        Self {
+            model: "llama-3.2-3b".to_string(),
+            max_tokens: 500,
+            temperature: 0.7,
+            system_prompt: "You are a helpful AI assistant.".to_string(),
+            distributed: false,
+        }
+    }
+}
+
+impl ChatSettings {
+    fn settings_path() -> PathBuf {
+        bootstrap::base_dir().join("chat_settings.json")
+    }
+
+    pub fn load() -> Self {
+        let path = Self::settings_path();
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(settings) = serde_json::from_str(&content) {
+                    return settings;
+                }
+            }
+        }
+        Self::default()
+    }
+
+    pub fn save(&self) -> anyhow::Result<()> {
+        let path = Self::settings_path();
+        let content = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, content)?;
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Slash Commands
+// ============================================================================
+
+#[derive(Debug)]
+enum SlashCommand {
+    Help,
+    Clear,
+    Status,
+    Model(String),
+    Temperature(f32),
+    MaxTokens(u32),
+    System(String),
+    Settings,
+    History,
+    Export(PathBuf),
+    Distributed(bool),
+    Quit,
+}
+
+fn parse_slash_command(input: &str) -> Option<SlashCommand> {
+    if !input.starts_with('/') {
+        return None;
+    }
+
+    let parts: Vec<&str> = input[1..].splitn(2, ' ').collect();
+    let cmd = parts.first()?.to_lowercase();
+    let arg = parts.get(1).map(|s| s.trim());
+
+    match cmd.as_str() {
+        "help" | "h" | "?" => Some(SlashCommand::Help),
+        "clear" | "c" => Some(SlashCommand::Clear),
+        "status" | "s" => Some(SlashCommand::Status),
+        "model" | "m" => arg.map(|s| SlashCommand::Model(s.to_string())),
+        "temperature" | "temp" | "t" => {
+            arg.and_then(|s| s.parse().ok()).map(SlashCommand::Temperature)
+        }
+        "max-tokens" | "tokens" | "max" => {
+            arg.and_then(|s| s.parse().ok()).map(SlashCommand::MaxTokens)
+        }
+        "system" | "sys" => arg.map(|s| SlashCommand::System(s.to_string())),
+        "settings" => Some(SlashCommand::Settings),
+        "history" | "hist" => Some(SlashCommand::History),
+        "export" | "save" => arg.map(|s| SlashCommand::Export(PathBuf::from(s))),
+        "distributed" | "dist" | "d" => {
+            let enabled = arg.map(|s| matches!(s.to_lowercase().as_str(), "on" | "true" | "1" | "yes"))
+                .unwrap_or(true);
+            Some(SlashCommand::Distributed(enabled))
+        }
+        "quit" | "exit" | "q" => Some(SlashCommand::Quit),
+        _ => None,
+    }
+}
+
+fn show_help() {
+    println!("\n\x1b[1m=== PeerClaw'd Chat Commands ===\x1b[0m");
+    println!();
+    println!("  \x1b[36m/help, /h, /?\x1b[0m         Show this help");
+    println!("  \x1b[36m/clear, /c\x1b[0m            Clear conversation history");
+    println!("  \x1b[36m/status, /s\x1b[0m           Show runtime status");
+    println!("  \x1b[36m/model <name>\x1b[0m         Switch model (e.g., /model llama-7b)");
+    println!("  \x1b[36m/temperature <n>\x1b[0m      Set temperature (0.0-2.0)");
+    println!("  \x1b[36m/max-tokens <n>\x1b[0m       Set max tokens per response");
+    println!("  \x1b[36m/system <prompt>\x1b[0m      Set system prompt");
+    println!("  \x1b[36m/settings\x1b[0m             Open interactive settings menu");
+    println!("  \x1b[36m/history\x1b[0m              Show conversation summary");
+    println!("  \x1b[36m/export <path>\x1b[0m        Export conversation to file");
+    println!("  \x1b[36m/distributed on|off\x1b[0m   Toggle distributed mode");
+    println!("  \x1b[36m/quit, /exit, /q\x1b[0m      Exit chat");
+    println!();
+    println!("  Type 'quit' or 'exit' to end the session.");
+    println!();
+}
+
+fn show_settings_menu(settings: &mut ChatSettings) -> bool {
+    println!("\n\x1b[1m=== Settings ===\x1b[0m");
+    println!();
+    println!("  \x1b[33m1.\x1b[0m Model:        {}", settings.model);
+    println!("  \x1b[33m2.\x1b[0m Max Tokens:   {}", settings.max_tokens);
+    println!("  \x1b[33m3.\x1b[0m Temperature:  {:.2}", settings.temperature);
+    println!("  \x1b[33m4.\x1b[0m System:       {}...", &settings.system_prompt[..settings.system_prompt.len().min(40)]);
+    println!("  \x1b[33m5.\x1b[0m Distributed:  {}", if settings.distributed { "On" } else { "Off" });
+    println!();
+    println!("Enter number to edit, or press Enter to return:");
+
+    let mut input = String::new();
+    io::stdin().lock().read_line(&mut input).ok();
+    let input = input.trim();
+
+    if input.is_empty() {
+        return false;
+    }
+
+    match input {
+        "1" => {
+            print!("New model name: ");
+            io::stdout().flush().ok();
+            let mut val = String::new();
+            io::stdin().lock().read_line(&mut val).ok();
+            let val = val.trim();
+            if !val.is_empty() {
+                settings.model = val.to_string();
+                println!("\x1b[32mModel set to: {}\x1b[0m", settings.model);
+            }
+        }
+        "2" => {
+            print!("Max tokens: ");
+            io::stdout().flush().ok();
+            let mut val = String::new();
+            io::stdin().lock().read_line(&mut val).ok();
+            if let Ok(n) = val.trim().parse() {
+                settings.max_tokens = n;
+                println!("\x1b[32mMax tokens set to: {}\x1b[0m", settings.max_tokens);
+            }
+        }
+        "3" => {
+            print!("Temperature (0.0-2.0): ");
+            io::stdout().flush().ok();
+            let mut val = String::new();
+            io::stdin().lock().read_line(&mut val).ok();
+            if let Ok(t) = val.trim().parse::<f32>() {
+                settings.temperature = t.clamp(0.0, 2.0);
+                println!("\x1b[32mTemperature set to: {:.2}\x1b[0m", settings.temperature);
+            }
+        }
+        "4" => {
+            print!("System prompt: ");
+            io::stdout().flush().ok();
+            let mut val = String::new();
+            io::stdin().lock().read_line(&mut val).ok();
+            let val = val.trim();
+            if !val.is_empty() {
+                settings.system_prompt = val.to_string();
+                println!("\x1b[32mSystem prompt updated\x1b[0m");
+            }
+        }
+        "5" => {
+            settings.distributed = !settings.distributed;
+            println!("\x1b[32mDistributed mode: {}\x1b[0m", if settings.distributed { "On" } else { "Off" });
+        }
+        _ => {
+            println!("\x1b[33mInvalid option\x1b[0m");
+        }
+    }
+
+    // Save settings
+    if let Err(e) = settings.save() {
+        println!("\x1b[33mWarning: Could not save settings: {}\x1b[0m", e);
+    }
+
+    true // Continue showing menu
+}
+
+fn show_history(history: &[(String, String)]) {
+    if history.is_empty() {
+        println!("\n\x1b[33mNo conversation history.\x1b[0m\n");
+        return;
+    }
+
+    println!("\n\x1b[1m=== Conversation History ({} exchanges) ===\x1b[0m\n", history.len());
+    for (i, (user, assistant)) in history.iter().enumerate() {
+        let user_preview = if user.len() > 50 { format!("{}...", &user[..50]) } else { user.clone() };
+        let assistant_preview = if assistant.len() > 50 { format!("{}...", &assistant[..50]) } else { assistant.clone() };
+        println!("  \x1b[36m{}.\x1b[0m You: {}", i + 1, user_preview);
+        println!("     AI: {}", assistant_preview);
+    }
+    println!();
+}
+
+fn export_conversation(path: &PathBuf, history: &[(String, String)], settings: &ChatSettings) -> anyhow::Result<()> {
+    let mut content = String::new();
+    content.push_str("# PeerClaw'd Chat Export\n\n");
+    content.push_str(&format!("Model: {}\n", settings.model));
+    content.push_str(&format!("Temperature: {}\n", settings.temperature));
+    content.push_str(&format!("System: {}\n\n", settings.system_prompt));
+    content.push_str("---\n\n");
+
+    for (user, assistant) in history {
+        content.push_str(&format!("**You:** {}\n\n", user));
+        content.push_str(&format!("**Assistant:** {}\n\n", assistant));
+    }
+
+    std::fs::write(path, content)?;
+    Ok(())
+}
 
 /// Check if a node is running by trying the API at the configured address
 async fn check_running_node() -> Option<String> {
@@ -71,30 +309,48 @@ enum ChatMode {
 }
 
 pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
-    println!("=== PeerClaw'd AI Chat ===");
-    println!("Model: {}", args.model);
-    println!("Max tokens: {}", args.max_tokens);
-    println!("Temperature: {}", args.temperature);
+    // Load persistent settings and merge with CLI args
+    let mut settings = ChatSettings::load();
+
+    // CLI args override saved settings
+    if args.model != "llama-3.2-3b" {
+        settings.model = args.model.clone();
+    }
+    if args.max_tokens != 500 {
+        settings.max_tokens = args.max_tokens;
+    }
+    if args.temperature != 0.7 {
+        settings.temperature = args.temperature;
+    }
+    if args.system != "You are a helpful AI assistant." {
+        settings.system_prompt = args.system.clone();
+    }
+    if args.distributed {
+        settings.distributed = true;
+    }
+
+    println!("\x1b[1m=== PeerClaw'd AI Chat ===\x1b[0m");
+    println!("Model: \x1b[36m{}\x1b[0m", settings.model);
+    println!("Max tokens: {}", settings.max_tokens);
+    println!("Temperature: {:.2}", settings.temperature);
 
     // Determine mode
     let mode = if args.standalone {
-        println!("Mode: Standalone");
+        println!("Mode: \x1b[33mStandalone\x1b[0m");
         ChatMode::Local { runtime: create_standalone_runtime().await? }
     } else if let Some(base_url) = check_running_node().await {
-        println!("Mode: Connected to running node at {}", base_url);
+        println!("Mode: \x1b[32mConnected to running node\x1b[0m at {}", base_url);
         ChatMode::Api { base_url }
-    } else if args.distributed {
-        println!("Mode: Distributed (will use network peers if needed)");
+    } else if settings.distributed {
+        println!("Mode: \x1b[35mDistributed\x1b[0m (will use network peers if needed)");
         ChatMode::Local { runtime: create_standalone_runtime().await? }
     } else {
-        println!("Mode: Local");
+        println!("Mode: \x1b[36mLocal\x1b[0m");
         ChatMode::Local { runtime: create_standalone_runtime().await? }
     };
 
     println!();
-    println!("Type your message and press Enter. Type 'quit' or 'exit' to end.");
-    println!("Type '/clear' to clear conversation history.");
-    println!("Type '/status' to show runtime status.");
+    println!("Type \x1b[36m/help\x1b[0m for commands. Type \x1b[33mquiet\x1b[0m or \x1b[33mexit\x1b[0m to end.");
     println!();
 
     // Get runtime reference if in local mode
@@ -104,7 +360,7 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
     };
 
     // Subscribe to job topics if distributed mode
-    if args.distributed {
+    if settings.distributed {
         if let Some(rt) = &runtime {
             rt.subscribe_to_job_topics().await?;
             let mut network = rt.network.write().await;
@@ -114,18 +370,17 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
             println!("Connecting to network...");
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             let peers = rt.connected_peers_count().await;
-            println!("Connected to {} peers\n", peers);
+            println!("Connected to \x1b[32m{}\x1b[0m peers\n", peers);
         }
     }
 
     // Conversation history
     let mut history: Vec<(String, String)> = Vec::new();
-    let system_prompt = args.system.clone();
 
     // Chat loop
     let stdin = io::stdin();
     loop {
-        print!("You: ");
+        print!("\x1b[36mYou:\x1b[0m ");
         io::stdout().flush()?;
 
         let mut input = String::new();
@@ -136,66 +391,147 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
             continue;
         }
 
-        // Handle commands
+        // Handle quit/exit without slash
         if input.eq_ignore_ascii_case("quit") || input.eq_ignore_ascii_case("exit") {
-            println!("Goodbye!");
+            println!("\x1b[33mGoodbye!\x1b[0m");
             break;
         }
 
-        if input.eq_ignore_ascii_case("/clear") {
-            history.clear();
-            println!("Conversation cleared.\n");
-            continue;
-        }
-
-        if input.eq_ignore_ascii_case("/status") {
-            match &mode {
-                ChatMode::Local { runtime: rt } => {
-                    let stats = rt.stats().await;
-                    println!("\n=== Status ===");
-                    println!("Peer ID: {}", stats.peer_id);
-                    println!("Connected peers: {}", stats.connected_peers);
-                    println!("Balance: {:.6} PCLAW", stats.balance);
-                    println!("CPU usage: {:.1}%", stats.resource_state.cpu_usage * 100.0);
-                    println!("RAM: {}/{} MB", stats.resource_state.ram_available_mb, stats.resource_state.ram_total_mb);
-                    println!("Active jobs: {}", stats.active_jobs);
+        // Handle slash commands
+        if let Some(cmd) = parse_slash_command(input) {
+            match cmd {
+                SlashCommand::Help => {
+                    show_help();
+                    continue;
                 }
-                ChatMode::Api { base_url } => {
-                    if let Ok(status) = fetch_api_status(base_url).await {
-                        println!("\n=== Status (via API) ===");
-                        println!("{}", status);
-                    } else {
-                        println!("\n[Could not fetch status from node]");
+                SlashCommand::Clear => {
+                    history.clear();
+                    println!("\x1b[32mConversation cleared.\x1b[0m\n");
+                    continue;
+                }
+                SlashCommand::Status => {
+                    match &mode {
+                        ChatMode::Local { runtime: rt } => {
+                            let stats = rt.stats().await;
+                            println!("\n\x1b[1m=== Status ===\x1b[0m");
+                            println!("Peer ID: \x1b[36m{}\x1b[0m", stats.peer_id);
+                            println!("Connected peers: \x1b[32m{}\x1b[0m", stats.connected_peers);
+                            println!("Balance: \x1b[33m{:.6} PCLAW\x1b[0m", stats.balance);
+                            println!("CPU usage: {:.1}%", stats.resource_state.cpu_usage * 100.0);
+                            println!("RAM: {}/{} MB", stats.resource_state.ram_available_mb, stats.resource_state.ram_total_mb);
+                            println!("Active jobs: {}", stats.active_jobs);
+                            println!();
+                            println!("Current settings:");
+                            println!("  Model: \x1b[36m{}\x1b[0m", settings.model);
+                            println!("  Max tokens: {}", settings.max_tokens);
+                            println!("  Temperature: {:.2}", settings.temperature);
+                            println!("  Distributed: {}", if settings.distributed { "On" } else { "Off" });
+                        }
+                        ChatMode::Api { base_url } => {
+                            if let Ok(status) = fetch_api_status(base_url).await {
+                                println!("\n\x1b[1m=== Status (via API) ===\x1b[0m");
+                                println!("{}", status);
+                            } else {
+                                println!("\n\x1b[31m[Could not fetch status from node]\x1b[0m");
+                            }
+                        }
                     }
+                    println!();
+                    continue;
+                }
+                SlashCommand::Model(name) => {
+                    settings.model = name.clone();
+                    settings.save().ok();
+                    println!("\x1b[32mModel set to: {}\x1b[0m\n", name);
+                    continue;
+                }
+                SlashCommand::Temperature(t) => {
+                    settings.temperature = t.clamp(0.0, 2.0);
+                    settings.save().ok();
+                    println!("\x1b[32mTemperature set to: {:.2}\x1b[0m\n", settings.temperature);
+                    continue;
+                }
+                SlashCommand::MaxTokens(n) => {
+                    settings.max_tokens = n;
+                    settings.save().ok();
+                    println!("\x1b[32mMax tokens set to: {}\x1b[0m\n", n);
+                    continue;
+                }
+                SlashCommand::System(prompt) => {
+                    settings.system_prompt = prompt.clone();
+                    settings.save().ok();
+                    println!("\x1b[32mSystem prompt updated\x1b[0m\n");
+                    continue;
+                }
+                SlashCommand::Settings => {
+                    while show_settings_menu(&mut settings) {}
+                    println!();
+                    continue;
+                }
+                SlashCommand::History => {
+                    show_history(&history);
+                    continue;
+                }
+                SlashCommand::Export(path) => {
+                    match export_conversation(&path, &history, &settings) {
+                        Ok(_) => println!("\x1b[32mConversation exported to: {}\x1b[0m\n", path.display()),
+                        Err(e) => println!("\x1b[31mExport failed: {}\x1b[0m\n", e),
+                    }
+                    continue;
+                }
+                SlashCommand::Distributed(enabled) => {
+                    settings.distributed = enabled;
+                    settings.save().ok();
+                    println!("\x1b[32mDistributed mode: {}\x1b[0m\n", if enabled { "On" } else { "Off" });
+                    continue;
+                }
+                SlashCommand::Quit => {
+                    println!("\x1b[33mGoodbye!\x1b[0m");
+                    break;
                 }
             }
-            println!();
+        }
+
+        // Unknown slash command
+        if input.starts_with('/') {
+            println!("\x1b[33mUnknown command. Type /help for available commands.\x1b[0m\n");
             continue;
         }
 
         // Build prompt with history
-        let full_prompt = build_prompt(&system_prompt, &history, input);
+        let full_prompt = build_prompt(&settings.system_prompt, &history, input);
 
         // Execute inference
-        print!("\nAssistant: ");
+        print!("\n\x1b[35mAssistant:\x1b[0m ");
         io::stdout().flush()?;
 
         let response = match &mode {
             ChatMode::Local { runtime: rt } => {
-                let task = InferenceTask::new(&args.model, &full_prompt)
-                    .with_max_tokens(args.max_tokens)
-                    .with_temperature(args.temperature);
+                let task = InferenceTask::new(&settings.model, &full_prompt)
+                    .with_max_tokens(settings.max_tokens)
+                    .with_temperature(settings.temperature);
 
                 match rt.execute_task(ExecutionTask::Inference(task)).await {
                     Ok(result) => {
+                        let provider_info = match &result.location {
+                            ExecutionLocation::Local => "Local".to_string(),
+                            ExecutionLocation::Remote { peer_id, .. } => {
+                                let short = if peer_id.len() > 16 {
+                                    format!("{}...{}", &peer_id[..8], &peer_id[peer_id.len()-8..])
+                                } else {
+                                    peer_id.clone()
+                                };
+                                format!("Remote ({})", short)
+                            }
+                        };
                         match &result.data {
                             TaskData::Inference(r) => {
                                 let metrics = if r.tokens_generated > 0 {
                                     Some(format!(
-                                        "[{} tokens, {:.1} tok/s, {:?}]",
+                                        "\x1b[90m[{} tokens, {:.1} tok/s, {}]\x1b[0m",
                                         r.tokens_generated,
                                         r.tokens_per_second,
-                                        result.location
+                                        provider_info
                                     ))
                                 } else {
                                     None
@@ -211,7 +547,7 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
             }
             ChatMode::Api { base_url } => {
                 // Use the API endpoint
-                execute_via_api(base_url, &args.model, &full_prompt, args.max_tokens, args.temperature).await
+                execute_via_api(base_url, &settings.model, &full_prompt, settings.max_tokens, settings.temperature).await
             }
         };
 
@@ -224,12 +560,15 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                 }
             }
             Err(e) => {
-                println!("[Error: {}]", e);
+                println!("\x1b[31m[Error: {}]\x1b[0m", e);
             }
         }
 
         println!();
     }
+
+    // Save settings on exit
+    settings.save().ok();
 
     Ok(())
 }

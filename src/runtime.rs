@@ -69,7 +69,9 @@ impl Runtime {
         wallet.credit(crate::wallet::to_micro(1000.0), "initial_balance").await?;
 
         // Create job manager
-        let job_manager = Arc::new(RwLock::new(JobManager::new(wallet.clone())));
+        let local_peer_id = identity.peer_id().clone();
+        let local_peer_id_str = local_peer_id.to_string();
+        let job_manager = Arc::new(RwLock::new(JobManager::new(wallet.clone(), local_peer_id_str)));
 
         // Create network
         let network = Arc::new(RwLock::new(Network::new(&identity, config.p2p.clone())?));
@@ -118,7 +120,7 @@ impl Runtime {
         let job_provider = Arc::new(JobProvider::new(
             job_manager.clone(),
             network.clone(),
-            local_peer_id,
+            local_peer_id.clone(),
         ));
 
         Ok(Self {

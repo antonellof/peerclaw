@@ -56,6 +56,8 @@ pub enum JobError {
 
 /// The job manager handles the lifecycle of jobs.
 pub struct JobManager {
+    /// Local peer ID for identifying this node in bids
+    local_peer_id: String,
     /// Active job requests awaiting bids
     requests: RwLock<HashMap<JobId, JobRequest>>,
     /// Bids received for requests
@@ -72,8 +74,9 @@ pub struct JobManager {
 
 impl JobManager {
     /// Create a new job manager.
-    pub fn new(wallet: Arc<Wallet>) -> Self {
+    pub fn new(wallet: Arc<Wallet>, local_peer_id: String) -> Self {
         Self {
+            local_peer_id,
             requests: RwLock::new(HashMap::new()),
             bids: RwLock::new(HashMap::new()),
             active_jobs: RwLock::new(HashMap::new()),
@@ -81,6 +84,11 @@ impl JobManager {
             pricing: RwLock::new(PricingStrategy::default()),
             wallet,
         }
+    }
+
+    /// Get the local peer ID.
+    pub fn local_peer_id(&self) -> &str {
+        &self.local_peer_id
     }
 
     /// Set the local pricing strategy.
@@ -193,7 +201,7 @@ impl JobManager {
         // Create a bid
         Some(JobBid::new(
             request.id.clone(),
-            "local_peer_id".to_string(), // TODO: Get actual peer ID
+            self.local_peer_id.clone(),
             price,
             pricing.estimated_latency_ms,
             60, // Bid valid for 60 seconds
@@ -324,6 +332,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let db = Database::open(&dir.path().join("test.redb")).unwrap();
         let identity = Arc::new(NodeIdentity::generate());
+        let peer_id = identity.peer_id().to_string();
         let wallet = Arc::new(
             Wallet::new(identity, WalletConfig::default(), db).unwrap()
         );
@@ -331,7 +340,7 @@ mod tests {
         // Credit some tokens for testing
         wallet.credit(crate::wallet::to_micro(1000.0), "test").await.unwrap();
 
-        (JobManager::new(wallet), dir)
+        (JobManager::new(wallet, peer_id), dir)
     }
 
     #[tokio::test]

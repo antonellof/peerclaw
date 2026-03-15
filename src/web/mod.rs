@@ -5,6 +5,9 @@
 //! - CPU/GPU/RAM monitoring
 //! - Job marketplace status
 //! - AI chat interface
+//! - OpenAI-compatible API (/v1/chat/completions, /v1/models)
+
+pub mod openai;
 
 use std::sync::Arc;
 use std::net::SocketAddr;
@@ -37,6 +40,7 @@ pub struct InferenceResponse {
     pub tokens_generated: u32,
     pub tokens_per_second: f32,
     pub location: String,
+    pub provider_peer_id: Option<String>,
 }
 
 /// Request for job submission from web UI
@@ -89,6 +93,7 @@ pub struct WebState {
 /// Create the web router.
 pub fn create_router(state: Arc<WebState>) -> Router {
     Router::new()
+        // Dashboard routes
         .route("/", get(index))
         .route("/api/status", get(api_status))
         .route("/api/peers", get(api_peers))
@@ -96,6 +101,10 @@ pub fn create_router(state: Arc<WebState>) -> Router {
         .route("/api/jobs/submit", post(api_submit_job))
         .route("/api/chat", post(api_chat))
         .route("/ws", get(ws_handler))
+        // OpenAI-compatible API routes
+        .route("/v1/chat/completions", post(openai::chat_completions))
+        .route("/v1/models", get(openai::list_models))
+        .route("/v1/embeddings", post(openai::embeddings))
         .with_state(state)
 }
 
@@ -320,6 +329,7 @@ struct ChatResponse {
     tokens: u32,
     tokens_per_second: f32,
     location: String,
+    provider_peer_id: Option<String>,
 }
 
 async fn api_chat(
@@ -353,6 +363,7 @@ async fn api_chat(
                         tokens: response.tokens_generated,
                         tokens_per_second: response.tokens_per_second,
                         location: response.location,
+                        provider_peer_id: response.provider_peer_id,
                     });
                 }
                 Ok(Err(_)) => {
@@ -361,6 +372,7 @@ async fn api_chat(
                         tokens: 0,
                         tokens_per_second: 0.0,
                         location: "error".to_string(),
+                        provider_peer_id: None,
                     });
                 }
                 Err(_) => {
@@ -369,6 +381,7 @@ async fn api_chat(
                         tokens: 0,
                         tokens_per_second: 0.0,
                         location: "error".to_string(),
+                        provider_peer_id: None,
                     });
                 }
             }
@@ -385,6 +398,7 @@ async fn api_chat(
         tokens: 0,
         tokens_per_second: 0.0,
         location: "none".to_string(),
+        provider_peer_id: None,
     })
 }
 
