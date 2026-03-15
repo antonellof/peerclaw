@@ -34,6 +34,9 @@ pub struct Config {
 
     /// WASM sandbox configuration
     pub wasm: WasmConfig,
+
+    /// Token economy configuration
+    pub economy: EconomyConfig,
 }
 
 impl Default for Config {
@@ -47,6 +50,7 @@ impl Default for Config {
             inference: InferenceConfig::default(),
             executor: ExecutorConfig::default(),
             wasm: WasmConfig::default(),
+            economy: EconomyConfig::default(),
         }
     }
 }
@@ -308,6 +312,135 @@ impl Default for WasmConfig {
             default_fuel_limit: 100_000_000,
             timeout_secs: 60,
         }
+    }
+}
+
+/// Token economy configuration.
+///
+/// Controls payment requirements for P2P services. Can be disabled
+/// for private networks while still allowing connection to public
+/// nodes that require payments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EconomyConfig {
+    /// Enable token economy for this node.
+    /// When false, this node:
+    /// - Does not require payments for its services
+    /// - Does not charge for inference, storage, or tools
+    /// - Can still PAY other nodes that require tokens
+    pub enabled: bool,
+
+    /// Require payment for inference requests.
+    pub charge_for_inference: bool,
+
+    /// Require payment for storage.
+    pub charge_for_storage: bool,
+
+    /// Require payment for tool execution.
+    pub charge_for_tools: bool,
+
+    /// Require payment for P2P messages.
+    pub charge_for_messages: bool,
+
+    /// Default price per 1K inference tokens (micro-PCLAW).
+    pub inference_price_per_1k: u64,
+
+    /// Default price per MB of storage per day (micro-PCLAW).
+    pub storage_price_per_mb_day: u64,
+
+    /// Default price per tool invocation (micro-PCLAW).
+    pub tool_price_per_call: u64,
+
+    /// Default price per message (micro-PCLAW).
+    pub message_price: u64,
+
+    /// Accept jobs from public network nodes that may require payment.
+    pub accept_paid_jobs: bool,
+
+    /// Maximum amount to pay for a single job (micro-PCLAW, 0 = unlimited).
+    pub max_job_payment: u64,
+
+    /// Minimum balance required to accept paid jobs.
+    pub min_balance_for_paid_jobs: u64,
+}
+
+impl Default for EconomyConfig {
+    fn default() -> Self {
+        Self {
+            // Economy enabled by default
+            enabled: true,
+            charge_for_inference: true,
+            charge_for_storage: true,
+            charge_for_tools: true,
+            charge_for_messages: false,
+            // Default prices (competitive starting points)
+            inference_price_per_1k: 100,   // 0.0001 PCLAW per 1K tokens
+            storage_price_per_mb_day: 10,  // 0.00001 PCLAW per MB/day
+            tool_price_per_call: 50,       // 0.00005 PCLAW per call
+            message_price: 1,              // 0.000001 PCLAW per message
+            // Payment behavior
+            accept_paid_jobs: true,
+            max_job_payment: 0,            // Unlimited
+            min_balance_for_paid_jobs: 0,  // No minimum
+        }
+    }
+}
+
+impl EconomyConfig {
+    /// Create a config for private networks (no payments).
+    pub fn private_network() -> Self {
+        Self {
+            enabled: false,
+            charge_for_inference: false,
+            charge_for_storage: false,
+            charge_for_tools: false,
+            charge_for_messages: false,
+            inference_price_per_1k: 0,
+            storage_price_per_mb_day: 0,
+            tool_price_per_call: 0,
+            message_price: 0,
+            accept_paid_jobs: true,  // Can still use paid public nodes
+            max_job_payment: 0,
+            min_balance_for_paid_jobs: 0,
+        }
+    }
+
+    /// Create a config for public nodes (full economy).
+    pub fn public_network() -> Self {
+        Self::default()
+    }
+
+    /// Check if any charging is enabled.
+    pub fn is_charging_enabled(&self) -> bool {
+        self.enabled && (
+            self.charge_for_inference ||
+            self.charge_for_storage ||
+            self.charge_for_tools ||
+            self.charge_for_messages
+        )
+    }
+
+    /// Get the price for an inference request.
+    pub fn inference_price(&self, tokens: u32) -> u64 {
+        if !self.enabled || !self.charge_for_inference {
+            return 0;
+        }
+        (tokens as u64 * self.inference_price_per_1k) / 1000
+    }
+
+    /// Get the price for storage.
+    pub fn storage_price(&self, mb: u64, days: u64) -> u64 {
+        if !self.enabled || !self.charge_for_storage {
+            return 0;
+        }
+        mb * days * self.storage_price_per_mb_day
+    }
+
+    /// Get the price for a tool call.
+    pub fn tool_price(&self) -> u64 {
+        if !self.enabled || !self.charge_for_tools {
+            return 0;
+        }
+        self.tool_price_per_call
     }
 }
 

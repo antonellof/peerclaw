@@ -16,6 +16,11 @@ async fn main() -> anyhow::Result<()> {
     // Parse CLI arguments
     let cli = Cli::parse();
 
+    // Silence llama.cpp/ggml logs unless --debug is passed
+    if !cli.debug {
+        peerclawd::inference::silence_llama_logs();
+    }
+
     // For interactive mode, use minimal logging
     let log_level = match &cli.command {
         None | Some(Command::Start) | Some(Command::Chat(_)) | Some(Command::Run(_)) => "peerclawd=warn",
@@ -73,6 +78,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Command::Tool { cmd }) => {
             peerclawd::cli::tool::run(cmd).await?;
+        }
+        Some(Command::Skill { cmd }) => {
+            peerclawd::cli::skill::run(cmd).await?;
         }
         Some(Command::Job(args)) => {
             peerclawd::cli::job::run(args).await?;

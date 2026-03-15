@@ -23,6 +23,8 @@ use crate::inference::{
 };
 use crate::job::{JobManager, PricingStrategy, network as job_network};
 use crate::p2p::{Network, NetworkEvent};
+use crate::skills::SkillRegistry;
+use crate::tools::ToolRegistry;
 use crate::wallet::{Wallet, WalletConfig};
 
 /// Runtime state containing all integrated subsystems.
@@ -47,6 +49,10 @@ pub struct Runtime {
     pub job_provider: Arc<JobProvider>,
     /// Batch aggregator for multi-agent inference
     pub batch_aggregator: Arc<BatchAggregator>,
+    /// Tool registry
+    pub tools: Arc<ToolRegistry>,
+    /// Skill registry
+    pub skills: Arc<SkillRegistry>,
     /// Local peer ID
     pub local_peer_id: PeerId,
     /// Configuration
@@ -139,6 +145,22 @@ impl Runtime {
         let (batch_aggregator, _batch_processor) = BatchAggregator::new(batch_config);
         let batch_aggregator = Arc::new(batch_aggregator);
 
+        // Create tool registry (builtin tools are registered in new())
+        let tools = Arc::new(ToolRegistry::new(local_peer_id.to_string()));
+        tracing::info!(count = tools.count().await, "Registered builtin tools");
+
+        // Create skill registry
+        let skills_dir = crate::bootstrap::base_dir().join("skills");
+        let skills = Arc::new(
+            SkillRegistry::new(skills_dir, local_peer_id.to_string())
+                .map_err(|e| anyhow::anyhow!("Failed to create skill registry: {}", e))?
+        );
+        // Scan for local skills
+        match skills.scan().await {
+            Ok(count) => tracing::info!(count, "Loaded local skills"),
+            Err(e) => tracing::warn!(error = %e, "Failed to scan skills directory"),
+        }
+
         Ok(Self {
             identity,
             database,
@@ -150,6 +172,8 @@ impl Runtime {
             model_distributor,
             job_provider,
             batch_aggregator,
+            tools,
+            skills,
             local_peer_id,
             config,
         })

@@ -8,6 +8,7 @@ pub mod network;
 pub mod peers;
 pub mod run;
 pub mod serve;
+pub mod skill;
 pub mod start;
 pub mod test;
 pub mod tool;
@@ -24,6 +25,10 @@ use clap::{Parser, Subcommand};
 #[command(about = "Decentralized P2P AI Agent Network", long_about = None)]
 #[command(after_help = "Run without arguments to start in interactive mode with menu.")]
 pub struct Cli {
+    /// Enable debug output (verbose llama.cpp logs)
+    #[arg(long, global = true)]
+    pub debug: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -84,6 +89,12 @@ pub enum Command {
     Tool {
         #[command(subcommand)]
         cmd: tool::ToolCommand,
+    },
+
+    /// Skill management (SKILL.md prompts)
+    Skill {
+        #[command(subcommand)]
+        cmd: skill::SkillCommand,
     },
 
     /// Distributed job submission

@@ -513,7 +513,7 @@ impl std::fmt::Display for ChannelStats {
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::wallet::WalletConfig;
+    use crate::wallet::{WalletConfig, to_micro};
     use tempfile::tempdir;
 
     fn create_test_channel() -> PaymentChannel {

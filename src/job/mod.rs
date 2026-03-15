@@ -324,6 +324,7 @@ impl JobManager {
 mod tests {
     use super::*;
     use crate::db::Database;
+    use crate::identity::NodeIdentity;
     use crate::wallet::WalletConfig;
     use tempfile::tempdir;
 

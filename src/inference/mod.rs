@@ -18,6 +18,29 @@
 //! └──────┘  └──────────┘
 //! ```
 
+/// Silence llama.cpp and ggml log output.
+/// Call this before any model loading to suppress verbose logs.
+pub fn silence_llama_logs() {
+    #[cfg(feature = "local-inference")]
+    {
+        use std::ffi::c_void;
+        use std::os::raw::c_char;
+
+        // Null callback that discards all log messages
+        unsafe extern "C" fn void_log(
+            _level: llama_cpp_sys_2::ggml_log_level,
+            _text: *const c_char,
+            _user_data: *mut c_void,
+        ) {
+        }
+
+        unsafe {
+            // Silence llama.cpp logs
+            llama_cpp_sys_2::llama_log_set(Some(void_log), std::ptr::null_mut());
+        }
+    }
+}
+
 pub mod batch;
 pub mod cache;
 pub mod distribution;
