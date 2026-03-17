@@ -2,21 +2,7 @@
 
 ## Transport Stack
 
-```
-┌─────────────────────────────────────────────────┐
-│                   Application                    │
-├─────────────────────────────────────────────────┤
-│  GossipSub (pub/sub)  │  Kademlia DHT (routing) │
-├─────────────────────────────────────────────────┤
-│  Request/Response     │  Identify                │
-├─────────────────────────────────────────────────┤
-│           Noise Protocol (encryption)            │
-├─────────────────────────────────────────────────┤
-│   QUIC Transport   │   TCP Transport (fallback)  │
-├─────────────────────────────────────────────────┤
-│        mDNS (local)  │  Bootstrap peers (WAN)    │
-└─────────────────────────────────────────────────┘
-```
+![P2P Transport Stack](images/p2p-stack.svg)
 
 ## Peer Discovery
 
@@ -35,24 +21,7 @@
 
 ## Job Protocol
 
-```
-Requester                Network                  Provider
-    │                       │                         │
-    ├─── JobRequest ───────►│                         │
-    │    (model, prompt,    │                         │
-    │     budget)           ├─── Broadcast ──────────►│
-    │                       │                         │
-    │                       │◄─── JobBid ─────────────┤
-    │                       │    (price, latency)     │
-    │◄── Collect Bids ─────┤                         │
-    │                       │                         │
-    ├─── BidAccepted ──────►│                         │
-    │    (winner_peer_id)   ├─── Notify ─────────────►│
-    │                       │                         │
-    │                       │◄─── JobResult ──────────┤
-    │◄── Result ───────────┤    (output)             │
-    │                       │                         │
-```
+![Job Protocol Sequence](images/job-protocol.svg)
 
 ## Message Format
 

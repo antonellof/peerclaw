@@ -1,0 +1,24 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#DC2626', 'primaryTextColor': '#fff', 'primaryBorderColor': '#B91C1C', 'lineColor': '#EF4444', 'secondaryColor': '#F87171', 'tertiaryColor': '#FEE2E2', 'actorLineColor': '#6B7280', 'signalColor': '#374151', 'background': '#ffffff', 'fontFamily': 'Inter, system-ui, sans-serif'}}}%%
+sequenceDiagram
+    participant R as Requester
+    participant N as Network
+    participant P as Provider
+    participant E as Escrow
+
+    R->>N: JobRequest<br/>(model, prompt, budget)
+    N->>P: Broadcast Request
+
+    P->>N: JobBid<br/>(price, latency, reputation)
+    N->>R: Collect Bids
+
+    R->>E: Lock Funds
+    R->>N: BidAccepted<br/>(winner_peer_id)
+    N->>P: Notify Winner
+
+    P->>P: Execute Job
+    P->>N: JobResult<br/>(output)
+    N->>R: Deliver Result
+
+    R->>R: Verify Result
+    R->>E: Release Funds
+    E->>P: Payment

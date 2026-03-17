@@ -284,45 +284,11 @@ policy_enforcement = true
 
 ## Architecture
 
-```
-peerclaw binary
-├── P2P Network (libp2p)
-│   ├── Kademlia DHT
-│   ├── GossipSub pub/sub
-│   ├── mDNS discovery
-│   └── Noise encryption
-├── Inference Engine
-│   ├── GGUF loader (llama-cpp-2)
-│   ├── Model cache (LRU)
-│   └── Batch aggregator
-├── Vector Store (vectX)
-│   ├── HNSW indexing
-│   ├── BM25 text search
-│   └── Hybrid ranking
-├── Executor
-│   ├── Local/remote routing
-│   ├── Resource monitor
-│   └── Task queue
-├── Economy
-│   ├── Wallet (Ed25519)
-│   ├── Escrow
-│   └── Job marketplace
-├── Tools
-│   ├── Builtin tools
-│   ├── WASM sandbox
-│   └── MCP client
-├── Skills
-│   ├── Parser (YAML + MD)
-│   ├── Registry
-│   └── Selector (activation)
-├── Safety
-│   ├── Leak detector
-│   ├── Sanitizer
-│   └── Policy engine
-└── Messaging
-    ├── Channel registry
-    └── Platform adapters
-```
+![PeerClaw Architecture](docs/images/architecture.svg)
+
+### CLI Structure
+
+![CLI Commands](docs/images/cli-structure.svg)
 
 ---
 

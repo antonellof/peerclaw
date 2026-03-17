@@ -1,0 +1,42 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#0891B2', 'primaryTextColor': '#fff', 'primaryBorderColor': '#0E7490', 'lineColor': '#06B6D4', 'secondaryColor': '#22D3EE', 'tertiaryColor': '#CFFAFE', 'background': '#ffffff', 'fontFamily': 'Inter, system-ui, sans-serif'}}}%%
+flowchart TD
+    PEERCLAW["peerclaw"]
+
+    PEERCLAW --> SERVE["serve"]
+    PEERCLAW --> RUN["run &lt;model&gt;"]
+    PEERCLAW --> CHAT["chat"]
+    PEERCLAW --> MODELS["models"]
+    PEERCLAW --> WALLET["wallet"]
+    PEERCLAW --> JOB["job"]
+    PEERCLAW --> VECTOR["vector"]
+    PEERCLAW --> SKILL["skill"]
+    PEERCLAW --> TOOL["tool"]
+    PEERCLAW --> AGENT["agent"]
+    PEERCLAW --> NETWORK["network"]
+    PEERCLAW --> PEERS["peers"]
+
+    SERVE --> S1["--web &lt;addr&gt;"]
+    SERVE --> S2["--provider"]
+    SERVE --> S3["--gpu"]
+
+    MODELS --> M1["list"]
+    MODELS --> M2["download"]
+
+    WALLET --> W1["create"]
+    WALLET --> W2["balance"]
+    WALLET --> W3["send"]
+    WALLET --> W4["history"]
+
+    VECTOR --> V1["create"]
+    VECTOR --> V2["insert"]
+    VECTOR --> V3["search"]
+    VECTOR --> V4["delete"]
+
+    SKILL --> SK1["list"]
+    SKILL --> SK2["install"]
+    SKILL --> SK3["search"]
+
+    AGENT --> A1["run"]
+    AGENT --> A2["list"]
+    AGENT --> A3["logs"]
+    AGENT --> A4["stop"]

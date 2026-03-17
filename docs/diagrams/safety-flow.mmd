@@ -1,0 +1,33 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#EA580C', 'primaryTextColor': '#fff', 'primaryBorderColor': '#C2410C', 'lineColor': '#F97316', 'secondaryColor': '#FB923C', 'tertiaryColor': '#FFEDD5', 'background': '#ffffff', 'fontFamily': 'Inter, system-ui, sans-serif'}}}%%
+flowchart LR
+    INPUT[/"Input"/]
+
+    subgraph SAFETY["Safety Layer"]
+        direction TB
+        VALIDATE["Input Validator"]
+        LEAK["Leak Detector"]
+        SANITIZE["Sanitizer"]
+        POLICY["Policy Engine"]
+    end
+
+    CLEAN{{"Clean?"}}
+    PROCESS["Process Request"]
+    BLOCK["Block/Redact"]
+
+    OUTPUT[/"Output"/]
+
+    INPUT --> VALIDATE
+    VALIDATE --> LEAK
+    LEAK --> SANITIZE
+    SANITIZE --> POLICY
+    POLICY --> CLEAN
+
+    CLEAN -->|Yes| PROCESS
+    CLEAN -->|No| BLOCK
+
+    PROCESS --> OUTPUT
+    BLOCK --> OUTPUT
+
+    style INPUT fill:#4F46E5,stroke:#3730A3,color:#fff
+    style OUTPUT fill:#059669,stroke:#047857,color:#fff
+    style BLOCK fill:#DC2626,stroke:#B91C1C,color:#fff

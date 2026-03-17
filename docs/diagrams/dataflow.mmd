@@ -1,0 +1,47 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#059669', 'primaryTextColor': '#fff', 'primaryBorderColor': '#047857', 'lineColor': '#10B981', 'secondaryColor': '#34D399', 'tertiaryColor': '#D1FAE5', 'background': '#ffffff', 'fontFamily': 'Inter, system-ui, sans-serif'}}}%%
+flowchart TD
+    INPUT[/"User Input"/]
+
+    subgraph ENTRY["Entry Points"]
+        CLI["CLI"]
+        API["Web API"]
+        CHANNEL["Channels"]
+    end
+
+    subgraph VALIDATION["Validation"]
+        SAFETY["Safety Layer"]
+        SKILL["Skill Selector"]
+    end
+
+    subgraph ROUTING["Task Routing"]
+        EXEC["Task Executor"]
+        LOCAL["Local Execution"]
+        REMOTE["P2P Job"]
+    end
+
+    subgraph PROCESSING["Processing"]
+        INFER["Inference"]
+        VECSTORE["Vector Store"]
+        TOOL["Tool Execution"]
+    end
+
+    subgraph SETTLEMENT["Settlement"]
+        ESCROW["Escrow"]
+        WALLET["Wallet"]
+    end
+
+    OUTPUT[/"Response"/]
+
+    INPUT --> ENTRY
+    ENTRY --> SAFETY
+    SAFETY --> SKILL
+    SKILL --> EXEC
+    EXEC --> LOCAL
+    EXEC --> REMOTE
+    LOCAL --> PROCESSING
+    REMOTE --> PROCESSING
+    PROCESSING --> SETTLEMENT
+    SETTLEMENT --> OUTPUT
+
+    style INPUT fill:#4F46E5,stroke:#3730A3,color:#fff
+    style OUTPUT fill:#059669,stroke:#047857,color:#fff

@@ -1,0 +1,75 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4F46E5', 'primaryTextColor': '#fff', 'primaryBorderColor': '#3730A3', 'lineColor': '#6366F1', 'secondaryColor': '#818CF8', 'tertiaryColor': '#E0E7FF', 'background': '#ffffff', 'fontFamily': 'Inter, system-ui, sans-serif'}}}%%
+flowchart TB
+    subgraph CLI["CLI Layer"]
+        direction LR
+        RUN["run &lt;model&gt;"]
+        CHAT["chat"]
+        SERVE["serve"]
+        CMDS["models | wallet | job | skill | vector"]
+    end
+
+    subgraph CORE["Core Runtime"]
+        direction TB
+        NODE["Node Coordinator"]
+        EXEC["Task Executor"]
+
+        subgraph INFERENCE["Inference Engine"]
+            GGUF["GGUF Loader"]
+            CACHE["Model Cache"]
+            BATCH["Batch Aggregator"]
+        end
+
+        subgraph VECTOR["Vector Store"]
+            HNSW["HNSW Index"]
+            BM25["BM25 Search"]
+            HYBRID["Hybrid Ranking"]
+        end
+    end
+
+    subgraph NETWORK["P2P Network"]
+        direction LR
+        DHT["Kademlia DHT"]
+        GOSSIP["GossipSub"]
+        MDNS["mDNS Discovery"]
+        NOISE["Noise Encryption"]
+    end
+
+    subgraph ECONOMY["Token Economy"]
+        direction LR
+        WALLET["Wallet"]
+        ESCROW["Escrow"]
+        JOB["Job Manager"]
+    end
+
+    subgraph EXTENSIONS["Extensions"]
+        direction LR
+        TOOLS["Tools Registry"]
+        SKILLS["Skills System"]
+        MCP["MCP Client"]
+        WASM["WASM Sandbox"]
+    end
+
+    subgraph SAFETY["Safety Layer"]
+        direction LR
+        LEAK["Leak Detector"]
+        SANITIZE["Sanitizer"]
+        POLICY["Policy Engine"]
+    end
+
+    subgraph MESSAGING["Messaging"]
+        direction LR
+        REPL["REPL"]
+        WEB["Web/API"]
+        PLATFORMS["Discord | Telegram | Slack"]
+    end
+
+    CLI --> NODE
+    NODE --> EXEC
+    EXEC --> INFERENCE
+    EXEC --> VECTOR
+    EXEC --> NETWORK
+    EXEC --> ECONOMY
+    EXEC --> EXTENSIONS
+    EXTENSIONS --> SAFETY
+    NODE --> MESSAGING
+    NETWORK <--> JOB

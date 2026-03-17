@@ -1,0 +1,38 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#7C3AED', 'primaryTextColor': '#fff', 'primaryBorderColor': '#6D28D9', 'lineColor': '#8B5CF6', 'secondaryColor': '#A78BFA', 'tertiaryColor': '#EDE9FE', 'background': '#ffffff', 'fontFamily': 'Inter, system-ui, sans-serif'}}}%%
+flowchart TB
+    subgraph APP["Application Layer"]
+        direction LR
+        AGENT["Agent Runtime"]
+        JOBMGR["Job Manager"]
+        STORAGE["Distributed Storage"]
+    end
+
+    subgraph PROTO["Protocol Layer"]
+        direction LR
+        GOSSIP["GossipSub<br/>Pub/Sub"]
+        KADEMLIA["Kademlia<br/>DHT Routing"]
+        REQRES["Request-Response"]
+    end
+
+    subgraph IDENT["Identity Layer"]
+        direction LR
+        IDENTIFY["Identify"]
+        NOISE["Noise Protocol<br/>Encryption"]
+    end
+
+    subgraph TRANS["Transport Layer"]
+        direction LR
+        QUIC["QUIC"]
+        TCP["TCP"]
+    end
+
+    subgraph DISC["Discovery"]
+        direction LR
+        MDNS["mDNS<br/>Local Network"]
+        BOOTSTRAP["Bootstrap Peers<br/>WAN"]
+    end
+
+    APP --> PROTO
+    PROTO --> IDENT
+    IDENT --> TRANS
+    TRANS --> DISC

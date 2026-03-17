@@ -4,58 +4,11 @@
 
 PeerClaw ships as a single statically-linked binary that operates in multiple modes. Every peer runs the same binary — roles (resource provider, agent host, gateway) are determined at runtime.
 
-```
-peerclaw
-├── serve              # Start a peer node
-│   ├── --gpu                  # Advertise GPU resources
-│   ├── --web <addr>           # Enable web UI
-│   ├── --bootstrap <peer>     # Join network via known peer
-│   └── --provider             # Accept jobs from network
-├── run <model>        # Run model (Ollama-style)
-├── chat               # Interactive AI chat with slash commands
-├── models             # Model management
-├── peers              # Peer management
-├── wallet             # Token wallet
-├── job                # Job submission
-├── vector             # Vector database operations
-├── skill              # Skill management
-├── tool               # Tool management
-├── network            # Network operations
-├── agent              # Agent lifecycle
-└── test               # Testing utilities
-```
+![CLI Structure](images/cli-structure.svg)
 
 ## Internal Architecture
 
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                           peerclaw binary                                   │
-│                                                                            │
-│  ┌──────────┐  ┌───────────┐  ┌───────────┐  ┌──────────┐  ┌───────────┐ │
-│  │ P2P      │  │ Task      │  │ Inference │  │ Job      │  │ Vector    │ │
-│  │ Network  │◄►│ Executor  │◄►│ Engine    │◄►│ Manager  │◄►│ Store     │ │
-│  │ Layer    │  │           │  │           │  │          │  │ (vectX)   │ │
-│  └────┬─────┘  └─────┬─────┘  └─────┬─────┘  └────┬─────┘  └─────┬─────┘ │
-│       │              │              │              │              │        │
-│  ┌────┴──────────────┴──────────────┴──────────────┴──────────────┴─────┐  │
-│  │                    Async Runtime (Tokio)                              │  │
-│  └──────────────────────────────┬───────────────────────────────────────┘  │
-│                                 │                                          │
-│  ┌─────────────┐  ┌─────────────┴─────────────┐  ┌──────────────────────┐  │
-│  │ Safety      │  │ Tool Registry             │  │ Skill Registry       │  │
-│  │ Layer       │◄►│ (Builtin + WASM + MCP)    │◄►│ (SKILL.md)           │  │
-│  └─────────────┘  └───────────────────────────┘  └──────────────────────┘  │
-│                                                                            │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                 Messaging Layer (Multi-Platform)                      │  │
-│  │    REPL │ Webhook │ WebSocket │ Discord │ Telegram │ Slack │ Matrix  │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                                                                            │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │              Embedded Web UI (Axum) + OpenAI API                      │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────────┘
-```
+![Architecture Overview](images/architecture.svg)
 
 ## Core Modules
 
@@ -200,45 +153,7 @@ Web interface and API:
 
 ## Data Flow
 
-```
-User Input
-    │
-    ▼
-┌─────────────────┐
-│ CLI / Web API   │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐     ┌─────────────────┐
-│ Safety Layer    │────►│ Skill Selector  │
-│ (validate)      │     │ (match prompts) │
-└────────┬────────┘     └────────┬────────┘
-         │                       │
-         ▼                       ▼
-┌─────────────────┐     ┌─────────────────┐
-│ Task Executor   │◄────│ Tool Registry   │
-│ (route task)    │     │ (resolve tools) │
-└────────┬────────┘     └─────────────────┘
-         │
-    ┌────┴────┐
-    ▼         ▼
-┌───────┐ ┌───────────┐
-│ Local │ │ P2P       │
-│ Exec  │ │ Job       │
-└───┬───┘ └─────┬─────┘
-    │           │
-    ▼           ▼
-┌─────────────────┐
-│ Inference +     │
-│ Vector Store    │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Wallet/Escrow   │
-│ (settle)        │
-└─────────────────┘
-```
+![Data Flow](images/dataflow.svg)
 
 ---
 

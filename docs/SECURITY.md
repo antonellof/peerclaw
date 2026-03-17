@@ -44,6 +44,8 @@ Future releases will support Firecracker microVMs for heavy workloads:
 
 ## Safety Layer (`src/safety/`)
 
+![Safety Flow](images/safety-flow.svg)
+
 Runtime protection against common attack vectors:
 
 ### Leak Detection
