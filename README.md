@@ -13,47 +13,78 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 ## Features
 
 ### AI Inference
-- **Local GGUF models** - Run Llama, Phi, Qwen, Gemma locally
-- **GPU acceleration** - Metal (macOS) and CUDA support via llama-cpp-2
-- **Streaming output** - Real-time token generation in CLI and API
-- **Batch aggregation** - Efficient multi-agent request handling
-- **Model caching** - LRU eviction, automatic memory management
+- **Local GGUF models** — Run Llama, Phi, Qwen, Gemma locally
+- **GPU acceleration** — Metal (macOS) and CUDA support via llama-cpp-2
+- **Streaming output** — Real-time token generation in CLI and API
+- **Batch aggregation** — Efficient multi-agent request handling
+- **Model caching** — LRU eviction, automatic memory management
+
+### Vector Memory (vectX)
+- **Semantic search** — HNSW-indexed vector storage for agent memory
+- **Hybrid search** — Combined vector + BM25 text search
+- **Collections** — Named collections with configurable distance metrics
+- **Embeddings** — Pluggable embedding providers (local or API)
+- **Persistence** — In-memory or disk-backed storage
 
 ### P2P Network
-- **Decentralized** - No central server, peers discover each other
-- **libp2p stack** - Kademlia DHT, GossipSub, mDNS, Noise encryption
-- **Job marketplace** - Request → Bid → Execute → Settle workflow
-- **Multi-peer clusters** - Test distributed execution locally
+- **Decentralized** — No central server, peers discover each other
+- **libp2p stack** — Kademlia DHT, GossipSub, mDNS, Noise encryption
+- **Job marketplace** — Request → Bid → Execute → Settle workflow
+- **Multi-peer clusters** — Test distributed execution locally
 
 ### Token Economy
-- **Native wallet** - Ed25519-based identity and transactions
-- **Escrow system** - Funds locked until job completion
-- **Dynamic pricing** - Each peer sets their own rates
-- **Payment channels** - Efficient micro-payments between peers
+- **Native wallet** — Ed25519-based identity and transactions
+- **Escrow system** — Funds locked until job completion
+- **Dynamic pricing** — Each peer sets their own rates
+- **Payment channels** — Efficient micro-payments between peers
+
+### Skills System
+- **SKILL.md prompts** — Markdown-based prompt extensions with YAML frontmatter
+- **Activation scoring** — Automatic skill selection via keywords and patterns
+- **Trust levels** — Local > Installed > Network with capability restrictions
+- **P2P sharing** — Discover and install skills from other peers
+
+### Tools & MCP
+- **Builtin tools** — HTTP, filesystem, shell, memory, P2P operations
+- **WASM sandbox** — Wasmtime-based isolation with capability grants
+- **MCP integration** — Connect to external Model Context Protocol servers
+- **Custom tools** — Build and deploy WASM tools to the network
+
+### Multi-Platform Messaging
+- **Channel abstraction** — Unified interface across platforms
+- **Supported platforms** — REPL, Webhook, WebSocket, Discord, Telegram, Slack, Matrix
+- **User trust levels** — Unknown → Verified → Trusted → Owner
+- **Conversation context** — Thread-like message history per channel
+
+### Safety Layer
+- **Leak detection** — Credential and secret pattern matching
+- **Prompt injection defense** — Content sanitization and escaping
+- **Policy enforcement** — Configurable content rules with severity levels
+- **Input validation** — Length checks and boundary validation
 
 ### CLI Experience
-- **Ollama-style commands** - `peerclaw run llama-3.2-3b`
-- **Claude-Code slash commands** - `/help`, `/model`, `/settings`, `/status`
-- **Interactive chat** - Conversation history, settings persistence
-- **Model management** - Download, list, remove models
+- **Ollama-style commands** — `peerclaw run llama-3.2-3b`
+- **Claude-Code slash commands** — `/help`, `/model`, `/settings`, `/status`
+- **Interactive chat** — Conversation history, settings persistence
+- **Model management** — Download, list, remove models
 
 ### OpenAI-Compatible API
-- **Drop-in replacement** - Use any OpenAI SDK
-- **SSE streaming** - Real-time token output via Server-Sent Events
-- **`/v1/chat/completions`** - Full chat completions endpoint
-- **`/v1/models`** - List available models
+- **Drop-in replacement** — Use any OpenAI SDK
+- **SSE streaming** — Real-time token output via Server-Sent Events
+- **`/v1/chat/completions`** — Full chat completions endpoint
+- **`/v1/models`** — List available models
 
 ### Web Dashboard
-- **Network topology** - Visual graph of connected peers
-- **Resource monitoring** - Real-time CPU, RAM, GPU stats
-- **Job tracking** - Active and completed jobs with peer IDs
-- **AI Chat interface** - Send prompts via browser
+- **Network topology** — Visual graph of connected peers
+- **Resource monitoring** — Real-time CPU, RAM, GPU stats
+- **Job tracking** — Active and completed jobs with peer IDs
+- **AI Chat interface** — Send prompts via browser
 
 ### Security
-- **WASM sandbox** - Wasmtime for isolated tool execution
-- **End-to-end encryption** - Noise protocol for all P2P traffic
-- **Ed25519 signatures** - Cryptographic identity verification
-- **Capability-based access** - Explicit permission grants
+- **WASM sandbox** — Wasmtime for isolated tool execution
+- **End-to-end encryption** — Noise protocol for all P2P traffic
+- **Ed25519 signatures** — Cryptographic identity verification
+- **Capability-based access** — Explicit permission grants
 
 ---
 
@@ -101,14 +132,19 @@ peerclaw run <model>              # Interactive chat
 peerclaw run <model> "prompt"     # Single query
 peerclaw chat                     # Chat with slash commands
 
-# Slash commands
+# Slash commands in chat mode
 /help                              # Show all commands
 /model <name>                      # Switch model
-/temperature <n>                   # Set temperature
+/temperature <n>                   # Set temperature (0.0-2.0)
+/max_tokens <n>                    # Set max output tokens
 /settings                          # Settings menu
 /status                            # Show runtime status
 /peers                             # List connected peers
 /balance                           # Show token balance
+/tools                             # List available tools
+/tool_exec <name> <args>           # Execute a tool
+/distributed <on|off>              # Toggle distributed inference
+/stream <on|off>                   # Toggle streaming output
 ```
 
 ### Models
@@ -126,6 +162,55 @@ peerclaw serve                    # Start peer node
 peerclaw serve --web 0.0.0.0:8080 # With web dashboard
 peerclaw serve --provider         # Accept jobs from network
 peerclaw peers list               # Show connected peers
+peerclaw network status           # Network health status
+```
+
+### Vector Memory
+
+```bash
+peerclaw vector create <collection>              # Create collection
+peerclaw vector list                             # List collections
+peerclaw vector insert <collection> <text>       # Insert with auto-embedding
+peerclaw vector search <collection> <query> -k 5 # Semantic search
+peerclaw vector delete <collection>              # Delete collection
+```
+
+### Skills
+
+```bash
+peerclaw skill list               # List installed skills
+peerclaw skill install <path>     # Install from file or URL
+peerclaw skill info <name>        # Show skill details
+peerclaw skill remove <name>      # Uninstall skill
+peerclaw skill search <query>     # Search network for skills
+```
+
+### Tools
+
+```bash
+peerclaw tool list                # List available tools
+peerclaw tool info <name>         # Show tool details
+peerclaw tool build <path>        # Build WASM tool from source
+peerclaw tool install <path>      # Install WASM tool
+```
+
+### Wallet
+
+```bash
+peerclaw wallet create            # Create new wallet
+peerclaw wallet balance           # Show balance
+peerclaw wallet send <addr> <amt> # Send tokens
+peerclaw wallet history           # Transaction history
+peerclaw wallet escrows           # Active escrows
+```
+
+### Jobs
+
+```bash
+peerclaw job submit <spec>        # Submit job to network
+peerclaw job status <id>          # Check job status
+peerclaw job list                 # List active jobs
+peerclaw job cancel <id>          # Cancel pending job
 ```
 
 ### Testing
@@ -158,6 +243,89 @@ for chunk in response:
 
 ---
 
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PEERCLAW_HOME` | Base directory for data | `~/.peerclaw` |
+| `PEERCLAW_LOG` | Log level (trace, debug, info, warn, error) | `info` |
+
+### Config File
+
+Create `~/.peerclaw/config.toml`:
+
+```toml
+[p2p]
+listen_addresses = ["/ip4/0.0.0.0/tcp/0"]
+bootstrap_peers = []
+mdns_enabled = true
+
+[web]
+enabled = false
+listen_addr = "127.0.0.1:8080"
+
+[inference]
+models_path = "~/.peerclaw/models"
+default_model = "llama-3.2-3b"
+
+[vector]
+embedding_dim = 384
+persistence_path = "~/.peerclaw/vector"
+
+[safety]
+leak_detection = true
+injection_defense = true
+policy_enforcement = true
+```
+
+---
+
+## Architecture
+
+```
+peerclaw binary
+├── P2P Network (libp2p)
+│   ├── Kademlia DHT
+│   ├── GossipSub pub/sub
+│   ├── mDNS discovery
+│   └── Noise encryption
+├── Inference Engine
+│   ├── GGUF loader (llama-cpp-2)
+│   ├── Model cache (LRU)
+│   └── Batch aggregator
+├── Vector Store (vectX)
+│   ├── HNSW indexing
+│   ├── BM25 text search
+│   └── Hybrid ranking
+├── Executor
+│   ├── Local/remote routing
+│   ├── Resource monitor
+│   └── Task queue
+├── Economy
+│   ├── Wallet (Ed25519)
+│   ├── Escrow
+│   └── Job marketplace
+├── Tools
+│   ├── Builtin tools
+│   ├── WASM sandbox
+│   └── MCP client
+├── Skills
+│   ├── Parser (YAML + MD)
+│   ├── Registry
+│   └── Selector (activation)
+├── Safety
+│   ├── Leak detector
+│   ├── Sanitizer
+│   └── Policy engine
+└── Messaging
+    ├── Channel registry
+    └── Platform adapters
+```
+
+---
+
 ## Roadmap
 
 ### Current (v0.2)
@@ -169,17 +337,23 @@ for chunk in response:
 - [x] Claude-Code-style CLI
 - [x] Web dashboard
 - [x] Batch aggregation
+- [x] Vector memory (vectX)
+- [x] Skills system (SKILL.md)
+- [x] Safety layer (leak detection, injection defense)
+- [x] MCP integration
+- [x] Multi-platform messaging
 
 ### Next (v0.3)
 - [ ] Distributed inference (pipeline parallelism)
-- [ ] Vector memory (HNSW)
 - [ ] Dynamic WASM tool building
 - [ ] Multi-agent collaboration
+- [ ] Reputation system
 
 ### Future (v1.0)
 - [ ] On-chain settlement
 - [ ] Public tool registry
 - [ ] Governance
+- [ ] Firecracker microVM isolation
 
 ---
 
@@ -190,6 +364,7 @@ for chunk in response:
 - [Token Economy](docs/TOKENS.md)
 - [Security](docs/SECURITY.md)
 - [Agent Spec](docs/AGENTS.md)
+- [Quickstart](docs/QUICKSTART.md)
 
 ---
 
