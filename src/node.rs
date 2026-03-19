@@ -7,7 +7,8 @@ use crate::bootstrap;
 use crate::config::Config;
 use crate::db::Database;
 use crate::identity::NodeIdentity;
-use crate::p2p::Network;
+use crate::p2p::{Network, NetworkEvent};
+use crate::swarm::{SwarmManager, SwarmManagerConfig};
 
 /// The main PeerClaw node.
 pub struct Node {
@@ -15,6 +16,7 @@ pub struct Node {
     identity: NodeIdentity,
     database: Database,
     network: Network,
+    swarm_manager: Arc<SwarmManager>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: Option<mpsc::Receiver<()>>,
 }
@@ -46,6 +48,15 @@ impl Node {
         // Create network
         let network = Network::new(&identity, config.p2p.clone())?;
 
+        // Create swarm manager
+        let swarm_config = SwarmManagerConfig {
+            event_buffer_size: 256,
+            max_action_history: 1000,
+            track_remote_peers: true,
+        };
+        let swarm_manager = Arc::new(SwarmManager::new(swarm_config));
+        tracing::info!("Swarm manager initialized");
+
         // Create shutdown channel
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
@@ -54,6 +65,7 @@ impl Node {
             identity,
             database,
             network,
+            swarm_manager,
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
         })
@@ -72,6 +84,11 @@ impl Node {
     /// Get a shutdown sender to signal the node to stop.
     pub fn shutdown_handle(&self) -> mpsc::Sender<()> {
         self.shutdown_tx.clone()
+    }
+
+    /// Get a reference to the swarm manager.
+    pub fn swarm_manager(&self) -> &Arc<SwarmManager> {
+        &self.swarm_manager
     }
 
     /// Run the node.
@@ -115,14 +132,25 @@ impl Node {
             None
         };
 
+        // Register local agent in swarm
+        let local_agent_id = self.swarm_manager.register_local_agent(
+            format!("node-{}", self.identity.peer_id().to_string().chars().take(8).collect::<String>()),
+            Default::default(),
+        );
+        tracing::info!("Registered local agent: {}", local_agent_id);
+
         // Main event loop
         tracing::info!("Node running. Press Ctrl+C to stop.");
 
+        let swarm_manager = self.swarm_manager.clone();
         tokio::select! {
-            // Handle network events
+            // Handle network events and bridge to swarm
             _ = async {
                 while let Ok(event) = event_rx.recv().await {
                     tracing::debug!("Network event: {}", event);
+
+                    // Bridge P2P events to swarm manager
+                    swarm_manager.handle_network_event(event);
                 }
             } => {}
 
