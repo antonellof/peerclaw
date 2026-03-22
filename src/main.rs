@@ -91,6 +91,9 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Test(args)) => {
             peerclaw::cli::test::run(args).await?;
         }
+        Some(Command::Doctor) => {
+            peerclaw::cli::doctor::run().await?;
+        }
         Some(Command::Version) => {
             println!("peerclaw {}", env!("CARGO_PKG_VERSION"));
         }

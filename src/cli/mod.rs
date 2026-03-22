@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod chat;
+pub mod doctor;
 pub mod job;
 pub mod models;
 pub mod network;
@@ -107,6 +108,9 @@ pub enum Command {
 
     /// Test distributed execution
     Test(test::TestArgs),
+
+    /// Run diagnostics on all subsystems
+    Doctor,
 
     /// Print version information
     #[command(visible_alias = "v")]
