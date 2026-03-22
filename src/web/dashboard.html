@@ -10,61 +10,121 @@
             --bg-primary: #0d1117;
             --bg-secondary: #161b22;
             --bg-tertiary: #21262d;
+            --bg-card: #1c2128;
             --text-primary: #c9d1d9;
             --text-secondary: #8b949e;
             --accent: #58a6ff;
             --success: #3fb950;
             --warning: #d29922;
             --danger: #f85149;
+            --purple: #a371f7;
             --border: #30363d;
+            --border-light: #3d444d;
+            --header-height: 56px;
         }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
-            min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
         }
 
+        /* ---- Header ---- */
         .header {
             background: var(--bg-secondary);
             border-bottom: 1px solid var(--border);
-            padding: 1rem 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .header h1 {
-            font-size: 1.5rem;
+            height: var(--header-height);
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            padding: 0 1.25rem;
+            gap: 1.5rem;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
         }
 
-        .header h1 span {
-            color: var(--accent);
-        }
-
-        .status-badge {
+        .logo {
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            background: var(--bg-tertiary);
-            border-radius: 6px;
-            font-size: 0.875rem;
+            font-size: 1.125rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            flex-shrink: 0;
+        }
+
+        .logo svg { color: var(--accent); }
+
+        /* Nav tabs */
+        .nav-tabs {
+            display: flex;
+            gap: 2px;
+            height: 100%;
+            align-items: stretch;
+        }
+
+        .nav-tab {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 0 1rem;
+            cursor: pointer;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            position: relative;
+            transition: color 0.15s;
+            white-space: nowrap;
+        }
+
+        .nav-tab:hover { color: var(--text-primary); }
+
+        .nav-tab.active {
+            color: var(--text-primary);
+        }
+
+        .nav-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0.5rem;
+            right: 0.5rem;
+            height: 2px;
+            background: var(--accent);
+            border-radius: 2px 2px 0 0;
+        }
+
+        /* Status bar (right side of header) */
+        .header-status {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-shrink: 0;
+        }
+
+        .header-stat {
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .header-stat .value {
+            color: var(--text-primary);
+            font-weight: 500;
+            font-family: 'SF Mono', SFMono-Regular, ui-monospace, monospace;
         }
 
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 7px;
+            height: 7px;
             border-radius: 50%;
             background: var(--success);
             animation: pulse 2s infinite;
@@ -72,53 +132,26 @@
 
         @keyframes pulse {
             0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+            50% { opacity: 0.4; }
         }
 
-        .container {
-            display: grid;
-            grid-template-columns: 1fr 400px;
-            grid-template-rows: 1fr 1fr;
-            gap: 1rem;
-            padding: 1rem;
-            height: calc(100vh - 70px);
+        /* ---- Page container ---- */
+        .page-container {
+            margin-top: var(--header-height);
+            height: calc(100vh - var(--header-height));
+            overflow: hidden;
         }
 
-        /* Tabs */
-        .tabs {
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .tab-btn {
-            background: transparent;
-            border: none;
-            color: var(--text-secondary);
-            padding: 0.5rem 1rem;
-            cursor: pointer;
-            font-size: 0.875rem;
-            border-radius: 4px;
-            transition: all 0.2s;
-        }
-
-        .tab-btn:hover {
-            color: var(--text-primary);
-            background: var(--bg-tertiary);
-        }
-
-        .tab-btn.active {
-            color: var(--accent);
-            background: var(--bg-tertiary);
-        }
-
-        .tab-content {
+        .page {
             display: none;
+            height: 100%;
+            overflow-y: auto;
+            padding: 1.25rem;
         }
 
-        .tab-content.active {
-            display: block;
-        }
+        .page.active { display: block; }
 
+        /* ---- Cards / Panels ---- */
         .panel {
             background: var(--bg-secondary);
             border: 1px solid var(--border);
@@ -127,320 +160,266 @@
         }
 
         .panel-header {
-            padding: 1rem;
+            padding: 0.75rem 1rem;
             border-bottom: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
             align-items: center;
-        }
-
-        .panel-header h2 {
-            font-size: 1rem;
+            font-size: 0.8125rem;
             font-weight: 600;
         }
 
-        .panel-content {
+        .panel-body {
             padding: 1rem;
-            height: calc(100% - 52px);
-            overflow: auto;
         }
 
-        /* Network Graph */
-        .network-panel {
-            grid-row: span 2;
-        }
-
-        #network-graph {
-            width: 100%;
-            height: 100%;
-        }
-
-        #network-graph svg {
-            width: 100%;
-            height: 100%;
-        }
-
-        .node-circle {
-            stroke: var(--border);
-            stroke-width: 2px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .node-circle:hover {
-            stroke: var(--accent);
-            stroke-width: 3px;
-        }
-
-        .node-circle.local {
-            fill: var(--accent);
-        }
-
-        .node-circle.peer {
-            fill: var(--success);
-        }
-
-        .node-label {
-            fill: var(--text-secondary);
-            font-size: 10px;
-            text-anchor: middle;
-        }
-
-        .link {
-            stroke: var(--border);
-            stroke-opacity: 0.6;
-        }
-
-        /* Monitoring Panel */
-        .stats-grid {
+        /* ---- Overview Page ---- */
+        .overview-stats {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1.25rem;
         }
 
         .stat-card {
-            background: var(--bg-tertiary);
-            border-radius: 6px;
-            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
         }
 
         .stat-label {
-            font-size: 0.75rem;
+            font-size: 0.6875rem;
             color: var(--text-secondary);
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            margin-bottom: 0.25rem;
+            margin-bottom: 0.375rem;
         }
 
         .stat-value {
             font-size: 1.5rem;
             font-weight: 600;
+            font-family: 'SF Mono', SFMono-Regular, ui-monospace, monospace;
         }
 
         .stat-value.accent { color: var(--accent); }
         .stat-value.success { color: var(--success); }
         .stat-value.warning { color: var(--warning); }
+        .stat-value.danger { color: var(--danger); }
 
         .progress-bar {
-            height: 6px;
+            height: 4px;
             background: var(--bg-primary);
-            border-radius: 3px;
-            margin-top: 0.5rem;
+            border-radius: 2px;
+            margin-top: 0.625rem;
             overflow: hidden;
         }
 
         .progress-fill {
             height: 100%;
-            border-radius: 3px;
-            transition: width 0.3s ease;
+            border-radius: 2px;
+            transition: width 0.4s ease;
         }
 
         .progress-fill.cpu { background: var(--accent); }
         .progress-fill.ram { background: var(--success); }
         .progress-fill.gpu { background: var(--warning); }
 
-        /* Jobs Panel */
-        .jobs-list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        .job-item {
-            background: var(--bg-tertiary);
-            border-radius: 6px;
-            padding: 0.75rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-        }
-
-        .job-info {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-            flex: 1;
-        }
-
-        .job-type {
-            font-weight: 500;
-            font-size: 0.875rem;
-        }
-
-        .job-id {
-            font-family: monospace;
-            font-size: 0.7rem;
-            color: var(--text-secondary);
-        }
-
-        .job-meta {
-            font-size: 0.7rem;
-            color: var(--text-secondary);
-        }
-
-        .job-status {
-            font-size: 0.7rem;
-            padding: 0.125rem 0.5rem;
-            border-radius: 4px;
-            white-space: nowrap;
-        }
-
-        .job-status.running {
-            background: rgba(88, 166, 255, 0.2);
-            color: var(--accent);
-        }
-
-        .job-status.completed {
-            background: rgba(63, 185, 80, 0.2);
-            color: var(--success);
-        }
-
-        .job-price {
-            font-size: 0.7rem;
-            color: var(--warning);
-            margin-top: 0.25rem;
-        }
-
-        .job-location {
-            font-size: 0.65rem;
-            color: var(--accent);
-            font-style: italic;
-        }
-
-        /* Swarm Visualization */
-        .swarm-container {
-            display: flex;
-            flex-direction: column;
-            height: 100%;
+        .overview-bottom {
+            display: grid;
+            grid-template-columns: 1fr;
             gap: 0.75rem;
         }
 
-        .swarm-topology {
-            flex: 1;
-            min-height: 200px;
-            position: relative;
+        #overview-graph {
+            width: 100%;
+            height: 340px;
         }
 
-        .swarm-topology svg {
+        #overview-graph svg {
             width: 100%;
             height: 100%;
         }
 
-        .agent-node {
+        /* ---- Agents Page ---- */
+        .info-banner {
+            background: rgba(88,166,255,0.08);
+            border: 1px solid rgba(88,166,255,0.25);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.8rem;
+            line-height: 1.6;
+            color: var(--text-secondary);
+            position: relative;
+        }
+        .info-close {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.75rem;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.1rem;
             cursor: pointer;
-            transition: all 0.2s;
+        }
+        .agents-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1.25rem;
         }
 
-        .agent-node:hover circle {
-            stroke-width: 3px;
-            stroke: var(--accent);
+        .agent-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            cursor: default;
+            transition: border-color 0.15s;
         }
 
+        .agent-card:hover { border-color: var(--border-light); }
+
+        .agent-card-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+
+        .agent-card-name {
+            font-weight: 600;
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .state-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .state-dot.idle { background: var(--text-secondary); }
+        .state-dot.thinking { background: var(--warning); animation: pulse 1s infinite; }
+        .state-dot.working { background: var(--accent); animation: pulse 1s infinite; }
+        .state-dot.waiting { background: var(--purple); }
+        .state-dot.error { background: var(--danger); }
+        .state-dot.offline { background: var(--bg-tertiary); }
+
+        .badge {
+            font-size: 0.625rem;
+            padding: 0.125rem 0.5rem;
+            border-radius: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .badge.local {
+            background: rgba(88, 166, 255, 0.15);
+            color: var(--accent);
+        }
+
+        .badge.remote {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--success);
+        }
+
+        .agent-card-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.375rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .agent-card-stats span {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .agent-card-stats .val { color: var(--text-primary); font-weight: 500; }
+
+        .agent-card-time {
+            margin-top: 0.5rem;
+            font-size: 0.6875rem;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .agents-topology-panel {
+            margin-bottom: 1.25rem;
+        }
+
+        #swarm-topology {
+            width: 100%;
+            height: 300px;
+        }
+
+        #swarm-topology svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .agent-node { cursor: pointer; transition: all 0.2s; }
+        .agent-node:hover circle { stroke-width: 3px; stroke: var(--accent); }
         .agent-node circle.idle { fill: var(--text-secondary); }
         .agent-node circle.thinking { fill: var(--warning); }
         .agent-node circle.working { fill: var(--accent); }
-        .agent-node circle.waiting { fill: #a371f7; }
+        .agent-node circle.waiting { fill: var(--purple); }
         .agent-node circle.error { fill: var(--danger); }
         .agent-node circle.offline { fill: var(--bg-tertiary); }
         .agent-node circle.local-ring { stroke: var(--accent); stroke-width: 3px; }
         .agent-node circle.remote-ring { stroke: var(--success); stroke-width: 2px; stroke-dasharray: 4 2; }
-
         .agent-name-label {
             fill: var(--text-primary);
             font-size: 9px;
             text-anchor: middle;
             pointer-events: none;
         }
-
         .swarm-link {
             stroke: var(--border);
             stroke-opacity: 0.5;
             stroke-dasharray: 4 2;
         }
 
-        .swarm-agents-bar {
-            display: flex;
-            gap: 0.5rem;
-            overflow-x: auto;
-            padding-bottom: 0.25rem;
-        }
+        .timeline-section { margin-top: 0; }
 
-        .agent-card {
-            background: var(--bg-tertiary);
-            border-radius: 6px;
-            padding: 0.5rem 0.75rem;
-            min-width: 140px;
-            flex-shrink: 0;
-            cursor: pointer;
-            border: 1px solid transparent;
-            transition: border-color 0.2s;
-        }
-
-        .agent-card:hover, .agent-card.selected {
-            border-color: var(--accent);
-        }
-
-        .agent-card-name {
-            font-size: 0.8rem;
-            font-weight: 600;
-            margin-bottom: 0.25rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .agent-card-state {
-            font-size: 0.65rem;
-            display: flex;
-            align-items: center;
-            gap: 0.25rem;
-        }
-
-        .state-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-        }
-
-        .state-dot.idle { background: var(--text-secondary); }
-        .state-dot.thinking { background: var(--warning); animation: pulse 1s infinite; }
-        .state-dot.working { background: var(--accent); animation: pulse 1s infinite; }
-        .state-dot.waiting { background: #a371f7; }
-        .state-dot.error { background: var(--danger); }
-        .state-dot.offline { background: var(--bg-primary); }
-
-        .agent-card-stats {
-            font-size: 0.6rem;
-            color: var(--text-secondary);
-            margin-top: 0.25rem;
-        }
-
-        .swarm-timeline {
-            max-height: 150px;
-            overflow-y: auto;
+        .timeline-list {
             display: flex;
             flex-direction: column;
             gap: 0.25rem;
+            max-height: 280px;
+            overflow-y: auto;
         }
 
         .timeline-item {
             display: flex;
-            gap: 0.5rem;
-            align-items: flex-start;
-            padding: 0.25rem 0.5rem;
-            font-size: 0.7rem;
+            gap: 0.75rem;
+            align-items: baseline;
+            padding: 0.375rem 0.75rem;
+            font-size: 0.75rem;
             background: var(--bg-tertiary);
             border-radius: 4px;
         }
 
         .timeline-time {
             color: var(--text-secondary);
+            font-family: 'SF Mono', SFMono-Regular, ui-monospace, monospace;
+            font-size: 0.6875rem;
             white-space: nowrap;
-            font-family: monospace;
-            font-size: 0.6rem;
-            min-width: 50px;
+            min-width: 52px;
         }
 
         .timeline-agent {
@@ -449,168 +428,68 @@
             white-space: nowrap;
         }
 
-        .timeline-action {
-            color: var(--text-primary);
-        }
-
         .timeline-type {
             display: inline-block;
-            font-size: 0.6rem;
-            padding: 0 0.25rem;
-            border-radius: 2px;
-            background: rgba(88, 166, 255, 0.15);
+            font-size: 0.625rem;
+            padding: 0.0625rem 0.375rem;
+            border-radius: 3px;
+            background: rgba(88, 166, 255, 0.12);
             color: var(--accent);
         }
 
-        /* Job submission form */
-        .job-form {
-            background: var(--bg-tertiary);
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 1rem;
+        .timeline-action { color: var(--text-primary); }
+
+        /* ---- Chat Page ---- */
+        .chat-page {
+            display: none;
+            height: 100%;
+            padding: 0 !important;
+            flex-direction: column;
         }
 
-        .job-form h3 {
-            font-size: 0.875rem;
-            margin-bottom: 0.75rem;
-            color: var(--text-primary);
-        }
+        .chat-page.active { display: flex; }
 
-        .form-row {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .form-group {
-            flex: 1;
-        }
-
-        .form-group label {
-            display: block;
-            font-size: 0.7rem;
-            color: var(--text-secondary);
-            margin-bottom: 0.25rem;
-        }
-
-        .form-group input,
-        .form-group select,
-        .form-group textarea {
-            width: 100%;
-            background: var(--bg-primary);
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            padding: 0.5rem;
-            color: var(--text-primary);
-            font-size: 0.8rem;
-        }
-
-        .form-group textarea {
-            resize: vertical;
-            min-height: 60px;
-        }
-
-        .submit-job-btn {
-            background: var(--success);
-            border: none;
-            border-radius: 4px;
-            padding: 0.5rem 1rem;
-            color: white;
-            font-weight: 500;
-            cursor: pointer;
-            font-size: 0.8rem;
-            width: 100%;
-        }
-
-        .submit-job-btn:hover {
-            opacity: 0.9;
-        }
-
-        .submit-job-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        /* Distribution chart */
-        .distribution-chart {
-            margin-top: 1rem;
-            padding: 0.75rem;
-            background: var(--bg-tertiary);
-            border-radius: 6px;
-        }
-
-        .distribution-chart h4 {
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-            margin-bottom: 0.5rem;
-        }
-
-        .dist-bar-container {
+        .chat-toolbar {
+            padding: 0.75rem 1.25rem;
+            border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
-            margin-bottom: 0.25rem;
+            gap: 0.75rem;
+            background: var(--bg-secondary);
+            flex-shrink: 0;
         }
 
-        .dist-label {
-            width: 80px;
-            font-size: 0.7rem;
+        .chat-toolbar label {
+            font-size: 0.75rem;
             color: var(--text-secondary);
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
 
-        .dist-bar {
-            flex: 1;
-            height: 12px;
-            background: var(--bg-primary);
-            border-radius: 2px;
-            overflow: hidden;
-            margin: 0 0.5rem;
-        }
-
-        .dist-bar-fill {
-            height: 100%;
-            border-radius: 2px;
-            transition: width 0.3s ease;
-        }
-
-        .dist-bar-fill.local { background: var(--accent); }
-        .dist-bar-fill.remote { background: var(--success); }
-
-        .dist-count {
-            width: 30px;
-            font-size: 0.7rem;
+        .chat-toolbar select {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.375rem 0.625rem;
             color: var(--text-primary);
-            text-align: right;
-        }
-
-        /* Chat Panel */
-        .chat-panel {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .chat-panel .panel-content {
-            display: flex;
-            flex-direction: column;
-            padding: 0;
+            font-size: 0.8125rem;
         }
 
         .chat-messages {
             flex: 1;
             overflow-y: auto;
-            padding: 1rem;
+            padding: 1.25rem;
             display: flex;
             flex-direction: column;
-            gap: 1rem;
+            gap: 0.75rem;
         }
 
         .chat-message {
-            max-width: 90%;
+            max-width: 72ch;
             padding: 0.75rem 1rem;
             border-radius: 12px;
             font-size: 0.875rem;
-            line-height: 1.4;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
 
         .chat-message.user {
@@ -621,72 +500,77 @@
         }
 
         .chat-message.assistant {
-            background: var(--bg-tertiary);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
             align-self: flex-start;
             border-bottom-left-radius: 4px;
         }
 
         .chat-message.error {
-            background: rgba(248, 81, 73, 0.2);
+            background: rgba(248, 81, 73, 0.15);
             color: var(--danger);
+            align-self: flex-start;
+        }
+
+        .chat-meta {
+            font-size: 0.6875rem;
+            color: var(--text-secondary);
+            margin-top: 0.375rem;
+            font-style: italic;
         }
 
         .chat-input-area {
-            padding: 1rem;
+            padding: 1rem 1.25rem;
             border-top: 1px solid var(--border);
             display: flex;
             gap: 0.5rem;
+            background: var(--bg-secondary);
+            flex-shrink: 0;
         }
 
         .chat-input {
             flex: 1;
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 0.75rem;
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
             color: var(--text-primary);
             font-size: 0.875rem;
             outline: none;
+            transition: border-color 0.15s;
         }
 
-        .chat-input:focus {
-            border-color: var(--accent);
-        }
+        .chat-input:focus { border-color: var(--accent); }
 
         .chat-send {
             background: var(--accent);
             border: none;
-            border-radius: 6px;
-            padding: 0.75rem 1.25rem;
+            border-radius: 8px;
+            padding: 0.75rem 1.5rem;
             color: white;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
-            transition: opacity 0.2s;
+            transition: opacity 0.15s;
+            font-size: 0.8125rem;
         }
 
-        .chat-send:hover {
-            opacity: 0.9;
-        }
+        .chat-send:hover { opacity: 0.9; }
+        .chat-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
-        .chat-send:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        /* Typing indicator */
         .typing-indicator {
             display: flex;
             gap: 4px;
             padding: 0.75rem 1rem;
-            background: var(--bg-tertiary);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
             border-radius: 12px;
             align-self: flex-start;
             border-bottom-left-radius: 4px;
         }
 
         .typing-indicator span {
-            width: 8px;
-            height: 8px;
+            width: 7px;
+            height: 7px;
             background: var(--text-secondary);
             border-radius: 50%;
             animation: typing 1.4s infinite;
@@ -700,29 +584,321 @@
             30% { transform: translateY(-4px); }
         }
 
-        /* Empty state */
+        /* ---- Jobs Page ---- */
+        .jobs-layout {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 1.25rem;
+            min-height: 0;
+        }
+
+        .job-form {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+            align-self: start;
+        }
+
+        .job-form h3 {
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        }
+
+        .form-group {
+            margin-bottom: 0.75rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.5rem 0.75rem;
+            color: var(--text-primary);
+            font-size: 0.8125rem;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            border-color: var(--accent);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .form-row .form-group { flex: 1; }
+
+        .submit-btn {
+            width: 100%;
+            background: var(--accent);
+            border: none;
+            border-radius: 6px;
+            padding: 0.625rem;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.8125rem;
+            transition: opacity 0.15s;
+        }
+
+        .submit-btn:hover { opacity: 0.9; }
+        .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .distribution-chart {
+            margin-top: 1.25rem;
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+        }
+
+        .distribution-chart h4 {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.625rem;
+        }
+
+        .dist-bar-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.375rem;
+        }
+
+        .dist-label {
+            width: 70px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .dist-bar {
+            flex: 1;
+            height: 10px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 0 0.5rem;
+        }
+
+        .dist-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.4s ease;
+        }
+
+        .dist-bar-fill.local { background: var(--accent); }
+        .dist-bar-fill.remote { background: var(--success); }
+
+        .dist-count {
+            width: 28px;
+            font-size: 0.75rem;
+            color: var(--text-primary);
+            text-align: right;
+            font-weight: 500;
+        }
+
+        .jobs-right {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .jobs-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .job-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.875rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        .job-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .job-type { font-weight: 600; font-size: 0.875rem; }
+
+        .job-id {
+            font-family: 'SF Mono', SFMono-Regular, ui-monospace, monospace;
+            font-size: 0.6875rem;
+            color: var(--text-secondary);
+        }
+
+        .job-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .job-price {
+            font-size: 0.75rem;
+            color: var(--warning);
+            font-weight: 500;
+        }
+
+        .job-location {
+            font-size: 0.6875rem;
+            color: var(--accent);
+        }
+
+        .job-status {
+            font-size: 0.6875rem;
+            padding: 0.1875rem 0.625rem;
+            border-radius: 10px;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+
+        .job-status.running {
+            background: rgba(88, 166, 255, 0.15);
+            color: var(--accent);
+        }
+
+        .job-status.completed {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--success);
+        }
+
+        .job-status.failed {
+            background: rgba(248, 81, 73, 0.15);
+            color: var(--danger);
+        }
+
+        /* ---- Network Page ---- */
+        #network-graph-full {
+            width: 100%;
+            height: calc(100vh - var(--header-height) - 340px);
+            min-height: 300px;
+        }
+
+        #network-graph-full svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .node-circle {
+            stroke: var(--border);
+            stroke-width: 2px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .node-circle:hover {
+            stroke: var(--accent);
+            stroke-width: 3px;
+        }
+
+        .node-circle.local { fill: var(--accent); }
+        .node-circle.peer { fill: var(--success); }
+
+        .node-label {
+            fill: var(--text-secondary);
+            font-size: 10px;
+            text-anchor: middle;
+        }
+
+        .link {
+            stroke: var(--border);
+            stroke-opacity: 0.6;
+        }
+
+        .peer-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 0.5rem;
+        }
+
+        .peer-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.625rem;
+            font-size: 0.8125rem;
+        }
+
+        .peer-item .peer-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            flex-shrink: 0;
+        }
+
+        .peer-item .peer-id-text {
+            font-family: 'SF Mono', SFMono-Regular, ui-monospace, monospace;
+            font-size: 0.75rem;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* ---- Shared empty state ---- */
         .empty-state {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100%;
+            padding: 3rem 1rem;
             color: var(--text-secondary);
             text-align: center;
+            font-size: 0.875rem;
         }
 
-        .empty-state svg {
-            width: 48px;
-            height: 48px;
-            margin-bottom: 1rem;
-            opacity: 0.5;
+        /* ---- Scrollbar ---- */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 768px) {
+            .header { gap: 0.5rem; padding: 0 0.75rem; }
+            .header-status { gap: 0.5rem; }
+            .header-stat .label-text { display: none; }
+            .jobs-layout { grid-template-columns: 1fr; }
+            .page { padding: 0.75rem; }
+            .overview-stats { grid-template-columns: 1fr 1fr; }
         }
     </style>
 </head>
 <body>
+    <!-- ======== Header ======== -->
     <header class="header">
-        <h1>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <div class="logo">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3"/>
                 <path d="M12 3v6m0 6v6M3 12h6m6 0h6"/>
                 <circle cx="12" cy="3" r="1.5" fill="currentColor"/>
@@ -731,121 +907,148 @@
                 <circle cx="21" cy="12" r="1.5" fill="currentColor"/>
             </svg>
             PeerClaw
-        </h1>
-        <div class="status-badge">
-            <div class="status-dot"></div>
-            <span id="peer-id">Loading...</span>
+        </div>
+
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-page="overview">Overview</button>
+            <button class="nav-tab" data-page="agents">Agents</button>
+            <button class="nav-tab" data-page="chat">Chat</button>
+            <button class="nav-tab" data-page="jobs">Jobs</button>
+            <button class="nav-tab" data-page="network">Network</button>
+        </nav>
+
+        <div class="header-status">
+            <div class="header-stat">
+                <div class="status-dot"></div>
+                <span class="value" id="hdr-peer-id">---</span>
+            </div>
+            <div class="header-stat">
+                <span class="label-text">Peers</span>
+                <span class="value" id="hdr-peers">0</span>
+            </div>
+            <div class="header-stat">
+                <span class="label-text">Balance</span>
+                <span class="value" id="hdr-balance">0.00</span>
+            </div>
         </div>
     </header>
 
-    <div class="container">
-        <div class="panel network-panel">
-            <div class="panel-header">
-                <h2>Network Topology</h2>
-                <span id="peer-count">0 peers</span>
-            </div>
-            <div class="panel-content">
-                <div id="network-graph"></div>
-            </div>
-        </div>
+    <!-- ======== Pages ======== -->
+    <div class="page-container">
 
-        <div class="panel">
-            <div class="panel-header">
-                <h2>System Resources</h2>
+        <!-- ---- Overview ---- -->
+        <div class="page active" id="page-overview">
+            <div class="overview-stats">
+                <div class="stat-card">
+                    <div class="stat-label">CPU Usage</div>
+                    <div class="stat-value accent" id="cpu-value">0%</div>
+                    <div class="progress-bar"><div class="progress-fill cpu" id="cpu-bar" style="width:0%"></div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">RAM Usage</div>
+                    <div class="stat-value success" id="ram-value">0 / 0 MB</div>
+                    <div class="progress-bar"><div class="progress-fill ram" id="ram-bar" style="width:0%"></div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">GPU Usage</div>
+                    <div class="stat-value warning" id="gpu-value">N/A</div>
+                    <div class="progress-bar"><div class="progress-fill gpu" id="gpu-bar" style="width:0%"></div></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Balance</div>
+                    <div class="stat-value" id="balance-value">0.000000 PCLAW</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Connected Peers</div>
+                    <div class="stat-value accent" id="ov-peers">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Swarm Agents</div>
+                    <div class="stat-value" id="ov-agents" style="color: var(--purple)">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active Jobs</div>
+                    <div class="stat-value accent" id="active-jobs">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Completed Jobs</div>
+                    <div class="stat-value success" id="completed-jobs">0</div>
+                </div>
             </div>
-            <div class="panel-content">
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-label">CPU Usage</div>
-                        <div class="stat-value accent" id="cpu-value">0%</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill cpu" id="cpu-bar" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">RAM Usage</div>
-                        <div class="stat-value success" id="ram-value">0 / 0 MB</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill ram" id="ram-bar" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">GPU Usage</div>
-                        <div class="stat-value warning" id="gpu-value">N/A</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill gpu" id="gpu-bar" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Balance</div>
-                        <div class="stat-value" id="balance-value">0.000000 PCLAW</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Active Jobs</div>
-                        <div class="stat-value accent" id="active-jobs">0</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Completed Jobs</div>
-                        <div class="stat-value success" id="completed-jobs">0</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Inference Tasks</div>
-                        <div class="stat-value" id="inference-tasks">0</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">WASM Tasks</div>
-                        <div class="stat-value" id="wasm-tasks">0</div>
+            <div class="overview-bottom">
+                <div class="panel">
+                    <div class="panel-header">Network Topology</div>
+                    <div class="panel-body">
+                        <div id="overview-graph"></div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="panel chat-panel">
-            <div class="panel-header">
-                <div class="tabs">
-                    <button class="tab-btn active" data-tab="chat">AI Chat</button>
-                    <button class="tab-btn" data-tab="swarm">Swarm</button>
-                    <button class="tab-btn" data-tab="jobs">Jobs</button>
+        <!-- ---- Agents ---- -->
+        <div class="page" id="page-agents">
+            <!-- Concepts explainer -->
+            <div class="info-banner" id="info-banner">
+                <button class="info-close" onclick="document.getElementById('info-banner').style.display='none'">&times;</button>
+                <strong>How PeerClaw works:</strong>
+                <strong style="color:var(--purple)">Agents</strong> are autonomous AI bots you deploy (from a TOML spec). They use a model, have tools, and respond on channels.
+                <strong style="color:var(--accent)">Jobs</strong> are units of work (inference, web fetch, WASM) that agents or users submit to the P2P network. Peers bid on jobs and get paid in PCLAW tokens.
+                The <strong style="color:var(--success)">node</strong> is your local peer that runs agents, executes jobs, and connects to the network.
+            </div>
+            <div class="agents-toolbar">
+                <h3 style="margin:0;font-size:1rem">Swarm Agents</h3>
+                <span id="agent-total" style="color:var(--text-secondary);font-size:0.8rem">0 agents</span>
+            </div>
+            <div class="agents-grid" id="agents-grid">
+                <div class="empty-state">
+                    <p>No agents registered yet.</p>
+                    <p style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.5rem">
+                        Start the server with an agent:<br>
+                        <code style="color:var(--accent)">peerclaw serve --web 127.0.0.1:8080 --agent examples/agents/coder.toml</code>
+                    </p>
                 </div>
-                <select id="model-select" style="background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px; padding: 0.25rem 0.5rem; color: var(--text-primary);">
+            </div>
+            <div class="panel agents-topology-panel">
+                <div class="panel-header">Agent Topology</div>
+                <div class="panel-body">
+                    <div id="swarm-topology"></div>
+                </div>
+            </div>
+            <div class="panel timeline-section">
+                <div class="panel-header">Action Timeline</div>
+                <div class="panel-body">
+                    <div class="timeline-list" id="swarm-timeline">
+                        <div class="empty-state" style="padding:1rem">No recent activity</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ---- Chat ---- -->
+        <div class="page chat-page" id="page-chat">
+            <div class="chat-toolbar">
+                <label>Model</label>
+                <select id="model-select">
                     <option value="llama-3.2-3b">Llama 3.2 3B</option>
                     <option value="llama-3.2-1b">Llama 3.2 1B</option>
                     <option value="phi-3-mini">Phi-3 Mini</option>
                 </select>
             </div>
-            <div class="panel-content">
-                <!-- Chat Tab -->
-                <div id="tab-chat" class="tab-content active" style="display: flex; flex-direction: column; height: 100%;">
-                    <div class="chat-messages" id="chat-messages">
-                        <div class="empty-state">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                            </svg>
-                            <p>Start a conversation with the AI</p>
-                        </div>
-                    </div>
-                    <div class="chat-input-area">
-                        <input type="text" class="chat-input" id="chat-input" placeholder="Type your message..." autocomplete="off">
-                        <button class="chat-send" id="chat-send">Send</button>
-                    </div>
+            <div class="chat-messages" id="chat-messages">
+                <div class="empty-state">
+                    <p>Start a conversation with the AI</p>
                 </div>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" class="chat-input" id="chat-input" placeholder="Type your message..." autocomplete="off">
+                <button class="chat-send" id="chat-send">Send</button>
+            </div>
+        </div>
 
-                <!-- Swarm Tab -->
-                <div id="tab-swarm" class="tab-content" style="height: 100%; overflow: hidden;">
-                    <div class="swarm-container">
-                        <div class="swarm-agents-bar" id="swarm-agents-bar">
-                            <div style="color: var(--text-secondary); font-size: 0.75rem; padding: 0.5rem;">No agents registered</div>
-                        </div>
-                        <div class="swarm-topology" id="swarm-topology"></div>
-                        <div class="swarm-timeline" id="swarm-timeline">
-                            <div style="color: var(--text-secondary); font-size: 0.75rem; padding: 0.5rem;">No recent activity</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Jobs Tab -->
-                <div id="tab-jobs" class="tab-content" style="height: 100%; overflow: auto; padding: 0.5rem;">
-                    <!-- Job Submission Form -->
+        <!-- ---- Jobs ---- -->
+        <div class="page" id="page-jobs">
+            <div class="jobs-layout">
+                <div>
                     <div class="job-form">
                         <h3>Submit New Job</h3>
                         <div class="form-row">
@@ -866,63 +1069,113 @@
                             <label>Prompt / URL / Tool Name</label>
                             <textarea id="job-payload" placeholder="Enter prompt for inference, URL for web fetch, or tool name for WASM..."></textarea>
                         </div>
-                        <button class="submit-job-btn" id="submit-job-btn">Submit Job to Network</button>
+                        <button class="submit-btn" id="submit-job-btn">Submit Job to Network</button>
                     </div>
-
-                    <!-- Distribution Chart -->
                     <div class="distribution-chart" id="distribution-chart">
                         <h4>Job Distribution</h4>
                         <div id="dist-bars">
                             <div class="dist-bar-container">
                                 <span class="dist-label">Local</span>
-                                <div class="dist-bar">
-                                    <div class="dist-bar-fill local" id="dist-local" style="width: 0%"></div>
-                                </div>
+                                <div class="dist-bar"><div class="dist-bar-fill local" id="dist-local" style="width:0%"></div></div>
                                 <span class="dist-count" id="dist-local-count">0</span>
                             </div>
                             <div class="dist-bar-container">
                                 <span class="dist-label">Network</span>
-                                <div class="dist-bar">
-                                    <div class="dist-bar-fill remote" id="dist-remote" style="width: 0%"></div>
-                                </div>
+                                <div class="dist-bar"><div class="dist-bar-fill remote" id="dist-remote" style="width:0%"></div></div>
                                 <span class="dist-count" id="dist-remote-count">0</span>
                             </div>
                         </div>
                     </div>
-
-                    <!-- Jobs List -->
-                    <h4 style="font-size: 0.75rem; color: var(--text-secondary); margin: 1rem 0 0.5rem;">Recent Jobs</h4>
-                    <div id="jobs-list" class="jobs-list">
-                        <div class="empty-state" style="padding: 1rem;">
-                            <p style="font-size: 0.8rem;">No jobs yet - submit one above!</p>
+                </div>
+                <div class="jobs-right">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <span>Recent Jobs</span>
+                            <span id="jobs-count" style="font-size:0.75rem;color:var(--text-secondary)">0 jobs</span>
                         </div>
+                        <div class="panel-body">
+                            <div class="jobs-list" id="jobs-list">
+                                <div class="empty-state">No jobs yet - submit one above!</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ---- Network ---- -->
+        <div class="page" id="page-network">
+            <div class="panel" style="margin-bottom:1.25rem">
+                <div class="panel-header">
+                    <span>Network Topology</span>
+                    <span id="net-peer-count" style="font-size:0.75rem;color:var(--text-secondary)">0 peers</span>
+                </div>
+                <div class="panel-body">
+                    <div id="network-graph-full"></div>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">Connected Peers</div>
+                <div class="panel-body">
+                    <div class="peer-list" id="peer-list">
+                        <div class="empty-state">No peers connected</div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- ======== JavaScript ======== -->
     <script>
-        // State
+        // ---- State ----
         let localPeerId = null;
         let peers = [];
+        let jobs = [];
         let ws = null;
         let isTyping = false;
+        let currentPage = 'overview';
+        let networkSimulation = null;
+        let overviewSimulation = null;
+        let swarmSimulation = null;
 
-        // Initialize WebSocket connection
+        // ---- Navigation ----
+        const navTabs = document.querySelectorAll('.nav-tab');
+        navTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const page = tab.dataset.page;
+                switchPage(page);
+            });
+        });
+
+        function switchPage(page) {
+            currentPage = page;
+            navTabs.forEach(t => t.classList.toggle('active', t.dataset.page === page));
+            document.querySelectorAll('.page').forEach(p => {
+                p.classList.toggle('active', p.id === `page-${page}`);
+            });
+
+            // Trigger data refreshes and graph renders for the active page
+            if (page === 'overview') {
+                renderOverviewGraph();
+            } else if (page === 'agents') {
+                fetchSwarmData();
+            } else if (page === 'network') {
+                renderNetworkGraph();
+            } else if (page === 'jobs') {
+                fetchJobs();
+            }
+        }
+
+        // ---- WebSocket ----
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
-            ws.onopen = () => {
-                console.log('WebSocket connected');
-            };
+            ws.onopen = () => console.log('WebSocket connected');
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                if (data.type === 'status') {
-                    updateStatus(data.data);
-                }
+                if (data.type === 'status') updateLiveStatus(data.data);
             };
 
             ws.onclose = () => {
@@ -930,185 +1183,327 @@
                 setTimeout(connectWebSocket, 2000);
             };
 
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-            };
+            ws.onerror = (err) => console.error('WebSocket error:', err);
         }
 
-        // Update status from WebSocket
-        function updateStatus(data) {
-            document.getElementById('cpu-value').textContent = `${(data.cpu_usage * 100).toFixed(1)}%`;
-            document.getElementById('cpu-bar').style.width = `${data.cpu_usage * 100}%`;
+        function updateLiveStatus(d) {
+            setText('cpu-value', `${(d.cpu_usage * 100).toFixed(1)}%`);
+            setWidth('cpu-bar', `${d.cpu_usage * 100}%`);
 
-            document.getElementById('ram-value').textContent = `${data.ram_used_mb} / ${data.ram_total_mb} MB`;
-            const ramPercent = (data.ram_used_mb / data.ram_total_mb) * 100;
-            document.getElementById('ram-bar').style.width = `${ramPercent}%`;
+            setText('ram-value', `${d.ram_used_mb} / ${d.ram_total_mb} MB`);
+            setWidth('ram-bar', `${(d.ram_used_mb / d.ram_total_mb) * 100}%`);
 
-            document.getElementById('peer-count').textContent = `${data.connected_peers} peers`;
-            document.getElementById('active-jobs').textContent = data.active_jobs;
+            setText('hdr-peers', d.connected_peers);
+            setText('ov-peers', d.connected_peers);
+            setText('active-jobs', d.active_jobs);
         }
 
-        // Fetch initial status
+        // ---- Fetch Initial Status ----
         async function fetchStatus() {
             try {
-                const response = await fetch('/api/status');
-                const data = await response.json();
+                const r = await fetch('/api/status');
+                const d = await r.json();
 
-                localPeerId = data.peer_id;
-                document.getElementById('peer-id').textContent = data.peer_id.substring(0, 16) + '...';
+                localPeerId = d.peer_id;
+                const shortId = d.peer_id ? d.peer_id.substring(0, 12) + '...' : '---';
+                setText('hdr-peer-id', shortId);
 
-                document.getElementById('cpu-value').textContent = `${(data.cpu_usage * 100).toFixed(1)}%`;
-                document.getElementById('cpu-bar').style.width = `${data.cpu_usage * 100}%`;
+                setText('cpu-value', `${(d.cpu_usage * 100).toFixed(1)}%`);
+                setWidth('cpu-bar', `${d.cpu_usage * 100}%`);
 
-                document.getElementById('ram-value').textContent = `${data.ram_used_mb} / ${data.ram_total_mb} MB`;
-                const ramPercent = (data.ram_used_mb / data.ram_total_mb) * 100;
-                document.getElementById('ram-bar').style.width = `${ramPercent}%`;
+                setText('ram-value', `${d.ram_used_mb} / ${d.ram_total_mb} MB`);
+                setWidth('ram-bar', `${(d.ram_used_mb / d.ram_total_mb) * 100}%`);
 
-                if (data.gpu_usage !== null) {
-                    document.getElementById('gpu-value').textContent = `${(data.gpu_usage * 100).toFixed(1)}%`;
-                    document.getElementById('gpu-bar').style.width = `${data.gpu_usage * 100}%`;
+                if (d.gpu_usage !== null && d.gpu_usage !== undefined) {
+                    setText('gpu-value', `${(d.gpu_usage * 100).toFixed(1)}%`);
+                    setWidth('gpu-bar', `${d.gpu_usage * 100}%`);
                 }
 
-                document.getElementById('balance-value').textContent = `${data.balance.toFixed(6)} PCLAW`;
-                document.getElementById('active-jobs').textContent = data.active_jobs;
-                document.getElementById('completed-jobs').textContent = data.completed_jobs;
-                document.getElementById('inference-tasks').textContent = data.active_inference;
-                document.getElementById('wasm-tasks').textContent = data.active_wasm;
-                document.getElementById('peer-count').textContent = `${data.connected_peers} peers`;
+                setText('balance-value', `${d.balance.toFixed(6)} PCLAW`);
+                setText('hdr-balance', d.balance.toFixed(2));
+                setText('active-jobs', d.active_jobs);
+                setText('completed-jobs', d.completed_jobs);
+                setText('hdr-peers', d.connected_peers);
+                setText('ov-peers', d.connected_peers);
 
-                updateNetworkGraph();
-            } catch (error) {
-                console.error('Failed to fetch status:', error);
+                fetchPeers();
+            } catch (err) {
+                console.error('Failed to fetch status:', err);
             }
         }
 
-        // Fetch peers
+        // ---- Fetch Peers ----
         async function fetchPeers() {
             try {
-                const response = await fetch('/api/peers');
-                peers = await response.json();
-                updateNetworkGraph();
-            } catch (error) {
-                console.error('Failed to fetch peers:', error);
+                const r = await fetch('/api/peers');
+                peers = await r.json();
+                setText('net-peer-count', `${peers.length} peers`);
+                renderPeerList();
+                if (currentPage === 'overview') renderOverviewGraph();
+                if (currentPage === 'network') renderNetworkGraph();
+            } catch (err) {
+                console.error('Failed to fetch peers:', err);
             }
         }
 
-        // Network graph visualization
-        function updateNetworkGraph() {
-            const container = document.getElementById('network-graph');
-            const width = container.clientWidth;
-            const height = container.clientHeight;
+        // ---- Peer List (Network Page) ----
+        function renderPeerList() {
+            const el = document.getElementById('peer-list');
+            if (peers.length === 0) {
+                el.innerHTML = '<div class="empty-state">No peers connected</div>';
+                return;
+            }
+            el.innerHTML = peers.map(p => `
+                <div class="peer-item">
+                    <div class="peer-dot"></div>
+                    <span class="peer-id-text">${p.id}</span>
+                </div>
+            `).join('');
+        }
 
-            // Clear existing
+        // ---- Network Topology Graph (Full - Network Page) ----
+        function renderNetworkGraph() {
+            const container = document.getElementById('network-graph-full');
+            if (!container) return;
+            const width = container.clientWidth || 600;
+            const height = container.clientHeight || 400;
             container.innerHTML = '';
 
-            const svg = d3.select('#network-graph')
-                .append('svg')
-                .attr('width', width)
-                .attr('height', height);
+            const svg = d3.select('#network-graph-full').append('svg').attr('width', width).attr('height', height);
 
-            // Create nodes data
-            // Peer IDs start with "12D3KooW" so use the last 8 chars for a unique label
             const nodes = [
                 { id: localPeerId || 'local', type: 'local', label: 'You' },
                 ...peers.map(p => ({ id: p.id, type: 'peer', label: '...' + p.id.slice(-8) }))
             ];
 
-            // Create links from local to all peers
-            const links = peers.map(p => ({
-                source: localPeerId || 'local',
-                target: p.id
-            }));
+            const links = peers.map(p => ({ source: localPeerId || 'local', target: p.id }));
 
-            // Create force simulation
-            const simulation = d3.forceSimulation(nodes)
-                .force('link', d3.forceLink(links).id(d => d.id).distance(100))
-                .force('charge', d3.forceManyBody().strength(-200))
+            if (networkSimulation) networkSimulation.stop();
+            networkSimulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links).id(d => d.id).distance(120))
+                .force('charge', d3.forceManyBody().strength(-300))
                 .force('center', d3.forceCenter(width / 2, height / 2))
-                .force('collision', d3.forceCollide().radius(40));
+                .force('collision', d3.forceCollide().radius(45));
 
-            // Draw links
-            const link = svg.append('g')
-                .selectAll('line')
-                .data(links)
-                .join('line')
-                .attr('class', 'link');
+            const link = svg.append('g').selectAll('line').data(links).join('line').attr('class', 'link');
 
-            // Draw nodes
-            const node = svg.append('g')
-                .selectAll('g')
-                .data(nodes)
-                .join('g')
+            const node = svg.append('g').selectAll('g').data(nodes).join('g')
                 .call(d3.drag()
-                    .on('start', dragstarted)
-                    .on('drag', dragged)
-                    .on('end', dragended));
+                    .on('start', (e) => { if (!e.active) networkSimulation.alphaTarget(0.3).restart(); e.subject.fx = e.subject.x; e.subject.fy = e.subject.y; })
+                    .on('drag', (e) => { e.subject.fx = e.x; e.subject.fy = e.y; })
+                    .on('end', (e) => { if (!e.active) networkSimulation.alphaTarget(0); e.subject.fx = null; e.subject.fy = null; }));
 
-            node.append('circle')
-                .attr('class', d => `node-circle ${d.type}`)
-                .attr('r', d => d.type === 'local' ? 20 : 15);
+            node.append('circle').attr('class', d => `node-circle ${d.type}`).attr('r', d => d.type === 'local' ? 22 : 16);
+            node.append('text').attr('class', 'node-label').attr('dy', d => d.type === 'local' ? 38 : 30).text(d => d.label);
 
-            node.append('text')
-                .attr('class', 'node-label')
-                .attr('dy', d => d.type === 'local' ? 35 : 28)
-                .text(d => d.label);
-
-            // Update positions on tick
-            simulation.on('tick', () => {
-                link
-                    .attr('x1', d => d.source.x)
-                    .attr('y1', d => d.source.y)
-                    .attr('x2', d => d.target.x)
-                    .attr('y2', d => d.target.y);
-
+            networkSimulation.on('tick', () => {
+                link.attr('x1', d => d.source.x).attr('y1', d => d.source.y).attr('x2', d => d.target.x).attr('y2', d => d.target.y);
                 node.attr('transform', d => `translate(${d.x},${d.y})`);
             });
+        }
 
-            function dragstarted(event) {
-                if (!event.active) simulation.alphaTarget(0.3).restart();
-                event.subject.fx = event.subject.x;
-                event.subject.fy = event.subject.y;
-            }
+        // ---- Overview Mini Topology ----
+        function renderOverviewGraph() {
+            const container = document.getElementById('overview-graph');
+            if (!container) return;
+            const width = container.clientWidth || 600;
+            const height = 340;
+            container.innerHTML = '';
 
-            function dragged(event) {
-                event.subject.fx = event.x;
-                event.subject.fy = event.y;
-            }
+            const svg = d3.select('#overview-graph').append('svg').attr('width', width).attr('height', height);
 
-            function dragended(event) {
-                if (!event.active) simulation.alphaTarget(0);
-                event.subject.fx = null;
-                event.subject.fy = null;
+            const nodes = [
+                { id: localPeerId || 'local', type: 'local', label: 'You' },
+                ...peers.map(p => ({ id: p.id, type: 'peer', label: '...' + p.id.slice(-8) }))
+            ];
+
+            const links = peers.map(p => ({ source: localPeerId || 'local', target: p.id }));
+
+            if (overviewSimulation) overviewSimulation.stop();
+            overviewSimulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links).id(d => d.id).distance(90))
+                .force('charge', d3.forceManyBody().strength(-200))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(35));
+
+            const link = svg.append('g').selectAll('line').data(links).join('line').attr('class', 'link');
+
+            const node = svg.append('g').selectAll('g').data(nodes).join('g')
+                .call(d3.drag()
+                    .on('start', (e) => { if (!e.active) overviewSimulation.alphaTarget(0.3).restart(); e.subject.fx = e.subject.x; e.subject.fy = e.subject.y; })
+                    .on('drag', (e) => { e.subject.fx = e.x; e.subject.fy = e.y; })
+                    .on('end', (e) => { if (!e.active) overviewSimulation.alphaTarget(0); e.subject.fx = null; e.subject.fy = null; }));
+
+            node.append('circle').attr('class', d => `node-circle ${d.type}`).attr('r', d => d.type === 'local' ? 18 : 12);
+            node.append('text').attr('class', 'node-label').attr('dy', d => d.type === 'local' ? 32 : 24).text(d => d.label);
+
+            overviewSimulation.on('tick', () => {
+                link.attr('x1', d => d.source.x).attr('y1', d => d.source.y).attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+                node.attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+        }
+
+        // ---- Swarm / Agents ----
+        async function fetchSwarmData() {
+            try {
+                const [agentsRes, topoRes, timelineRes] = await Promise.all([
+                    fetch('/api/swarm/agents'),
+                    fetch('/api/swarm/topology'),
+                    fetch('/api/swarm/timeline')
+                ]);
+                const agentsData = await agentsRes.json();
+                const topoData = await topoRes.json();
+                const timelineData = await timelineRes.json();
+
+                setText('ov-agents', agentsData.total || 0);
+                renderAgentCards(agentsData.agents || []);
+                renderSwarmTopology(topoData);
+                renderTimeline(timelineData.actions || []);
+            } catch (err) {
+                console.error('Failed to fetch swarm data:', err);
             }
         }
 
-        // Chat functionality
+        function renderAgentCards(agents) {
+            const grid = document.getElementById('agents-grid');
+            setText('agent-total', `${agents.length} agent(s)`);
+            if (!agents.length) {
+                grid.innerHTML = `<div class="empty-state">
+                    <p>No agents registered yet.</p>
+                    <p style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.5rem">
+                        Start with: <code style="color:var(--accent)">peerclaw serve --web 127.0.0.1:8080 --agent examples/agents/coder.toml</code>
+                    </p>
+                </div>`;
+                return;
+            }
+            grid.innerHTML = agents.map(a => {
+                const state = (a.state || 'offline').toLowerCase();
+                const isLocal = a.is_local !== false;
+                const rate = a.success_rate != null ? `${(a.success_rate * 100).toFixed(0)}%` : '--';
+                const created = a.created_at ? new Date(a.created_at).toLocaleString() : '--';
+                const lastActive = a.last_active_at ? new Date(a.last_active_at).toLocaleString() : '--';
+                const shortId = a.id ? a.id.slice(0, 8) + '...' : '';
+                return `
+                <div class="agent-card">
+                    <div class="agent-card-top">
+                        <div class="agent-card-name">
+                            <div class="state-dot ${state}"></div>
+                            ${escHtml(a.name || a.id)}
+                        </div>
+                        <span class="badge ${isLocal ? 'local' : 'remote'}">${isLocal ? 'Local' : 'Remote'}</span>
+                    </div>
+                    <div class="agent-card-stats">
+                        <span>State <span class="val">${capitalize(state)}</span></span>
+                        <span>Actions <span class="val">${a.action_count || 0}</span></span>
+                        <span>Success <span class="val">${rate}</span></span>
+                        <span>Jobs <span class="val">${(a.jobs_completed || 0)}/${(a.jobs_completed || 0) + (a.jobs_failed || 0)}</span></span>
+                    </div>
+                    <div class="agent-card-time">
+                        <span title="${a.id || ''}">ID: ${shortId}</span>
+                        <span>Active: ${lastActive}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function renderSwarmTopology(topo) {
+            const container = document.getElementById('swarm-topology');
+            if (!container) return;
+            const width = container.clientWidth || 600;
+            const height = 300;
+            container.innerHTML = '';
+
+            const nodes = (topo.nodes || []).map(n => ({...n}));
+            const edges = (topo.edges || []).map(e => ({source: e.source, target: e.target}));
+
+            if (!nodes.length) {
+                container.innerHTML = '<div class="empty-state" style="height:100%">No agent topology data</div>';
+                return;
+            }
+
+            const svg = d3.select('#swarm-topology').append('svg').attr('width', width).attr('height', height);
+
+            if (swarmSimulation) swarmSimulation.stop();
+            swarmSimulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(edges).id(d => d.id).distance(80))
+                .force('charge', d3.forceManyBody().strength(-180))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(30));
+
+            const link = svg.append('g').selectAll('line').data(edges).join('line').attr('class', 'swarm-link');
+
+            const node = svg.append('g').selectAll('g').data(nodes).join('g').attr('class', 'agent-node')
+                .call(d3.drag()
+                    .on('start', (e) => { if (!e.active) swarmSimulation.alphaTarget(0.3).restart(); e.subject.fx = e.subject.x; e.subject.fy = e.subject.y; })
+                    .on('drag', (e) => { e.subject.fx = e.x; e.subject.fy = e.y; })
+                    .on('end', (e) => { if (!e.active) swarmSimulation.alphaTarget(0); e.subject.fx = null; e.subject.fy = null; }));
+
+            // Outer ring
+            node.append('circle')
+                .attr('r', 16)
+                .attr('class', d => d.is_local ? 'local-ring' : 'remote-ring')
+                .attr('fill', 'none');
+
+            // Inner circle
+            node.append('circle')
+                .attr('r', 12)
+                .attr('class', d => (d.state || 'offline').toLowerCase())
+                .attr('stroke', 'none');
+
+            // Label
+            node.append('text')
+                .attr('class', 'agent-name-label')
+                .attr('dy', 28)
+                .text(d => d.name || d.id.slice(0, 8));
+
+            swarmSimulation.on('tick', () => {
+                link.attr('x1', d => d.source.x).attr('y1', d => d.source.y).attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+                node.attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+        }
+
+        function renderTimeline(actions) {
+            const el = document.getElementById('swarm-timeline');
+            if (!actions.length) {
+                el.innerHTML = '<div class="empty-state" style="padding:1rem">No recent activity</div>';
+                return;
+            }
+            el.innerHTML = actions.slice(0, 50).map(a => {
+                const t = a.timestamp ? new Date(a.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '--:--';
+                return `
+                <div class="timeline-item">
+                    <span class="timeline-time">${t}</span>
+                    <span class="timeline-agent">${escHtml(a.agent_name || a.agent_id)}</span>
+                    <span class="timeline-type">${escHtml(a.action_type || '')}</span>
+                    <span class="timeline-action">${escHtml(a.details || '')}</span>
+                </div>`;
+            }).join('');
+        }
+
+        // ---- Chat ----
         const chatMessages = document.getElementById('chat-messages');
         const chatInput = document.getElementById('chat-input');
         const chatSend = document.getElementById('chat-send');
         const modelSelect = document.getElementById('model-select');
 
         function addMessage(content, type, metadata = null) {
-            // Remove empty state if present
-            const emptyState = chatMessages.querySelector('.empty-state');
-            if (emptyState) emptyState.remove();
+            const empty = chatMessages.querySelector('.empty-state');
+            if (empty) empty.remove();
 
             const msg = document.createElement('div');
             msg.className = `chat-message ${type}`;
             msg.textContent = content;
 
-            // Add metadata (tokens, peer info) for assistant messages
             if (metadata && type === 'assistant') {
                 const meta = document.createElement('div');
-                meta.style.cssText = 'font-size: 0.65rem; color: var(--text-secondary); margin-top: 0.5rem; font-style: italic;';
-                let metaText = `${metadata.tokens} tokens, ${metadata.tokens_per_second.toFixed(1)} tok/s`;
+                meta.className = 'chat-meta';
+                let text = `${metadata.tokens} tokens, ${metadata.tokens_per_second.toFixed(1)} tok/s`;
                 if (metadata.provider_peer_id) {
-                    const shortPeer = metadata.provider_peer_id.length > 16
-                        ? metadata.provider_peer_id.slice(0, 8) + '...' + metadata.provider_peer_id.slice(-8)
-                        : metadata.provider_peer_id;
-                    metaText += ` | Executed by: ${shortPeer}`;
+                    const sp = metadata.provider_peer_id;
+                    const short = sp.length > 16 ? sp.slice(0, 8) + '...' + sp.slice(-8) : sp;
+                    text += ` | Provider: ${short}`;
                 }
-                meta.textContent = metaText;
+                meta.textContent = text;
                 msg.appendChild(meta);
             }
 
@@ -1116,18 +1511,18 @@
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
 
-        function showTypingIndicator() {
-            const indicator = document.createElement('div');
-            indicator.className = 'typing-indicator';
-            indicator.id = 'typing-indicator';
-            indicator.innerHTML = '<span></span><span></span><span></span>';
-            chatMessages.appendChild(indicator);
+        function showTyping() {
+            const ind = document.createElement('div');
+            ind.className = 'typing-indicator';
+            ind.id = 'typing-indicator';
+            ind.innerHTML = '<span></span><span></span><span></span>';
+            chatMessages.appendChild(ind);
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
 
-        function hideTypingIndicator() {
-            const indicator = document.getElementById('typing-indicator');
-            if (indicator) indicator.remove();
+        function hideTyping() {
+            const ind = document.getElementById('typing-indicator');
+            if (ind) ind.remove();
         }
 
         async function sendMessage() {
@@ -1138,22 +1533,18 @@
             chatInput.value = '';
             chatSend.disabled = true;
             isTyping = true;
-            showTypingIndicator();
+            showTyping();
 
             try {
-                const response = await fetch('/api/chat', {
+                const r = await fetch('/api/chat', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message: message,
-                        model: modelSelect.value
-                    })
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ message, model: modelSelect.value })
                 });
+                const data = await r.json();
+                hideTyping();
 
-                const data = await response.json();
-                hideTypingIndicator();
-
-                if (data.response.startsWith('Error:')) {
+                if (data.response && data.response.startsWith('Error:')) {
                     addMessage(data.response, 'error');
                 } else {
                     addMessage(data.response, 'assistant', {
@@ -1162,9 +1553,9 @@
                         provider_peer_id: data.provider_peer_id
                     });
                 }
-            } catch (error) {
-                hideTypingIndicator();
-                addMessage(`Error: ${error.message}`, 'error');
+            } catch (err) {
+                hideTyping();
+                addMessage(`Error: ${err.message}`, 'error');
             }
 
             chatSend.disabled = false;
@@ -1172,71 +1563,35 @@
         }
 
         chatSend.addEventListener('click', sendMessage);
-        chatInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
-        });
+        chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
 
-        // Tab switching
-        const tabBtns = document.querySelectorAll('.tab-btn');
-        tabBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tabName = btn.dataset.tab;
-
-                // Update button states
-                tabBtns.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-
-                // Show/hide content
-                document.querySelectorAll('.tab-content').forEach(content => {
-                    content.classList.remove('active');
-                    content.style.display = 'none';
-                });
-                const activeTab = document.getElementById(`tab-${tabName}`);
-                activeTab.classList.add('active');
-                activeTab.style.display = tabName === 'chat' ? 'flex' : 'block';
-
-                // Hide model select for non-chat tabs
-                document.getElementById('model-select').style.display =
-                    tabName === 'chat' ? 'block' : 'none';
-
-                // Refresh swarm view when switching to it
-                if (tabName === 'swarm') {
-                    fetchSwarmData();
-                }
-            });
-        });
-
-        // Fetch and display jobs
-        let jobs = [];
+        // ---- Jobs ----
         async function fetchJobs() {
             try {
-                const response = await fetch('/api/jobs');
-                jobs = await response.json();
+                const r = await fetch('/api/jobs');
+                jobs = await r.json();
                 renderJobs();
-            } catch (error) {
-                console.error('Failed to fetch jobs:', error);
+            } catch (err) {
+                console.error('Failed to fetch jobs:', err);
             }
         }
 
         function renderJobs() {
-            const jobsList = document.getElementById('jobs-list');
+            const el = document.getElementById('jobs-list');
+            setText('jobs-count', `${jobs.length} jobs`);
 
-            if (jobs.length === 0) {
-                jobsList.innerHTML = `
-                    <div class="empty-state" style="padding: 1rem;">
-                        <p style="font-size: 0.8rem;">No jobs yet - submit one above!</p>
-                    </div>
-                `;
+            if (!jobs.length) {
+                el.innerHTML = '<div class="empty-state">No jobs yet - submit one above!</div>';
                 updateDistribution();
                 return;
             }
 
-            jobsList.innerHTML = jobs.map(job => {
-                const statusClass = job.status.toLowerCase().includes('progress') || job.status.toLowerCase() === 'pending'
-                    ? 'running' : 'completed';
+            el.innerHTML = jobs.map(job => {
+                const isActive = (job.status || '').toLowerCase().includes('progress') || (job.status || '').toLowerCase() === 'pending';
+                const isFailed = (job.status || '').toLowerCase().includes('fail');
+                const statusClass = isFailed ? 'failed' : (isActive ? 'running' : 'completed');
                 const price = (job.price_micro / 1000000).toFixed(6);
 
-                // Format provider peer ID
                 let providerDisplay = 'Pending';
                 let isLocal = false;
                 if (job.provider) {
@@ -1250,7 +1605,6 @@
                     }
                 }
 
-                // Format requester
                 let requesterDisplay = job.requester || 'Unknown';
                 if (localPeerId && requesterDisplay.includes(localPeerId.slice(-8))) {
                     requesterDisplay = 'You';
@@ -1261,33 +1615,29 @@
                 const location = job.location || (isLocal ? 'Local' : 'Network');
 
                 return `
-                    <div class="job-item">
-                        <div class="job-info">
-                            <div class="job-type">${job.job_type}</div>
-                            <div class="job-id">${job.id.substring(0, 20)}...</div>
-                            <div class="job-meta">
-                                <span style="color: ${isLocal ? 'var(--accent)' : 'var(--success)'}">Provider: ${providerDisplay}</span>
-                                | Requester: ${requesterDisplay}
-                            </div>
-                            <div class="job-price">${price} PCLAW</div>
-                            <div class="job-location">Executed: ${location}</div>
+                <div class="job-item">
+                    <div class="job-info">
+                        <div class="job-type">${escHtml(job.job_type)}</div>
+                        <div class="job-id">${job.id.substring(0, 24)}...</div>
+                        <div class="job-meta">
+                            <span style="color:${isLocal ? 'var(--accent)' : 'var(--success)'}">Provider: ${escHtml(providerDisplay)}</span>
+                            &middot; Requester: ${escHtml(requesterDisplay)}
                         </div>
-                        <span class="job-status ${statusClass}">${job.status}</span>
+                        <div class="job-price">${price} PCLAW</div>
+                        <div class="job-location">Executed: ${escHtml(location)}</div>
                     </div>
-                `;
+                    <span class="job-status ${statusClass}">${escHtml(job.status)}</span>
+                </div>`;
             }).join('');
 
             updateDistribution();
         }
 
-        // Update distribution chart
         function updateDistribution() {
-            let localCount = 0;
-            let remoteCount = 0;
-
+            let localCount = 0, remoteCount = 0;
             jobs.forEach(job => {
-                const provider = job.provider || '';
-                if (provider === 'Local' || provider === '' || provider.includes(localPeerId?.slice(-8))) {
+                const prov = job.provider || '';
+                if (!prov || prov === 'Local' || (localPeerId && prov.includes(localPeerId.slice(-8)))) {
                     localCount++;
                 } else {
                     remoteCount++;
@@ -1295,255 +1645,88 @@
             });
 
             const total = localCount + remoteCount || 1;
-            const localPct = (localCount / total) * 100;
-            const remotePct = (remoteCount / total) * 100;
-
-            document.getElementById('dist-local').style.width = `${localPct}%`;
-            document.getElementById('dist-remote').style.width = `${remotePct}%`;
-            document.getElementById('dist-local-count').textContent = localCount;
-            document.getElementById('dist-remote-count').textContent = remoteCount;
+            setWidth('dist-local', `${(localCount / total) * 100}%`);
+            setWidth('dist-remote', `${(remoteCount / total) * 100}%`);
+            setText('dist-local-count', localCount);
+            setText('dist-remote-count', remoteCount);
         }
 
-        // Job submission
-        const submitJobBtn = document.getElementById('submit-job-btn');
-        submitJobBtn.addEventListener('click', async () => {
+        // ---- Job Submission ----
+        document.getElementById('submit-job-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('submit-job-btn');
             const jobType = document.getElementById('job-type').value;
             const budget = parseFloat(document.getElementById('job-budget').value);
             const payload = document.getElementById('job-payload').value.trim();
 
-            if (!payload) {
-                alert('Please enter a prompt, URL, or tool name');
-                return;
-            }
+            if (!payload) return;
 
-            submitJobBtn.disabled = true;
-            submitJobBtn.textContent = 'Submitting...';
+            btn.disabled = true;
+            btn.textContent = 'Submitting...';
 
             try {
-                const response = await fetch('/api/jobs/submit', {
+                const r = await fetch('/api/jobs/submit', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        job_type: jobType,
-                        budget: budget,
-                        payload: payload
-                    })
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ job_type: jobType, budget, payload })
                 });
-
-                const result = await response.json();
-
-                if (result.success) {
+                const data = await r.json();
+                if (data.success) {
                     document.getElementById('job-payload').value = '';
-                    // Refresh jobs list
-                    await fetchJobs();
+                    setTimeout(fetchJobs, 500);
                 } else {
-                    alert('Failed to submit job: ' + (result.error || 'Unknown error'));
+                    alert('Job submission failed: ' + (data.error || 'Unknown error'));
                 }
-            } catch (error) {
-                alert('Error submitting job: ' + error.message);
+            } catch (err) {
+                alert('Job submission error: ' + err.message);
             }
 
-            submitJobBtn.disabled = false;
-            submitJobBtn.textContent = 'Submit Job to Network';
+            btn.disabled = false;
+            btn.textContent = 'Submit Job to Network';
         });
 
-        // === Swarm Visualization ===
-        let swarmAgents = [];
-        let swarmTopology = { nodes: [], edges: [] };
-        let swarmTimeline = [];
-        let swarmSimulation = null;
-
-        async function fetchSwarmData() {
-            try {
-                const [agentsRes, topoRes, timelineRes] = await Promise.all([
-                    fetch('/api/swarm/agents'),
-                    fetch('/api/swarm/topology'),
-                    fetch('/api/swarm/timeline')
-                ]);
-                const agentsData = await agentsRes.json();
-                swarmAgents = agentsData.agents || [];
-                swarmTopology = await topoRes.json();
-                const timelineData = await timelineRes.json();
-                swarmTimeline = timelineData.actions || [];
-
-                renderSwarmAgentCards();
-                renderSwarmTopology();
-                renderSwarmTimeline();
-            } catch (error) {
-                console.error('Failed to fetch swarm data:', error);
-            }
+        // ---- Helpers ----
+        function setText(id, val) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = val;
         }
 
-        function renderSwarmAgentCards() {
-            const bar = document.getElementById('swarm-agents-bar');
-            if (swarmAgents.length === 0) {
-                bar.innerHTML = '<div style="color: var(--text-secondary); font-size: 0.75rem; padding: 0.5rem;">No agents registered</div>';
-                return;
-            }
-
-            bar.innerHTML = swarmAgents.map(agent => {
-                const stateClass = agent.state.toLowerCase();
-                const typeLabel = agent.is_local ? 'Local' : 'Remote';
-                return `
-                    <div class="agent-card" data-agent-id="${agent.id}">
-                        <div class="agent-card-name" title="${agent.name}">${agent.name}</div>
-                        <div class="agent-card-state">
-                            <span class="state-dot ${stateClass}"></span>
-                            ${agent.state} &middot; ${typeLabel}
-                        </div>
-                        <div class="agent-card-stats">
-                            ${agent.jobs_completed} jobs &middot; ${(agent.success_rate * 100).toFixed(0)}% success
-                        </div>
-                    </div>
-                `;
-            }).join('');
+        function setWidth(id, val) {
+            const el = document.getElementById(id);
+            if (el) el.style.width = val;
         }
 
-        function renderSwarmTopology() {
-            const container = document.getElementById('swarm-topology');
-            const width = container.clientWidth || 350;
-            const height = container.clientHeight || 200;
+        function escHtml(str) {
+            const d = document.createElement('div');
+            d.textContent = str || '';
+            return d.innerHTML;
+        }
 
-            container.innerHTML = '';
+        function capitalize(s) {
+            return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+        }
 
-            if (swarmTopology.nodes.length === 0) {
-                container.innerHTML = '<div style="color: var(--text-secondary); font-size: 0.75rem; padding: 1rem; text-align: center;">No agents in topology</div>';
-                return;
-            }
+        // ---- Init ----
+        function init() {
+            fetchStatus();
+            connectWebSocket();
+            fetchJobs();
+            fetchSwarmData();
 
-            const svg = d3.select('#swarm-topology')
-                .append('svg')
-                .attr('width', width)
-                .attr('height', height);
+            // Periodic refresh
+            setInterval(fetchStatus, 10000);
+            setInterval(fetchPeers, 15000);
+            setInterval(fetchJobs, 20000);
+            setInterval(() => {
+                if (currentPage === 'agents') fetchSwarmData();
+            }, 8000);
 
-            const nodes = swarmTopology.nodes.map(n => ({
-                id: n.id,
-                name: n.name,
-                state: n.state.toLowerCase(),
-                is_local: n.is_local,
-                action_count: n.action_count,
-                success_rate: n.success_rate
-            }));
-
-            const links = swarmTopology.edges.map(e => ({
-                source: e.source,
-                target: e.target
-            }));
-
-            if (swarmSimulation) swarmSimulation.stop();
-
-            swarmSimulation = d3.forceSimulation(nodes)
-                .force('link', d3.forceLink(links).id(d => d.id).distance(80))
-                .force('charge', d3.forceManyBody().strength(-150))
-                .force('center', d3.forceCenter(width / 2, height / 2))
-                .force('collision', d3.forceCollide().radius(30));
-
-            const link = svg.append('g')
-                .selectAll('line')
-                .data(links)
-                .join('line')
-                .attr('class', 'swarm-link');
-
-            const node = svg.append('g')
-                .selectAll('g')
-                .data(nodes)
-                .join('g')
-                .attr('class', 'agent-node')
-                .call(d3.drag()
-                    .on('start', (event) => {
-                        if (!event.active) swarmSimulation.alphaTarget(0.3).restart();
-                        event.subject.fx = event.subject.x;
-                        event.subject.fy = event.subject.y;
-                    })
-                    .on('drag', (event) => {
-                        event.subject.fx = event.x;
-                        event.subject.fy = event.y;
-                    })
-                    .on('end', (event) => {
-                        if (!event.active) swarmSimulation.alphaTarget(0);
-                        event.subject.fx = null;
-                        event.subject.fy = null;
-                    }));
-
-            // Outer ring (local vs remote indicator)
-            node.append('circle')
-                .attr('r', 16)
-                .attr('fill', 'none')
-                .attr('class', d => d.is_local ? 'local-ring' : 'remote-ring');
-
-            // Inner circle (state color)
-            node.append('circle')
-                .attr('r', 12)
-                .attr('class', d => d.state);
-
-            // Agent initial letter
-            node.append('text')
-                .attr('text-anchor', 'middle')
-                .attr('dy', '0.35em')
-                .attr('fill', 'white')
-                .attr('font-size', '10px')
-                .attr('font-weight', 'bold')
-                .attr('pointer-events', 'none')
-                .text(d => d.name.charAt(0).toUpperCase());
-
-            // Name label below
-            node.append('text')
-                .attr('class', 'agent-name-label')
-                .attr('dy', 28)
-                .text(d => d.name.length > 12 ? d.name.slice(0, 10) + '..' : d.name);
-
-            swarmSimulation.on('tick', () => {
-                link
-                    .attr('x1', d => d.source.x)
-                    .attr('y1', d => d.source.y)
-                    .attr('x2', d => d.target.x)
-                    .attr('y2', d => d.target.y);
-
-                node.attr('transform', d => `translate(${d.x},${d.y})`);
+            // Render overview graph once DOM is laid out
+            requestAnimationFrame(() => {
+                setTimeout(renderOverviewGraph, 100);
             });
         }
 
-        function renderSwarmTimeline() {
-            const container = document.getElementById('swarm-timeline');
-            if (swarmTimeline.length === 0) {
-                container.innerHTML = '<div style="color: var(--text-secondary); font-size: 0.75rem; padding: 0.5rem;">No recent activity</div>';
-                return;
-            }
-
-            container.innerHTML = swarmTimeline.map(action => {
-                const time = new Date(action.timestamp);
-                const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                return `
-                    <div class="timeline-item">
-                        <span class="timeline-time">${timeStr}</span>
-                        <span class="timeline-agent">${action.agent_name}</span>
-                        <span class="timeline-type">${action.action_type}</span>
-                        <span class="timeline-action">${action.details}</span>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        // Initialize
-        connectWebSocket();
-        fetchStatus();
-        fetchPeers();
-        fetchJobs();
-        fetchSwarmData();
-
-        // Poll for updates
-        setInterval(fetchStatus, 5000);
-        setInterval(fetchPeers, 10000);
-        setInterval(fetchJobs, 5000);
-        setInterval(fetchSwarmData, 5000);
-
-        // Handle resize
-        window.addEventListener('resize', () => {
-            updateNetworkGraph();
-            if (document.getElementById('tab-swarm').classList.contains('active')) {
-                renderSwarmTopology();
-            }
-        });
+        init();
     </script>
 </body>
 </html>

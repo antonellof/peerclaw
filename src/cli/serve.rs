@@ -136,14 +136,39 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     let (inference_tx, mut inference_rx) = mpsc::channel::<InferenceRequest>(32);
     let (job_submit_tx, mut job_submit_rx) = mpsc::channel::<JobSubmitRequest>(32);
 
-    // Create web state for dashboard with full channel support
+    // Create swarm manager for agent visualization
+    let swarm_manager = Arc::new(crate::swarm::SwarmManager::new(
+        crate::swarm::SwarmManagerConfig {
+            event_buffer_size: 256,
+            max_action_history: 1000,
+            track_remote_peers: true,
+        },
+    ));
+
+    // Register the local node as an agent in the swarm
+    let local_agent_name = format!(
+        "node-{}",
+        &runtime.local_peer_id.to_string()[..8.min(runtime.local_peer_id.to_string().len())]
+    );
+    let _local_agent_id = swarm_manager.register_local_agent(
+        local_agent_name,
+        Default::default(),
+    );
+
+    // Create web state with all features: inference, jobs, and swarm
     let web_state = if config.web.enabled {
-        Some(crate::web::create_web_state_with_channels(
-            runtime.local_peer_id,
-            runtime.executor.resource_monitor(),
-            inference_tx,
-            job_submit_tx,
-        ))
+        Some(Arc::new(crate::web::WebState {
+            local_peer_id: runtime.local_peer_id,
+            resource_monitor: runtime.executor.resource_monitor(),
+            wallet_balance: Arc::new(tokio::sync::RwLock::new(0)),
+            connected_peers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            active_jobs: Arc::new(tokio::sync::RwLock::new(0)),
+            completed_jobs: Arc::new(tokio::sync::RwLock::new(0)),
+            job_list: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            inference_tx: Some(inference_tx),
+            job_submit_tx: Some(job_submit_tx),
+            swarm_manager: Some(swarm_manager.clone()),
+        }))
     } else {
         None
     };
@@ -202,6 +227,18 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                     if let Ok(db) = Database::open(&config.database.path) {
                         let _ = db.store_agent(&agent_id, &agent_state);
                     }
+
+                    // Register agent in swarm manager for visualization
+                    let profile = crate::swarm::AgentProfile::new(agent_name)
+                        .with_model(model);
+                    let swarm_agent_id = swarm_manager.register_local_agent(
+                        agent_name.to_string(),
+                        profile,
+                    );
+                    swarm_manager.update_agent_state(
+                        swarm_agent_id,
+                        crate::swarm::SwarmAgentState::Idle,
+                    );
 
                     tracing::info!(
                         "Agent '{}' loaded (model: {}, id: {})",

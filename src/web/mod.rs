@@ -99,7 +99,7 @@ pub fn create_router(state: Arc<WebState>) -> Router {
     Router::new()
         // Dashboard routes
         .route("/", get(index))
-        .route("/chat", get(chat_page))
+        .route("/chat", get(index)) // Redirect to main dashboard (has Chat tab)
         .route("/api/status", get(api_status))
         .route("/api/peers", get(api_peers))
         .route("/api/jobs", get(api_jobs))
