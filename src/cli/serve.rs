@@ -57,6 +57,10 @@ pub struct ServeArgs {
     /// Load and run an agent from a TOML spec file
     #[arg(long, value_name = "PATH")]
     pub agent: Option<std::path::PathBuf>,
+
+    /// Use Ollama for inference (connects to localhost:11434)
+    #[arg(long)]
+    pub ollama: bool,
 }
 
 pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
@@ -103,6 +107,11 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
 
     if let Some(cpu) = args.cpu {
         config.resources.cpu_cores = Some(cpu);
+    }
+
+    if args.ollama {
+        config.inference.use_ollama = true;
+        tracing::info!("Ollama inference enabled ({})", config.inference.ollama_url);
     }
 
     // Open database

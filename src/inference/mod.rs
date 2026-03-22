@@ -46,6 +46,7 @@ pub mod cache;
 pub mod distribution;
 pub mod gguf;
 pub mod model;
+pub mod ollama;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -66,6 +67,10 @@ pub use gguf::{AsyncGgufEngine, GgufBackend, GgufConfig, GgufEngine, GgufError, 
 pub use model::{ModelArchitecture, ModelId, ModelInfo, ModelRequirements, Quantization};
 
 /// Inference engine for running LLM models.
+///
+/// Supports two backends:
+/// 1. Local GGUF models loaded via llama.cpp
+/// 2. Ollama provider (HTTP API at localhost:11434) as fallback
 pub struct InferenceEngine {
     /// Model cache for loaded models
     cache: ModelCache,
@@ -75,6 +80,8 @@ pub struct InferenceEngine {
     config: InferenceConfig,
     /// Model registry (available but not necessarily loaded)
     registry: Arc<RwLock<ModelRegistry>>,
+    /// Ollama provider for models not available locally
+    ollama: ollama::OllamaProvider,
 }
 
 impl InferenceEngine {
@@ -85,12 +92,17 @@ impl InferenceEngine {
 
         let cache = ModelCache::new(config.max_loaded_models, config.max_memory_mb);
         let registry = Arc::new(RwLock::new(ModelRegistry::new()));
+        let ollama = ollama::OllamaProvider::new(ollama::OllamaConfig {
+            base_url: config.ollama_url.clone(),
+            timeout_secs: 120,
+        });
 
         let engine = Self {
             cache,
             models_dir: config.models_dir.clone(),
             config,
             registry,
+            ollama,
         };
 
         Ok(engine)
@@ -187,53 +199,100 @@ impl InferenceEngine {
     }
 
     /// Run inference on a model.
+    ///
+    /// Tries local GGUF models first. If the model isn't available locally
+    /// and Ollama is enabled (USE_OLLAMA=1 or OLLAMA_BASE_URL set), falls
+    /// back to Ollama's API.
     pub async fn generate(
         &self,
         request: &GenerateRequest,
     ) -> Result<GenerateResponse, InferenceError> {
         let start = Instant::now();
 
-        // Ensure model is loaded
-        if !self.cache.is_loaded(&request.model).await {
-            self.load_model(&request.model).await?;
+        // Try local GGUF model first
+        let has_local = self.registry.read().await.get(&request.model).is_some();
+
+        if has_local {
+            // Load model if not in cache
+            if !self.cache.is_loaded(&request.model).await {
+                self.load_model(&request.model).await?;
+            }
+
+            // Get model handle
+            let model = self
+                .cache
+                .get(&request.model)
+                .await
+                .ok_or_else(|| InferenceError::ModelNotFound(request.model.clone()))?;
+
+            let _guard = ModelUseGuard::new(&self.cache, &request.model);
+            let model_guard = model.read().await;
+
+            // TODO: Wire llama.cpp generate call here for local GGUF models
+            let elapsed = start.elapsed();
+            return Ok(GenerateResponse {
+                text: format!(
+                    "[Local GGUF inference not yet wired for '{}'. \
+                    Enable Ollama with USE_OLLAMA=1 or place .gguf files in {:?}]",
+                    request.model, self.models_dir
+                ),
+                tokens_generated: 0,
+                tokens_per_second: 0.0,
+                time_to_first_token_ms: elapsed.as_millis() as u64,
+                total_time_ms: elapsed.as_millis() as u64,
+                finish_reason: FinishReason::Stop,
+                model_id: model_guard.info.id.clone(),
+            });
         }
 
-        // Get model handle
-        let model = self
-            .cache
-            .get(&request.model)
-            .await
-            .ok_or_else(|| InferenceError::ModelNotFound(request.model.clone()))?;
+        // No local model found - try Ollama if enabled
+        if self.config.use_ollama {
+            tracing::info!(
+                model = %request.model,
+                prompt_len = request.prompt.len(),
+                "Routing to Ollama"
+            );
 
-        // Track that we're using the model
-        let _guard = ModelUseGuard::new(&self.cache, &request.model);
+            let result = self.ollama.generate(
+                &request.model,
+                &request.prompt,
+                request.max_tokens,
+                request.temperature,
+                None, // system prompt is baked into the prompt by caller
+            ).await.map_err(|e| InferenceError::GenerationFailed(e))?;
 
-        let model_guard = model.read().await;
+            return Ok(GenerateResponse {
+                text: result.text,
+                tokens_generated: result.tokens_generated,
+                tokens_per_second: result.tokens_per_second,
+                time_to_first_token_ms: 0,
+                total_time_ms: result.total_time_ms,
+                finish_reason: FinishReason::Stop,
+                model_id: result.model_used,
+            });
+        }
 
-        // TODO: Implement actual inference using llama.cpp
-        // For now, return a placeholder response
-        tracing::info!(
-            model = %request.model,
-            prompt_len = request.prompt.len(),
-            max_tokens = request.max_tokens,
-            "Would run inference"
-        );
+        // Neither local nor Ollama available
+        let no_gguf = std::fs::read_dir(&self.models_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().is_some_and(|ext| ext == "gguf"))
+                    .count()
+            })
+            .unwrap_or(0) == 0;
 
-        let elapsed = start.elapsed();
+        let hint = if no_gguf {
+            format!(
+                "Model not found: {}. No GGUF models in {:?}. \
+                To use Ollama: USE_OLLAMA=1 peerclaw serve --web 127.0.0.1:8080",
+                request.model, self.models_dir
+            )
+        } else {
+            format!("Model not found: {}", request.model)
+        };
 
-        Ok(GenerateResponse {
-            text: format!(
-                "[Inference placeholder for model '{}' with prompt: '{}...']",
-                request.model,
-                request.prompt.chars().take(50).collect::<String>()
-            ),
-            tokens_generated: 0,
-            tokens_per_second: 0.0,
-            time_to_first_token_ms: elapsed.as_millis() as u64,
-            total_time_ms: elapsed.as_millis() as u64,
-            finish_reason: FinishReason::Stop,
-            model_id: model_guard.info.id.clone(),
-        })
+        Err(InferenceError::ModelNotFound(hint))
     }
 
     /// Get memory usage stats.
@@ -325,6 +384,10 @@ pub struct InferenceConfig {
     pub context_size: u32,
     /// Batch size for inference
     pub batch_size: u32,
+    /// Use Ollama as a provider for models not found locally
+    pub use_ollama: bool,
+    /// Ollama base URL
+    pub ollama_url: String,
 }
 
 impl Default for InferenceConfig {
@@ -336,6 +399,10 @@ impl Default for InferenceConfig {
             gpu_layers: -1,        // Auto
             context_size: 4096,
             batch_size: 512,
+            use_ollama: std::env::var("OLLAMA_BASE_URL").is_ok()
+                || std::env::var("USE_OLLAMA").is_ok_and(|v| v == "1" || v == "true"),
+            ollama_url: std::env::var("OLLAMA_BASE_URL")
+                .unwrap_or_else(|_| "http://localhost:11434".to_string()),
         }
     }
 }

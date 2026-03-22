@@ -120,6 +120,8 @@ impl Runtime {
             gpu_layers: config.inference.gpu_layers,
             context_size: config.inference.context_size,
             batch_size: config.inference.batch_size,
+            use_ollama: config.inference.use_ollama,
+            ollama_url: config.inference.ollama_url.clone(),
         };
         let inference = Arc::new(InferenceEngine::new(inference_config)?);
 

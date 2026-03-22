@@ -206,6 +206,16 @@ pub struct InferenceConfig {
     pub batch_size: u32,
     /// Enable P2P model download
     pub enable_p2p_download: bool,
+    /// Use Ollama as inference provider (set USE_OLLAMA=1 or OLLAMA_BASE_URL)
+    #[serde(default)]
+    pub use_ollama: bool,
+    /// Ollama API base URL
+    #[serde(default = "default_ollama_url")]
+    pub ollama_url: String,
+}
+
+fn default_ollama_url() -> String {
+    "http://localhost:11434".to_string()
 }
 
 impl Default for InferenceConfig {
@@ -218,6 +228,10 @@ impl Default for InferenceConfig {
             context_size: 4096,
             batch_size: 512,
             enable_p2p_download: true,
+            use_ollama: std::env::var("USE_OLLAMA").is_ok_and(|v| v == "1" || v == "true")
+                || std::env::var("OLLAMA_BASE_URL").is_ok(),
+            ollama_url: std::env::var("OLLAMA_BASE_URL")
+                .unwrap_or_else(|_| "http://localhost:11434".to_string()),
         }
     }
 }
