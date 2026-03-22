@@ -1,6 +1,9 @@
 //! `peerclaw chat` command - Interactive AI chat with Claude-Code-style commands.
 
 use clap::Args;
+use rustyline::completion::{Completer, Pair};
+use rustyline::error::ReadlineError;
+use rustyline::{Config as RlConfig, Editor};
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
@@ -12,6 +15,58 @@ use crate::db::Database;
 use crate::executor::task::{ExecutionTask, ExecutionLocation, InferenceTask, TaskData};
 use crate::identity::NodeIdentity;
 use crate::runtime::Runtime;
+
+// ============================================================================
+// Rustyline Completer for Slash Commands
+// ============================================================================
+
+/// All slash commands available for tab completion
+const SLASH_COMMANDS: &[&str] = &[
+    "/help", "/clear", "/status", "/settings", "/history",
+    "/export", "/quit", "/exit",
+    "/model", "/temperature", "/max-tokens", "/system",
+    "/stream", "/distributed",
+    "/cost", "/balance", "/peers", "/jobs",
+    "/compact", "/doctor", "/config",
+    "/tools", "/tool info", "/tool exec", "/tool list",
+    "/skills", "/skill info", "/skill create", "/skill scan",
+];
+
+struct ChatHelper;
+
+impl rustyline::highlight::Highlighter for ChatHelper {}
+impl rustyline::hint::Hinter for ChatHelper {
+    type Hint = String;
+}
+impl rustyline::validate::Validator for ChatHelper {}
+impl rustyline::Helper for ChatHelper {}
+
+impl Completer for ChatHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &rustyline::Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        if !line.starts_with('/') {
+            return Ok((0, vec![]));
+        }
+
+        let prefix = &line[..pos];
+        let matches: Vec<Pair> = SLASH_COMMANDS
+            .iter()
+            .filter(|cmd| cmd.starts_with(prefix))
+            .map(|cmd| Pair {
+                display: cmd.to_string(),
+                replacement: cmd.to_string(),
+            })
+            .collect();
+
+        Ok((0, matches))
+    }
+}
 
 // ============================================================================
 // Chat Settings (Persistent)
@@ -490,14 +545,38 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
         start_time: Some(std::time::Instant::now()),
     };
 
-    // Chat loop
-    let stdin = io::stdin();
-    loop {
-        print!("\x1b[36mYou:\x1b[0m ");
-        io::stdout().flush()?;
+    // Initialize rustyline editor with history and tab completion
+    let rl_config = RlConfig::builder()
+        .max_history_size(1000)
+        .unwrap_or_default()
+        .auto_add_history(true)
+        .build();
+    let mut rl = Editor::with_config(rl_config)?;
+    rl.set_helper(Some(ChatHelper));
 
-        let mut input = String::new();
-        stdin.lock().read_line(&mut input)?;
+    // Load history from previous sessions
+    let history_path = bootstrap::base_dir().join("chat_history.txt");
+    let _ = rl.load_history(&history_path);
+
+    // Chat loop
+    loop {
+        let prompt = format!("\x1b[36m{}\x1b[0m \x1b[90m>\x1b[0m ", settings.model);
+        let readline = rl.readline(&prompt);
+        let input = match readline {
+            Ok(line) => line,
+            Err(ReadlineError::Interrupted) => {
+                println!("\x1b[33m(Ctrl+C to exit, or type /quit)\x1b[0m");
+                continue;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("\x1b[33mGoodbye!\x1b[0m");
+                break;
+            }
+            Err(err) => {
+                eprintln!("Input error: {}", err);
+                break;
+            }
+        };
         let input = input.trim();
 
         if input.is_empty() {
@@ -507,6 +586,7 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
         // Handle quit/exit without slash
         if input.eq_ignore_ascii_case("quit") || input.eq_ignore_ascii_case("exit") {
             println!("\x1b[33mGoodbye!\x1b[0m");
+            let _ = rl.save_history(&history_path);
             break;
         }
 
@@ -1134,7 +1214,8 @@ When helping users:
         println!();
     }
 
-    // Save settings on exit
+    // Save history and settings on exit
+    let _ = rl.save_history(&history_path);
     settings.save().ok();
 
     Ok(())

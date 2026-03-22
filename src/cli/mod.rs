@@ -62,7 +62,7 @@ pub enum Command {
     #[command(visible_alias = "m")]
     Models(models::ModelsArgs),
 
-    /// Manage P2P peer connections
+    /// Manage P2P peer connections (alias for 'network')
     #[command(visible_alias = "p")]
     Peers(peers::PeersArgs),
 
