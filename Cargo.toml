@@ -112,6 +112,7 @@ cron = "0.13"
 tempfile = "3"
 tokio-test = "0.4"
 pretty_assertions = "1"
+wat = "1"
 
 [features]
 default = ["local-inference"]

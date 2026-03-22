@@ -122,6 +122,10 @@ pub struct HostState {
     pub network_requests: u32,
     /// Filesystem operations
     pub fs_operations: u32,
+    /// Input JSON for the current execution
+    pub input_json: Option<String>,
+    /// Output JSON from the current execution
+    pub output_json: Option<String>,
 }
 
 impl HostState {
@@ -133,6 +137,8 @@ impl HostState {
             memory_used: 0,
             network_requests: 0,
             fs_operations: 0,
+            input_json: None,
+            output_json: None,
         }
     }
 
