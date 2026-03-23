@@ -106,12 +106,6 @@ impl Runtime {
             default_web_timeout_secs: config.executor.default_web_timeout_secs,
         };
 
-        // Create task executor
-        let executor = TaskExecutor::new(resource_monitor.clone(), router_config, executor_config)
-            .with_job_manager(job_manager.clone())
-            .with_network(network.clone());
-        let executor = Arc::new(executor);
-
         // Create inference engine
         let inference_config = InferenceConfig {
             models_dir: config.inference.models_dir.clone(),
@@ -124,6 +118,13 @@ impl Runtime {
             ollama_url: config.inference.ollama_url.clone(),
         };
         let inference = Arc::new(InferenceEngine::new(inference_config)?);
+
+        // Create task executor with inference engine wired in
+        let executor = TaskExecutor::new(resource_monitor.clone(), router_config, executor_config)
+            .with_job_manager(job_manager.clone())
+            .with_network(network.clone())
+            .with_inference_engine(inference.clone());
+        let executor = Arc::new(executor);
 
         // Create model distributor
         let model_distributor = Arc::new(ModelDistributor::new(config.inference.models_dir.clone()));

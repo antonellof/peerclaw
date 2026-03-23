@@ -53,6 +53,8 @@ pub struct TaskExecutor {
     gguf_engine: Arc<RwLock<GgufEngine>>,
     /// Currently loaded model handle
     loaded_model: Arc<RwLock<Option<GgufModelHandle>>>,
+    /// High-level inference engine (supports GGUF + Ollama)
+    inference_engine: Option<Arc<crate::inference::InferenceEngine>>,
 }
 
 impl TaskExecutor {
@@ -76,6 +78,7 @@ impl TaskExecutor {
             config,
             gguf_engine: Arc::new(RwLock::new(gguf_engine)),
             loaded_model: Arc::new(RwLock::new(None)),
+            inference_engine: None,
         }
     }
 
@@ -88,6 +91,12 @@ impl TaskExecutor {
     /// Set the network for P2P operations.
     pub fn with_network(mut self, network: Arc<RwLock<Network>>) -> Self {
         self.network = Some(network);
+        self
+    }
+
+    /// Set the high-level inference engine (supports GGUF + Ollama).
+    pub fn with_inference_engine(mut self, engine: Arc<crate::inference::InferenceEngine>) -> Self {
+        self.inference_engine = Some(engine);
         self
     }
 
@@ -217,7 +226,10 @@ impl TaskExecutor {
         self.execute_local(task_id, task, start).await
     }
 
-    /// Execute inference locally using GGUF model.
+    /// Execute inference locally.
+    ///
+    /// If a high-level `InferenceEngine` is set (supports GGUF + Ollama routing),
+    /// it is used. Otherwise falls back to the direct GGUF engine.
     async fn execute_inference_local(
         &self,
         task: InferenceTask,
@@ -235,73 +247,59 @@ impl TaskExecutor {
             model = %task.model,
             max_tokens = task.max_tokens,
             prompt_len = prompt.len(),
-            "Executing inference locally with GGUF model"
+            "Executing inference locally"
         );
 
-        // Find model file
-        let model_filename = format!("{}.gguf", task.model.to_lowercase().replace(" ", "-"));
-        let model_path = self.config.models_dir.join(&model_filename);
+        // --- High-level InferenceEngine path (GGUF + Ollama) ---
+        if let Some(engine) = &self.inference_engine {
+            let request = GenerateRequest {
+                model: task.model.clone(),
+                prompt,
+                max_tokens: task.max_tokens,
+                temperature: task.temperature,
+                top_p: 0.9,
+                stop_sequences: task.stop_sequences.clone(),
+            };
 
-        // If exact match doesn't exist, try to find a matching model
-        let actual_path = if model_path.exists() {
-            model_path
-        } else {
-            // Look for any gguf file that contains the model name
-            let mut found_path = None;
-            if let Ok(entries) = std::fs::read_dir(&self.config.models_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "gguf") {
-                        let filename = path.file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("");
-                        // Match if filename contains any part of requested model name
-                        if filename.to_lowercase().contains(&task.model.to_lowercase().replace("-", "").replace(" ", ""))
-                           || task.model.to_lowercase().replace("-", "").replace(" ", "").contains(&filename.to_lowercase().replace("-", "").replace(" ", "")) {
-                            found_path = Some(path);
-                            break;
-                        }
-                    }
-                }
-            }
+            let response = engine
+                .generate(&request)
+                .await
+                .map_err(|e| ExecutorError::InferenceError(e.to_string()))?;
 
-            // If still not found, try to use first available model
-            if found_path.is_none() {
-                if let Ok(entries) = std::fs::read_dir(&self.config.models_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().is_some_and(|e| e == "gguf") {
-                            found_path = Some(path);
-                            break;
-                        }
-                    }
-                }
-            }
+            tracing::info!(
+                tokens = response.tokens_generated,
+                tps = format!("{:.1}", response.tokens_per_second),
+                model_id = %response.model_id,
+                "Inference complete"
+            );
 
-            match found_path {
-                Some(p) => p,
-                None => {
-                    return Err(ExecutorError::InferenceError(format!(
-                        "Model not found: {}. No GGUF models in {}",
-                        task.model,
-                        self.config.models_dir.display()
-                    )));
-                }
-            }
-        };
+            let finish_reason = match response.finish_reason {
+                crate::inference::FinishReason::Stop => FinishReason::Stop,
+                crate::inference::FinishReason::Length => FinishReason::Length,
+                crate::inference::FinishReason::ContentFilter => FinishReason::ContentFilter,
+            };
+
+            return Ok(TaskData::Inference(InferenceResult {
+                text: response.text,
+                tokens_generated: response.tokens_generated,
+                tokens_per_second: response.tokens_per_second,
+                finish_reason,
+            }));
+        }
+
+        // --- Direct GGUF engine fallback ---
+        let actual_path = self.find_gguf_model(&task.model)?;
 
         tracing::info!(
             model_path = %actual_path.display(),
-            "Loading model for inference"
+            "Loading model for inference (direct GGUF)"
         );
 
-        // Load model if needed
         let engine = self.gguf_engine.read().await;
 
         let model_handle = engine.load(&actual_path)
             .map_err(|e| ExecutorError::InferenceError(format!("Failed to load model: {}", e)))?;
 
-        // Generate text
         let request = GenerateRequest {
             model: task.model.clone(),
             prompt,
@@ -320,7 +318,6 @@ impl TaskExecutor {
             "Inference complete"
         );
 
-        // Convert inference::FinishReason to executor::task::FinishReason
         let finish_reason = match response.finish_reason {
             crate::inference::FinishReason::Stop => FinishReason::Stop,
             crate::inference::FinishReason::Length => FinishReason::Length,
@@ -333,6 +330,49 @@ impl TaskExecutor {
             tokens_per_second: response.tokens_per_second,
             finish_reason,
         }))
+    }
+
+    /// Find a GGUF model file by name, with fuzzy matching and fallback.
+    fn find_gguf_model(&self, model_name: &str) -> Result<std::path::PathBuf, ExecutorError> {
+        let model_filename = format!("{}.gguf", model_name.to_lowercase().replace(" ", "-"));
+        let model_path = self.config.models_dir.join(&model_filename);
+
+        if model_path.exists() {
+            return Ok(model_path);
+        }
+
+        // Look for any gguf file that contains the model name
+        let norm = |s: &str| s.to_lowercase().replace('-', "").replace(' ', "");
+        let needle = norm(model_name);
+
+        let mut found_path = None;
+        if let Ok(entries) = std::fs::read_dir(&self.config.models_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "gguf") {
+                    let filename = path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("");
+                    let hay = norm(filename);
+                    if hay.contains(&needle) || needle.contains(&hay) {
+                        return Ok(path);
+                    }
+                    if found_path.is_none() {
+                        found_path = Some(path);
+                    }
+                }
+            }
+        }
+
+        // Fall back to first available gguf
+        match found_path {
+            Some(p) => Ok(p),
+            None => Err(ExecutorError::InferenceError(format!(
+                "Model not found: {}. No GGUF models in {}",
+                model_name,
+                self.config.models_dir.display()
+            ))),
+        }
     }
 
     /// Execute web fetch locally.
@@ -440,6 +480,10 @@ impl TaskExecutor {
 
     /// Execute inference locally with streaming - prints tokens directly to stdout.
     /// Returns the final InferenceResult after completion.
+    ///
+    /// When an `InferenceEngine` is set, delegates to it (non-streaming for now,
+    /// since the high-level engine doesn't yet expose a streaming API).
+    /// Otherwise uses the direct GGUF streaming path.
     pub async fn execute_inference_streaming_print(
         &self,
         task: InferenceTask,
@@ -464,59 +508,47 @@ impl TaskExecutor {
             "Executing streaming inference"
         );
 
-        // Find model file (same logic as execute_inference_local)
-        let model_filename = format!("{}.gguf", task.model.to_lowercase().replace(" ", "-"));
-        let model_path = self.config.models_dir.join(&model_filename);
+        // --- High-level InferenceEngine path ---
+        if let Some(engine) = &self.inference_engine {
+            let request = GenerateRequest {
+                model: task.model.clone(),
+                prompt,
+                max_tokens: task.max_tokens,
+                temperature: task.temperature,
+                top_p: 0.9,
+                stop_sequences: task.stop_sequences.clone(),
+            };
 
-        let actual_path = if model_path.exists() {
-            model_path
-        } else {
-            let mut found_path = None;
-            if let Ok(entries) = std::fs::read_dir(&self.config.models_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "gguf") {
-                        let filename = path.file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("");
-                        if filename.to_lowercase().contains(&task.model.to_lowercase().replace("-", "").replace(" ", ""))
-                           || task.model.to_lowercase().replace("-", "").replace(" ", "").contains(&filename.to_lowercase().replace("-", "").replace(" ", "")) {
-                            found_path = Some(path);
-                            break;
-                        }
-                    }
-                }
-            }
+            let response = engine
+                .generate(&request)
+                .await
+                .map_err(|e| ExecutorError::InferenceError(e.to_string()))?;
 
-            if found_path.is_none() {
-                if let Ok(entries) = std::fs::read_dir(&self.config.models_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().is_some_and(|e| e == "gguf") {
-                            found_path = Some(path);
-                            break;
-                        }
-                    }
-                }
-            }
+            // Print the full response (non-streaming for now)
+            print!("{}", response.text);
+            let _ = std::io::stdout().flush();
 
-            match found_path {
-                Some(p) => p,
-                None => {
-                    return Err(ExecutorError::InferenceError(format!(
-                        "Model not found: {}",
-                        task.model,
-                    )));
-                }
-            }
-        };
+            let finish_reason = match response.finish_reason {
+                crate::inference::FinishReason::Stop => FinishReason::Stop,
+                crate::inference::FinishReason::Length => FinishReason::Length,
+                crate::inference::FinishReason::ContentFilter => FinishReason::ContentFilter,
+            };
 
-        // Load model
+            return Ok(InferenceResult {
+                text: response.text,
+                tokens_generated: response.tokens_generated,
+                tokens_per_second: response.tokens_per_second,
+                finish_reason,
+            });
+        }
+
+        // --- Direct GGUF streaming fallback ---
+        let actual_path = self.find_gguf_model(&task.model)?;
+
         let engine = self.gguf_engine.read().await;
         let model_handle = engine.load(&actual_path)
             .map_err(|e| ExecutorError::InferenceError(format!("Failed to load model: {}", e)))?;
 
-        // Generate with streaming callback that prints directly
         let request = GenerateRequest {
             model: task.model.clone(),
             prompt,
@@ -526,7 +558,6 @@ impl TaskExecutor {
             stop_sequences: task.stop_sequences.clone(),
         };
 
-        // Create callback that prints tokens directly to stdout
         let callback: TokenCallback = Box::new(|token: &str| {
             print!("{}", token);
             let _ = std::io::stdout().flush();
