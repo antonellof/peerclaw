@@ -61,6 +61,18 @@ pub struct ServeArgs {
     /// Use Ollama for inference (connects to localhost:11434)
     #[arg(long)]
     pub ollama: bool,
+
+    /// Share local inference capacity with network peers (earn CLAW tokens)
+    #[arg(long)]
+    pub share_inference: bool,
+
+    /// Maximum inference requests per hour when sharing (default: 60)
+    #[arg(long, default_value = "60")]
+    pub provider_max_requests: u32,
+
+    /// Maximum tokens per day when sharing (default: 100000)
+    #[arg(long, default_value = "100000")]
+    pub provider_max_tokens_day: u64,
 }
 
 pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
@@ -114,6 +126,17 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         tracing::info!("Ollama inference enabled ({})", config.inference.ollama_url);
     }
 
+    if args.share_inference {
+        config.provider_sharing.enabled = true;
+        config.provider_sharing.max_requests_per_hour = args.provider_max_requests;
+        config.provider_sharing.max_tokens_per_day = args.provider_max_tokens_day;
+        tracing::info!(
+            "Provider sharing enabled (max {}/hr, {}/day tokens)",
+            args.provider_max_requests,
+            args.provider_max_tokens_day
+        );
+    }
+
     // Open database
     let database = Database::open(&config.database.path)?;
     tracing::info!("Database opened at {:?}", config.database.path);
@@ -164,64 +187,26 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         Default::default(),
     );
 
-    // Create web state with all features: inference, jobs, and swarm
-    let web_state = if config.web.enabled {
-        Some(Arc::new(crate::web::WebState {
-            local_peer_id: runtime.local_peer_id,
-            resource_monitor: runtime.executor.resource_monitor(),
-            wallet_balance: Arc::new(tokio::sync::RwLock::new(0)),
-            connected_peers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
-            active_jobs: Arc::new(tokio::sync::RwLock::new(0)),
-            completed_jobs: Arc::new(tokio::sync::RwLock::new(0)),
-            job_list: Arc::new(tokio::sync::RwLock::new(Vec::new())),
-            inference_tx: Some(inference_tx),
-            job_submit_tx: Some(job_submit_tx),
-            swarm_manager: Some(swarm_manager.clone()),
-        }))
-    } else {
-        None
-    };
-
-    // Start web server if enabled
-    if let Some(state) = web_state.clone() {
-        let web_addr = config.web.listen_addr;
-        tokio::spawn(async move {
-            if let Err(e) = crate::web::start_server(web_addr, state).await {
-                tracing::error!("Web server error: {}", e);
-            }
-        });
-        tracing::info!("Web UI available at http://{}", config.web.listen_addr);
-    }
-
-    // Load agent if specified
-    if let Some(agent_path) = &args.agent {
+    // Load agent if specified - creates a real AgentRuntime (before web state so we can pass it)
+    let agent_runtime: Option<Arc<tokio::sync::RwLock<crate::agent::AgentRuntime>>> = if let Some(agent_path) = &args.agent {
         if !agent_path.exists() {
             tracing::error!("Agent spec not found: {}", agent_path.display());
+            None
         } else {
-            match std::fs::read_to_string(agent_path) {
-                Ok(spec_content) => {
-                    let spec: toml::Value = toml::from_str(&spec_content)
-                        .unwrap_or_else(|e| {
-                            tracing::error!("Failed to parse agent spec: {}", e);
-                            toml::Value::Table(Default::default())
-                        });
+            match crate::agent::AgentSpec::from_file(agent_path) {
+                Ok(spec) => {
+                    let agent_name = spec.agent.name.clone();
+                    let model = spec.model.name.clone();
 
-                    let agent_name = spec
-                        .get("agent")
-                        .and_then(|a| a.get("name"))
-                        .and_then(|n| n.as_str())
-                        .unwrap_or("unnamed");
-
-                    let model = spec
-                        .get("model")
-                        .and_then(|m| m.get("name"))
-                        .and_then(|n| n.as_str())
-                        .unwrap_or("llama-3.2-3b");
-
-                    let agent_id = format!(
-                        "agent_{}",
-                        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
+                    // Create the agent runtime with real executor and tools
+                    let agent_rt = crate::agent::AgentRuntime::from_spec(
+                        &spec,
+                        runtime.executor.clone(),
+                        runtime.tools.clone(),
+                        runtime.local_peer_id.to_string(),
                     );
+
+                    let agent_id = agent_rt.config.id.clone();
 
                     // Store agent state in database
                     let agent_state = serde_json::json!({
@@ -238,10 +223,10 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                     }
 
                     // Register agent in swarm manager for visualization
-                    let profile = crate::swarm::AgentProfile::new(agent_name)
-                        .with_model(model);
+                    let profile = crate::swarm::AgentProfile::new(&agent_name)
+                        .with_model(&model);
                     let swarm_agent_id = swarm_manager.register_local_agent(
-                        agent_name.to_string(),
+                        agent_name.clone(),
                         profile,
                     );
                     swarm_manager.update_agent_state(
@@ -250,13 +235,56 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                     );
 
                     tracing::info!(
-                        "Agent '{}' loaded (model: {}, id: {})",
+                        "Agent '{}' loaded with runtime (model: {}, id: {})",
                         agent_name, model, agent_id
                     );
+
+                    Some(Arc::new(tokio::sync::RwLock::new(agent_rt)))
                 }
-                Err(e) => tracing::error!("Failed to read agent spec: {}", e),
+                Err(e) => {
+                    tracing::error!("Failed to load agent spec: {}", e);
+                    None
+                }
             }
         }
+    } else {
+        None
+    };
+
+    // Create agent task channel if agent runtime is available
+    let (agent_task_tx, mut agent_task_rx) = mpsc::channel::<crate::web::AgentTaskRequest>(32);
+    let agent_task_tx_opt = if agent_runtime.is_some() { Some(agent_task_tx) } else { None };
+
+    // Create web state with all features: inference, jobs, swarm, tasks, providers, agent
+    let web_state = if config.web.enabled {
+        Some(Arc::new(crate::web::WebState {
+            local_peer_id: runtime.local_peer_id,
+            resource_monitor: runtime.executor.resource_monitor(),
+            wallet_balance: Arc::new(tokio::sync::RwLock::new(0)),
+            connected_peers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            active_jobs: Arc::new(tokio::sync::RwLock::new(0)),
+            completed_jobs: Arc::new(tokio::sync::RwLock::new(0)),
+            job_list: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            inference_tx: Some(inference_tx),
+            job_submit_tx: Some(job_submit_tx),
+            swarm_manager: Some(swarm_manager.clone()),
+            task_store: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            provider_tracker: Some(runtime.provider_tracker.clone()),
+            agent_task_tx: agent_task_tx_opt,
+        }))
+    } else {
+        None
+    };
+
+    // Start web server if enabled
+    if let Some(state) = web_state.clone() {
+        let web_addr = config.web.listen_addr;
+        tokio::spawn(async move {
+            if let Err(e) = crate::web::start_server(web_addr, state).await {
+                tracing::error!("Web server error: {}", e);
+            }
+        });
+        tracing::info!("Web UI available at http://{}", config.web.listen_addr);
     }
 
     // Main loop
@@ -272,8 +300,8 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     // Interval for updating web state
     let mut stats_interval = tokio::time::interval(std::time::Duration::from_secs(2));
 
-    // Interval for advertising resources
-    let _advertise_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+    // Interval for advertising provider to network
+    let mut provider_advertise_interval = tokio::time::interval(std::time::Duration::from_secs(60));
 
     // Interval for auto-accepting bids on pending jobs (after bid collection period)
     let mut bid_accept_interval = tokio::time::interval(std::time::Duration::from_secs(3));
@@ -371,6 +399,58 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             let _ = request.response_tx.send(response);
         }
 
+        // Handle agent task requests from web UI
+        if let Ok(request) = agent_task_rx.try_recv() {
+            if let Some(agent_rt) = &agent_runtime {
+                tracing::info!(task_id = %request.task_id, "Agent starting task execution");
+                let mut agent = agent_rt.write().await;
+                agent.clear_log().await;
+
+                // Spawn a background log syncer that streams agent logs to the task store
+                let log_ref = agent.task_log.clone();
+                let store_ref = request.task_store.clone();
+                let tid = request.task_id.clone();
+                let log_syncer = tokio::spawn(async move {
+                    let mut last_count = 0usize;
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        let logs = log_ref.read().await;
+                        if logs.len() > last_count {
+                            let new_logs: Vec<String> = logs[last_count..].to_vec();
+                            last_count = logs.len();
+                            drop(logs);
+                            let mut tasks = store_ref.write().await;
+                            if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
+                                t.logs.extend(new_logs);
+                            }
+                        }
+                    }
+                });
+
+                let result = agent.run_task(&request.description).await;
+
+                // Stop the log syncer
+                log_syncer.abort();
+
+                // Final log sync
+                {
+                    let logs = agent.task_log.read().await;
+                    let mut tasks = request.task_store.write().await;
+                    if let Some(t) = tasks.iter_mut().find(|t| t.id == request.task_id) {
+                        t.logs = logs.clone();
+                    }
+                }
+
+                tracing::info!(
+                    task_id = %request.task_id,
+                    success = result.success,
+                    iterations = result.iterations,
+                    "Agent task completed, sending result"
+                );
+                let _ = request.response_tx.send(result);
+            }
+        }
+
         // Check for shutdown signal
         if tokio::signal::ctrl_c().now_or_never().is_some() {
             tracing::info!("Received Ctrl+C, shutting down...");
@@ -452,6 +532,13 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         // Auto-accept bids for our pending requests after bid collection period
         if bid_accept_interval.tick().now_or_never().is_some() {
             auto_accept_bids(&runtime, &mut job_creation_times).await;
+        }
+
+        // Periodically advertise our provider manifest
+        if provider_advertise_interval.tick().now_or_never().is_some() {
+            if let Err(e) = runtime.advertise_provider().await {
+                tracing::debug!("Provider advertisement: {}", e);
+            }
         }
     }
 

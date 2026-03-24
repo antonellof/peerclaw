@@ -41,6 +41,8 @@ use crate::inference::GenerateRequest;
 use crate::job::JobManager;
 use crate::p2p::Network;
 
+use self::remote::RemoteExecutor;
+
 /// Unified task executor with automatic local/network routing.
 #[allow(dead_code)]
 pub struct TaskExecutor {
@@ -55,6 +57,8 @@ pub struct TaskExecutor {
     loaded_model: Arc<RwLock<Option<GgufModelHandle>>>,
     /// High-level inference engine (supports GGUF + Ollama)
     inference_engine: Option<Arc<crate::inference::InferenceEngine>>,
+    /// Remote executor for P2P task offloading
+    remote_executor: Option<Arc<RemoteExecutor>>,
 }
 
 impl TaskExecutor {
@@ -79,6 +83,7 @@ impl TaskExecutor {
             gguf_engine: Arc::new(RwLock::new(gguf_engine)),
             loaded_model: Arc::new(RwLock::new(None)),
             inference_engine: None,
+            remote_executor: None,
         }
     }
 
@@ -97,6 +102,12 @@ impl TaskExecutor {
     /// Set the high-level inference engine (supports GGUF + Ollama).
     pub fn with_inference_engine(mut self, engine: Arc<crate::inference::InferenceEngine>) -> Self {
         self.inference_engine = Some(engine);
+        self
+    }
+
+    /// Set the remote executor for P2P task offloading.
+    pub fn with_remote_executor(mut self, remote: Arc<RemoteExecutor>) -> Self {
+        self.remote_executor = Some(remote);
         self
     }
 
@@ -196,33 +207,36 @@ impl TaskExecutor {
         &self,
         task_id: TaskId,
         task: ExecutionTask,
-        _peer_filter: PeerFilter,
+        peer_filter: PeerFilter,
         start: Instant,
     ) -> Result<TaskResult, ExecutorError> {
-        let _job_manager = self
-            .job_manager
-            .as_ref()
-            .ok_or(ExecutorError::NetworkUnavailable)?;
+        // Use the RemoteExecutor if available
+        if let Some(remote) = &self.remote_executor {
+            tracing::info!(
+                task_id = %task_id,
+                task_type = %task.task_type(),
+                "Offloading task to P2P network"
+            );
 
-        // TODO: Implement full remote execution flow:
-        // 1. Serialize task to JobRequest payload
-        // 2. Broadcast request via JobManager
-        // 3. Collect bids from network peers
-        // 4. Select best bid
-        // 5. Create escrow
-        // 6. Wait for result
-        // 7. Verify and settle
+            match remote.execute(task_id.clone(), task.clone(), peer_filter).await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    tracing::warn!(
+                        task_id = %task_id,
+                        error = %e,
+                        "Remote execution failed, falling back to local"
+                    );
+                    // Fall back to local execution
+                    return self.execute_local(task_id, task, start).await;
+                }
+            }
+        }
 
-        let _total_time_ms = start.elapsed().as_millis() as u64;
-
-        // For now, return a placeholder indicating remote execution isn't fully implemented
-        tracing::warn!(
+        // No remote executor available, fall back to local
+        tracing::debug!(
             task_id = %task_id,
-            task_type = %task.task_type(),
-            "Remote execution not yet implemented, falling back to local"
+            "No remote executor configured, executing locally"
         );
-
-        // Fallback to local for now
         self.execute_local(task_id, task, start).await
     }
 

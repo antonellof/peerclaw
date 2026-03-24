@@ -255,6 +255,7 @@ impl From<crate::p2p::Capability> for AgentCapability {
             crate::p2p::Capability::Storage => Self::Storage,
             crate::p2p::Capability::Relay => Self::Relay,
             crate::p2p::Capability::WebProxy => Self::WebAccess,
+            crate::p2p::Capability::LlmProvider => Self::Inference,
         }
     }
 }

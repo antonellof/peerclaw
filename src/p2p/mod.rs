@@ -4,10 +4,14 @@
 
 mod behaviour;
 mod events;
+pub mod provider;
+pub mod provider_tracker;
 mod resource;
 
 pub use behaviour::PeerclawdBehaviour;
 pub use events::NetworkEvent;
+pub use provider::{ProviderManifest, ModelOffering, ProviderBackend, ProviderRateLimits, ProviderSharingConfig};
+pub use provider_tracker::ProviderTracker;
 pub use resource::{Capability, ResourceManifest, Resources};
 
 use futures::StreamExt;

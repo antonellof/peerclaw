@@ -913,7 +913,9 @@
             <button class="nav-tab active" data-page="overview">Overview</button>
             <button class="nav-tab" data-page="agents">Agents</button>
             <button class="nav-tab" data-page="chat">Chat</button>
+            <button class="nav-tab" data-page="tasks">Tasks</button>
             <button class="nav-tab" data-page="jobs">Jobs</button>
+            <button class="nav-tab" data-page="providers">Providers</button>
             <button class="nav-tab" data-page="network">Network</button>
         </nav>
 
@@ -1123,6 +1125,117 @@
                 </div>
             </div>
         </div>
+
+        <!-- ---- Tasks ---- -->
+        <div class="page" id="page-tasks">
+            <div style="display:flex;gap:1rem;margin-bottom:1.25rem;align-items:flex-start">
+                <div class="panel" style="flex:1">
+                    <div class="panel-header">
+                        <span>Create Task</span>
+                    </div>
+                    <div class="panel-body">
+                        <div style="display:flex;flex-direction:column;gap:0.75rem">
+                            <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+                                <button class="task-template-btn" onclick="setTaskTemplate('research')" style="padding:0.375rem 0.75rem;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);cursor:pointer;font-size:0.75rem">Research</button>
+                                <button class="task-template-btn" onclick="setTaskTemplate('summarize')" style="padding:0.375rem 0.75rem;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);cursor:pointer;font-size:0.75rem">Summarize</button>
+                                <button class="task-template-btn" onclick="setTaskTemplate('code')" style="padding:0.375rem 0.75rem;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);cursor:pointer;font-size:0.75rem">Code Review</button>
+                                <button class="task-template-btn" onclick="setTaskTemplate('monitor')" style="padding:0.375rem 0.75rem;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);cursor:pointer;font-size:0.75rem">Monitor</button>
+                                <button class="task-template-btn" onclick="setTaskTemplate('analyze')" style="padding:0.375rem 0.75rem;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);cursor:pointer;font-size:0.75rem">Analyze</button>
+                                <button class="task-template-btn" onclick="setTaskTemplate('automate')" style="padding:0.375rem 0.75rem;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);cursor:pointer;font-size:0.75rem">Automate</button>
+                            </div>
+                            <textarea id="task-description" rows="3" placeholder="Describe your task... e.g. 'Research the latest Rust async patterns and summarize the key approaches'" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;padding:0.75rem;color:var(--text-primary);font-family:inherit;font-size:0.8125rem;resize:vertical"></textarea>
+                            <div style="display:flex;gap:0.75rem;align-items:center">
+                                <select id="task-type" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;padding:0.375rem 0.75rem;color:var(--text-primary);font-size:0.8125rem">
+                                    <option value="general">General</option>
+                                    <option value="research">Research</option>
+                                    <option value="code">Code</option>
+                                    <option value="monitor">Monitor</option>
+                                    <option value="analyze">Analyze</option>
+                                </select>
+                                <button onclick="createTask()" style="padding:0.375rem 1rem;background:var(--accent);border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:0.8125rem;font-weight:500">Run Task</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <span>Task History</span>
+                    <span id="task-count" style="font-size:0.75rem;color:var(--text-secondary)">0 tasks</span>
+                </div>
+                <div class="panel-body" id="task-list">
+                    <div class="empty-state">No tasks yet. Create one above.</div>
+                </div>
+            </div>
+            <!-- Task Detail Panel -->
+            <div id="task-detail-panel" style="display:none;margin-top:1rem" class="panel">
+                <div class="panel-header">
+                    <span id="task-detail-title">Task Detail</span>
+                    <button onclick="closeTaskDetail()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:1rem">&times;</button>
+                </div>
+                <div class="panel-body">
+                    <div id="task-detail-status" style="margin-bottom:0.75rem"></div>
+                    <div style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:0.375rem">Result</div>
+                    <div id="task-detail-result" style="background:var(--bg-tertiary);border-radius:6px;padding:1rem;margin-bottom:1rem;font-size:0.8125rem;white-space:pre-wrap;line-height:1.5;max-height:500px;overflow-y:auto;word-wrap:break-word"></div>
+                    <div style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:0.375rem">Execution Log</div>
+                    <div id="task-detail-logs" style="background:var(--bg-primary);border-radius:6px;padding:0.75rem;font-size:0.6875rem;font-family:'SF Mono',SFMono-Regular,monospace;max-height:300px;overflow-y:auto;line-height:1.6"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ---- Providers ---- -->
+        <div class="page" id="page-providers">
+            <div class="panel" style="margin-bottom:1.25rem">
+                <div class="panel-header">
+                    <span>Local Provider Settings</span>
+                </div>
+                <div class="panel-body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                        <div>
+                            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.375rem">Share Inference</label>
+                            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+                                <input type="checkbox" id="provider-enabled" onchange="updateProviderConfig()">
+                                <span style="font-size:0.8125rem">Enable LLM sharing with network</span>
+                            </label>
+                        </div>
+                        <div>
+                            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.375rem">Price Multiplier</label>
+                            <input type="number" id="provider-price" value="1.0" step="0.1" min="0.1" max="10" onchange="updateProviderConfig()" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;padding:0.375rem 0.75rem;color:var(--text-primary);font-size:0.8125rem;width:100%">
+                        </div>
+                        <div>
+                            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.375rem">Max Requests/Hour</label>
+                            <input type="number" id="provider-max-req" value="60" onchange="updateProviderConfig()" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;padding:0.375rem 0.75rem;color:var(--text-primary);font-size:0.8125rem;width:100%">
+                        </div>
+                        <div>
+                            <label style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.375rem">Max Tokens/Day</label>
+                            <input type="number" id="provider-max-tokens" value="100000" onchange="updateProviderConfig()" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;padding:0.375rem 0.75rem;color:var(--text-primary);font-size:0.8125rem;width:100%">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <span>Network Providers</span>
+                    <span id="provider-count" style="font-size:0.75rem;color:var(--text-secondary)">0 providers</span>
+                </div>
+                <div class="panel-body" id="provider-list">
+                    <div class="empty-state">No providers discovered yet. Other peers sharing inference will appear here.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Node Detail Slide-out Panel -->
+    <div id="node-detail-overlay" style="display:none;position:fixed;top:0;right:0;bottom:0;width:400px;background:var(--bg-secondary);border-left:1px solid var(--border);z-index:200;overflow-y:auto;box-shadow:-4px 0 20px rgba(0,0,0,0.3)">
+        <div style="padding:1rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <h3 id="node-detail-name" style="font-size:0.875rem;margin:0">Node Detail</h3>
+            <button onclick="closeNodeDetail()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:1.25rem">&times;</button>
+        </div>
+        <div style="padding:1rem">
+            <div id="node-detail-info" style="font-size:0.8125rem"></div>
+            <div id="node-detail-models" style="margin-top:1rem"></div>
+            <div id="node-detail-tasks" style="margin-top:1rem"></div>
+        </div>
     </div>
 
     <!-- ======== JavaScript ======== -->
@@ -1293,8 +1406,10 @@
                     .on('drag', (e) => { e.subject.fx = e.x; e.subject.fy = e.y; })
                     .on('end', (e) => { if (!e.active) networkSimulation.alphaTarget(0); e.subject.fx = null; e.subject.fy = null; }));
 
-            node.append('circle').attr('class', d => `node-circle ${d.type}`).attr('r', d => d.type === 'local' ? 22 : 16);
+            node.append('circle').attr('class', d => `node-circle ${d.type}`).attr('r', d => d.type === 'local' ? 22 : 16)
+                .style('cursor', 'pointer');
             node.append('text').attr('class', 'node-label').attr('dy', d => d.type === 'local' ? 38 : 30).text(d => d.label);
+            node.on('click', (event, d) => { event.stopPropagation(); showNodeDetail(d.id); });
 
             networkSimulation.on('tick', () => {
                 link.attr('x1', d => d.source.x).attr('y1', d => d.source.y).attr('x2', d => d.target.x).attr('y2', d => d.target.y);
@@ -1455,6 +1570,10 @@
                 .attr('class', 'agent-name-label')
                 .attr('dy', 28)
                 .text(d => d.name || d.id.slice(0, 8));
+
+            // Click handler for node detail
+            node.style('cursor', 'pointer')
+                .on('click', (event, d) => { event.stopPropagation(); showNodeDetail(d.id); });
 
             swarmSimulation.on('tick', () => {
                 link.attr('x1', d => d.source.x).attr('y1', d => d.source.y).attr('x2', d => d.target.x).attr('y2', d => d.target.y);
@@ -1725,6 +1844,278 @@
                 setTimeout(renderOverviewGraph, 100);
             });
         }
+
+        // ---- Tasks ----
+        let tasks = [];
+        let selectedTaskId = null;
+
+        function setTaskTemplate(type) {
+            const desc = document.getElementById('task-description');
+            const typeSelect = document.getElementById('task-type');
+            const templates = {
+                research: 'Research the following topic and provide a comprehensive summary: ',
+                summarize: 'Fetch and summarize the content at this URL: ',
+                code: 'Review this code for bugs, performance issues, and best practices: ',
+                monitor: 'Check this URL and report on its current status and content: ',
+                analyze: 'Analyze the following data and provide insights: ',
+                automate: 'Create a shell script that automates the following task: ',
+            };
+            desc.value = templates[type] || '';
+            typeSelect.value = type === 'summarize' || type === 'automate' ? 'general' : type;
+            desc.focus();
+        }
+
+        async function createTask() {
+            const desc = document.getElementById('task-description').value.trim();
+            if (!desc) return;
+            const type = document.getElementById('task-type').value;
+            try {
+                const res = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({task_type: type, description: desc, budget: 5.0})
+                });
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('task-description').value = '';
+                    loadTasks();
+                }
+            } catch(e) { console.error('Task creation failed:', e); }
+        }
+
+        async function loadTasks() {
+            try {
+                const res = await fetch('/api/tasks');
+                tasks = await res.json();
+                renderTasks();
+            } catch(e) {}
+        }
+
+        function escapeHtml(s) {
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function renderTasks() {
+            const el = document.getElementById('task-list');
+            document.getElementById('task-count').textContent = tasks.length + ' tasks';
+            if (!tasks.length) {
+                el.innerHTML = '<div class="empty-state">No tasks yet. Create one above.</div>';
+                return;
+            }
+            el.innerHTML = tasks.slice().reverse().map(t => {
+                const statusColors = {pending:'var(--warning)',running:'var(--accent)',completed:'var(--success)',failed:'var(--danger)'};
+                const color = statusColors[t.status] || 'var(--text-secondary)';
+                const isSelected = t.id === selectedTaskId;
+                const bg = isSelected ? 'var(--bg-tertiary)' : 'transparent';
+                const hasResult = t.result && t.result.length > 0;
+                const resultPreview = hasResult ? escapeHtml(t.result.substring(0, 400)) + (t.result.length > 400 ? '...' : '') : '';
+                const showResult = (t.status === 'completed' || t.status === 'failed') && hasResult;
+                const logCount = (t.logs || []).length;
+
+                return `<div onclick="showTaskDetail('${t.id}')" style="padding:0.75rem;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;background:${bg}" onmouseover="this.style.background='var(--bg-tertiary)'" onmouseout="this.style.background='${bg}'">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.375rem">
+                        <span style="font-size:0.8125rem;font-weight:500">${escapeHtml(t.description.substring(0,100))}${t.description.length>100?'...':''}</span>
+                        <span style="font-size:0.6875rem;padding:0.125rem 0.5rem;border-radius:10px;background:${color}22;color:${color};white-space:nowrap;margin-left:0.5rem">${t.status}${t.status==='running'?' ...':''}</span>
+                    </div>
+                    <div style="font-size:0.6875rem;color:var(--text-secondary)">${t.task_type} | ${t.iterations} iters | ${t.tokens_used} tokens${t.status==='running'?' | '+logCount+' logs':''}</div>
+                    ${showResult ? `<div style="font-size:0.8125rem;color:var(--text-primary);background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;padding:0.75rem;margin-top:0.5rem;white-space:pre-wrap;line-height:1.5;max-height:200px;overflow-y:auto">${resultPreview}</div>` : ''}
+                    ${t.status==='running' ? `<div style="font-size:0.75rem;color:var(--accent);margin-top:0.375rem;display:flex;align-items:center;gap:0.375rem"><span class="status-dot" style="width:6px;height:6px;background:var(--accent)"></span> Running... click to see live logs (${logCount} entries)</div>` : ''}
+                </div>`;
+            }).join('');
+
+            // Auto-open detail for the latest task
+            if (tasks.length && !selectedTaskId) {
+                const latest = tasks[tasks.length - 1];
+                showTaskDetail(latest.id);
+            }
+        }
+
+        async function showTaskDetail(id) {
+            selectedTaskId = id;
+            try {
+                const res = await fetch(`/api/tasks/${id}`);
+                const t = await res.json();
+                if (t.error) return; // task not found
+
+                document.getElementById('task-detail-panel').style.display = 'block';
+                document.getElementById('task-detail-title').textContent = t.description || 'Task';
+
+                const statusColors = {pending:'var(--warning)',running:'var(--accent)',completed:'var(--success)',failed:'var(--danger)'};
+                const color = statusColors[t.status] || 'var(--text-secondary)';
+                const statusIcon = t.status === 'running' ? ' ...' : '';
+                document.getElementById('task-detail-status').innerHTML = `
+                    <span style="padding:0.25rem 0.75rem;border-radius:10px;background:${color}22;color:${color};font-size:0.75rem">${t.status}${statusIcon}</span>
+                    <span style="font-size:0.75rem;color:var(--text-secondary);margin-left:0.5rem">${t.iterations} iterations, ${t.tokens_used} tokens</span>
+                    ${t.completed_at ? `<span style="font-size:0.6875rem;color:var(--text-secondary);margin-left:0.5rem">completed ${new Date(t.completed_at).toLocaleTimeString()}</span>` : ''}
+                `;
+
+                // Show full result (not truncated)
+                const resultEl = document.getElementById('task-detail-result');
+                if (t.result) {
+                    resultEl.textContent = t.result;
+                    resultEl.style.display = 'block';
+                } else if (t.status === 'running') {
+                    resultEl.innerHTML = '<span style="color:var(--accent)">Agent is working on this task...</span>';
+                    resultEl.style.display = 'block';
+                } else {
+                    resultEl.textContent = 'No result yet';
+                    resultEl.style.display = 'block';
+                }
+
+                // Show logs with auto-scroll
+                const logsEl = document.getElementById('task-detail-logs');
+                const logs = t.logs || [];
+                if (logs.length) {
+                    logsEl.innerHTML = logs.map(l => {
+                        // Color-code log entries
+                        let logColor = 'var(--text-secondary)';
+                        if (l.includes('[tool]')) logColor = 'var(--purple)';
+                        else if (l.includes('Error')) logColor = 'var(--danger)';
+                        else if (l.includes('Completed')) logColor = 'var(--success)';
+                        else if (l.includes('started') || l.includes('iteration')) logColor = 'var(--accent)';
+                        return `<div style="margin-bottom:0.25rem;color:${logColor}">${l}</div>`;
+                    }).join('');
+                    // Auto-scroll to bottom if task is running
+                    if (t.status === 'running') {
+                        logsEl.scrollTop = logsEl.scrollHeight;
+                    }
+                } else {
+                    logsEl.innerHTML = '<div style="color:var(--text-secondary)">No logs yet</div>';
+                }
+            } catch(e) { console.error('showTaskDetail error:', e); }
+        }
+
+        function closeTaskDetail() {
+            document.getElementById('task-detail-panel').style.display = 'none';
+            selectedTaskId = null;
+        }
+
+        // ---- Providers ----
+        async function loadProviders() {
+            try {
+                const [provRes, configRes] = await Promise.all([
+                    fetch('/api/providers'),
+                    fetch('/api/providers/config')
+                ]);
+                const providers = await provRes.json();
+                const config = await configRes.json();
+
+                document.getElementById('provider-enabled').checked = config.enabled;
+                document.getElementById('provider-price').value = config.price_multiplier;
+                document.getElementById('provider-max-req').value = config.max_requests_per_hour;
+                document.getElementById('provider-max-tokens').value = config.max_tokens_per_day;
+                document.getElementById('provider-count').textContent = providers.length + ' providers';
+
+                const el = document.getElementById('provider-list');
+                if (!providers.length) {
+                    el.innerHTML = '<div class="empty-state">No providers discovered yet. Other peers sharing inference will appear here.</div>';
+                    return;
+                }
+                el.innerHTML = providers.map(p => `<div style="padding:0.75rem;border-bottom:1px solid var(--border)">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:0.375rem">
+                        <span style="font-size:0.8125rem;font-weight:500;font-family:monospace">...${p.peer_id.slice(-12)}</span>
+                        <span style="font-size:0.6875rem;color:var(--text-secondary)">${p.max_requests_per_hour} req/hr</span>
+                    </div>
+                    ${p.models.map(m => `<div style="display:flex;justify-content:space-between;padding:0.25rem 0;font-size:0.75rem">
+                        <span style="color:var(--accent)">${m.model_name}</span>
+                        <span style="color:var(--text-secondary)">${m.price_per_1k_tokens} uPCLAW/1k | ctx:${m.context_size} | ${m.backend}</span>
+                    </div>`).join('')}
+                </div>`).join('');
+            } catch(e) {}
+        }
+
+        async function updateProviderConfig() {
+            try {
+                await fetch('/api/providers/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        enabled: document.getElementById('provider-enabled').checked,
+                        price_multiplier: parseFloat(document.getElementById('provider-price').value),
+                        max_requests_per_hour: parseInt(document.getElementById('provider-max-req').value),
+                        max_tokens_per_day: parseInt(document.getElementById('provider-max-tokens').value),
+                    })
+                });
+            } catch(e) {}
+        }
+
+        // ---- Node Detail (clickable topology nodes) ----
+        function showNodeDetail(nodeId) {
+            document.getElementById('node-detail-overlay').style.display = 'block';
+            fetch(`/api/nodes/${nodeId}`).then(r => r.json()).then(n => {
+                document.getElementById('node-detail-name').textContent = n.name;
+                document.getElementById('node-detail-info').innerHTML = `
+                    <div style="margin-bottom:0.75rem">
+                        <div style="font-size:0.6875rem;color:var(--text-secondary);margin-bottom:0.25rem">Peer ID</div>
+                        <div style="font-family:monospace;font-size:0.75rem;word-break:break-all">${n.id}</div>
+                    </div>
+                    <div style="display:flex;gap:1rem;margin-bottom:0.75rem">
+                        <div><span style="font-size:0.6875rem;color:var(--text-secondary)">State</span><br><span style="color:${n.state==='idle'?'var(--success)':'var(--accent)'}">${n.state}</span></div>
+                        <div><span style="font-size:0.6875rem;color:var(--text-secondary)">Actions</span><br>${n.action_count}</div>
+                        <div><span style="font-size:0.6875rem;color:var(--text-secondary)">Success</span><br>${(n.success_rate*100).toFixed(0)}%</div>
+                        <div><span style="font-size:0.6875rem;color:var(--text-secondary)">Local</span><br>${n.is_local?'Yes':'No'}</div>
+                    </div>`;
+
+                const modelsEl = document.getElementById('node-detail-models');
+                if (n.models && n.models.length) {
+                    modelsEl.innerHTML = '<div style="font-size:0.75rem;font-weight:600;margin-bottom:0.5rem">Available Models</div>' +
+                        n.models.map(m => `<div style="padding:0.375rem 0;border-bottom:1px solid var(--border);font-size:0.75rem">
+                            <span style="color:var(--accent)">${m.model_name}</span>
+                            <span style="color:var(--text-secondary);float:right">${m.price_per_1k_tokens} uPCLAW/1k</span>
+                        </div>`).join('');
+                } else {
+                    modelsEl.innerHTML = '';
+                }
+
+                const tasksEl = document.getElementById('node-detail-tasks');
+                if (n.tasks && n.tasks.length) {
+                    tasksEl.innerHTML = '<div style="font-size:0.75rem;font-weight:600;margin-bottom:0.5rem">Tasks</div>' +
+                        n.tasks.slice(0,5).map(t => `<div style="padding:0.375rem 0;border-bottom:1px solid var(--border);font-size:0.75rem">
+                            <span>${t.description.substring(0,40)}...</span>
+                            <span style="color:${t.status==='completed'?'var(--success)':'var(--warning)'};float:right">${t.status}</span>
+                        </div>`).join('');
+                } else {
+                    tasksEl.innerHTML = '';
+                }
+            }).catch(() => {});
+        }
+
+        function closeNodeDetail() {
+            document.getElementById('node-detail-overlay').style.display = 'none';
+        }
+
+        // Refresh tasks/providers when switching tabs
+        const origSwitchPage = switchPage;
+        switchPage = function(page) {
+            origSwitchPage(page);
+            if (page === 'tasks') { loadTasks(); }
+            if (page === 'providers') { loadProviders(); }
+        };
+
+        // Auto-refresh tasks - faster when tasks are running
+        let taskRefreshInterval = null;
+        function startTaskRefresh() {
+            if (taskRefreshInterval) clearInterval(taskRefreshInterval);
+            const hasRunning = tasks.some(t => t.status === 'running');
+            const interval = hasRunning ? 1000 : 3000; // 1s when running, 3s otherwise
+            taskRefreshInterval = setInterval(async () => {
+                if (currentPage === 'tasks') {
+                    await loadTasks();
+                    if (selectedTaskId) showTaskDetail(selectedTaskId);
+                }
+            }, interval);
+        }
+        startTaskRefresh();
+
+        // Re-check refresh speed when tasks change
+        const origLoadTasks = loadTasks;
+        loadTasks = async function() {
+            await origLoadTasks();
+            startTaskRefresh();
+        };
+
+        // Also load tasks on startup
+        loadTasks();
 
         init();
     </script>

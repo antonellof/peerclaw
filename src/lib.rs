@@ -3,6 +3,7 @@
 //! A fully decentralized, peer-to-peer network where autonomous AI agents
 //! collaborate, share resources, and transact using a native token economy.
 
+pub mod agent;
 pub mod bootstrap;
 pub mod channel;
 pub mod channels;

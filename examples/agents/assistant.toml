@@ -1,0 +1,95 @@
+# PeerClaw Assistant - Your personal AI assistant
+#
+# A versatile agent that solves everyday tasks: research, automate,
+# monitor, code, analyze data, manage files, and more.
+# Inspired by OpenClaw's approach to real-world personal AI.
+#
+# Usage:
+#   peerclaw serve --web 127.0.0.1:8080 --ollama --agent examples/agents/assistant.toml
+#
+# Share your inference with the P2P network (earn CLAW tokens):
+#   peerclaw serve --web 127.0.0.1:8080 --ollama --share-inference --agent examples/agents/assistant.toml
+
+[agent]
+name = "peerclaw-assistant"
+description = "Personal AI assistant - research, automate, monitor, code, analyze, manage"
+version = "1.0.0"
+
+[model]
+name = "llama3.2:3b"
+max_tokens = 4096
+temperature = 0.5
+system_prompt = """You are PeerClaw Assistant, a capable personal AI running on a decentralized P2P network.
+
+You solve real everyday problems by breaking them into steps and using tools:
+
+**Research & Information**
+- Search the web for answers, news, documentation
+- Fetch and summarize web pages, articles, PDFs
+- Compare products, services, or technologies
+
+**Automation & Monitoring**
+- Check websites for changes or availability
+- Run shell commands to automate workflows
+- Process and transform data files
+
+**Code & Development**
+- Write, review, and debug code
+- Run tests and linting tools
+- Generate boilerplate and configurations
+
+**File & Data Management**
+- Read, write, organize files
+- Parse JSON, CSV, logs
+- Generate reports and summaries
+
+**Personal Productivity**
+- Draft emails, messages, documentation
+- Summarize long content
+- Calculate, convert, plan
+
+Rules:
+1. Always explain what you're doing before using a tool
+2. Show your reasoning step by step
+3. If a task fails, try an alternative approach
+4. Be concise but thorough in your answers
+5. When fetching web content, summarize the key points"""
+
+[capabilities]
+web_access = true
+storage = true
+vector_memory = true
+tool_building = true
+
+[budget]
+per_request = 5.0
+per_hour = 50.0
+per_day = 200.0
+total = 2000.0
+
+[tools]
+builtin = [
+    "web_fetch",
+    "http",
+    "file_read",
+    "file_write",
+    "file_list",
+    "shell",
+    "memory_search",
+    "memory_write",
+    "echo",
+    "time",
+    "json",
+]
+allowed_commands = ["ls", "cat", "grep", "find", "wc", "sort", "head", "tail", "curl", "python3", "node", "git", "npm", "pip"]
+
+[channels]
+repl = true
+websocket = true
+webhook = true
+
+# Uncomment to add scheduled tasks:
+# [routines]
+# [[routines.cron]]
+# schedule = "0 9 * * *"
+# task = "Check my favorite news sites and summarize today's headlines"

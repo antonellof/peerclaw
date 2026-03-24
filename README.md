@@ -74,8 +74,23 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **`/v1/chat/completions`** — Full chat completions endpoint
 - **`/v1/models`** — List available models
 
+### Agent Runtime
+- **ReAct loop** — LLM plans, calls tools, iterates until task is solved
+- **Budget enforcement** — Per-request, hourly, daily, and total spend limits
+- **Tool execution** — Agents use builtin tools (web_fetch, shell, file I/O, etc.)
+- **TOML agent specs** — Define agents with model, tools, budget, and capabilities
+- **Personal assistant** — Research, code, automate, monitor, summarize, analyze
+
+### LLM Provider Sharing
+- **Share your LLM** — Let other peers use your Ollama/GGUF models for CLAW tokens
+- **Rate limits** — Configure max requests/hour, tokens/day, concurrent requests
+- **Auto-discovery** — Providers advertise via GossipSub, tracked network-wide
+- **Pricing** — Set your own price multiplier on the base token economy rates
+
 ### Web Dashboard
-- **Network topology** — Visual graph of connected peers
+- **Network topology** — Interactive D3.js graph, click nodes to see details
+- **Task management** — Create, monitor, and view results of agent tasks
+- **Provider settings** — Configure LLM sharing, view discovered network providers
 - **Resource monitoring** — Real-time CPU, RAM, GPU stats
 - **Job tracking** — Active and completed jobs with peer IDs
 - **AI Chat interface** — Send prompts via browser
@@ -119,7 +134,87 @@ curl -L -o ~/.peerclaw/models/llama-3.2-1b-instruct-q4_k_m.gguf \
 
 # Start peer node with web dashboard
 ./target/release/peerclaw serve --web 127.0.0.1:8080
+
+# Start with Ollama + personal assistant agent
+./target/release/peerclaw serve --web 127.0.0.1:8080 --ollama --agent examples/agents/assistant.toml
+
+# Share your LLM with the P2P network (earn CLAW tokens)
+./target/release/peerclaw serve --web 127.0.0.1:8080 --ollama --share-inference --agent examples/agents/assistant.toml
 ```
+
+---
+
+## Agent Examples
+
+### Personal Assistant
+
+The built-in assistant agent (`examples/agents/assistant.toml`) can solve everyday tasks:
+
+```bash
+peerclaw serve --web 127.0.0.1:8080 --ollama --agent examples/agents/assistant.toml
+```
+
+Then open the dashboard at http://127.0.0.1:8080, go to **Tasks**, and try:
+
+| Task | What it does |
+|------|-------------|
+| "Research the latest Rust async patterns and summarize" | Web search + summarize |
+| "Fetch https://news.ycombinator.com and list the top 5 stories" | Web fetch + extract |
+| "List all .rs files in the current directory" | Shell tool execution |
+| "Read my Cargo.toml and explain the dependencies" | File read + analysis |
+| "What time is it?" | Quick tool call |
+
+### Custom Agent Specs
+
+Create your own agent in TOML:
+
+```toml
+# my-agent.toml
+[agent]
+name = "code-reviewer"
+description = "Reviews code for bugs and best practices"
+
+[model]
+name = "llama3.2:3b"
+max_tokens = 4096
+temperature = 0.3
+system_prompt = "You are an expert code reviewer. Analyze code for bugs, security issues, and suggest improvements."
+
+[capabilities]
+storage = true
+
+[budget]
+per_request = 3.0
+total = 500.0
+
+[tools]
+builtin = ["file_read", "file_list", "shell"]
+allowed_commands = ["grep", "wc", "find", "cat"]
+
+[channels]
+websocket = true
+```
+
+```bash
+peerclaw serve --web 127.0.0.1:8080 --ollama --agent my-agent.toml
+```
+
+### Provider Sharing
+
+Share your LLM capacity with the P2P network and earn CLAW tokens:
+
+```bash
+# Share with default limits (60 req/hr, 100k tokens/day)
+peerclaw serve --ollama --share-inference
+
+# Custom limits
+peerclaw serve --ollama --share-inference --provider-max-requests 120 --provider-max-tokens-day 500000
+
+# Full setup: web + agent + provider sharing
+peerclaw serve --web 127.0.0.1:8080 --ollama --share-inference --agent examples/agents/assistant.toml
+```
+
+Other peers on the network can then use your LLM by paying CLAW tokens. Configure pricing in the **Providers** tab of the dashboard.
 
 ---
 
@@ -158,11 +253,14 @@ peerclaw pull <model>             # Alias for download
 ### Network
 
 ```bash
-peerclaw serve                    # Start peer node
-peerclaw serve --web 0.0.0.0:8080 # With web dashboard
-peerclaw serve --provider         # Accept jobs from network
-peerclaw peers list               # Show connected peers
-peerclaw network status           # Network health status
+peerclaw serve                                # Start peer node
+peerclaw serve --web 0.0.0.0:8080             # With web dashboard
+peerclaw serve --ollama                       # Use Ollama for inference
+peerclaw serve --ollama --agent agent.toml    # With agent runtime
+peerclaw serve --ollama --share-inference     # Share LLM with network
+peerclaw serve --provider                     # Accept jobs from network
+peerclaw peers list                           # Show connected peers
+peerclaw network status                       # Network health status
 ```
 
 ### Vector Memory
@@ -294,7 +392,7 @@ policy_enforcement = true
 
 ## Roadmap
 
-### Current (v0.2)
+### v0.2 — Core Platform
 - [x] P2P networking with libp2p
 - [x] GGUF inference with GPU acceleration
 - [x] Job marketplace protocol
@@ -302,18 +400,32 @@ policy_enforcement = true
 - [x] OpenAI-compatible API
 - [x] Claude-Code-style CLI
 - [x] Web dashboard
-- [x] Batch aggregation
 - [x] Vector memory (vectX)
 - [x] Skills system (SKILL.md)
-- [x] Safety layer (leak detection, injection defense)
+- [x] Safety layer
 - [x] MCP integration
-- [x] Multi-platform messaging
 
-### Next (v0.3)
+### v0.3 — Production Polish
+- [x] Swarm agent visualization (D3.js topology)
+- [x] WASM sandbox with host bindings
+- [x] Ed25519 signatures on job messages
+- [x] Rustyline chat CLI
+- [x] `peerclaw doctor` diagnostics
+
+### v0.4 — Agents & Provider Sharing (Current)
+- [x] Agent Runtime with ReAct loop (plan → tool call → iterate)
+- [x] LLM Provider Sharing protocol (share Ollama/GGUF over P2P)
+- [x] Remote execution wired (RemoteExecutor → P2P job flow)
+- [x] Interactive dashboard: Tasks, Providers, clickable topology nodes
+- [x] Budget enforcement (per-request/hour/day/total)
+- [x] Task management API
+- [x] Example agents (assistant, coder, researcher, monitor, data-analyst)
+
+### Next (v0.5)
 - [ ] Distributed inference (pipeline parallelism)
-- [ ] Dynamic WASM tool building
 - [ ] Multi-agent collaboration
 - [ ] Reputation system
+- [ ] Context compaction for long conversations
 
 ### Future (v1.0)
 - [ ] On-chain settlement
@@ -323,15 +435,4 @@ policy_enforcement = true
 
 ---
 
-## Documentation
-
-- [Architecture](docs/ARCHITECTURE.md)
-- [P2P Protocol](docs/P2P_PROTOCOL.md)
-- [Token Economy](docs/TOKENS.md)
-- [Security](docs/SECURITY.md)
-- [Agent Spec](docs/AGENTS.md)
-- [Quickstart](docs/QUICKSTART.md)
-
----
-
-*v0.2 — March 2026*
+*v0.4 — March 2026*

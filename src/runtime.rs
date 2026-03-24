@@ -12,7 +12,7 @@ use crate::db::Database;
 use crate::executor::{
     MonitorConfig, ResourceMonitor, RouterConfig, TaskExecutor,
 };
-use crate::executor::remote::JobProvider;
+use crate::executor::remote::{JobProvider, RemoteExecutor, RemoteExecutorConfig};
 use crate::executor::task::{ExecutionTask, InferenceTask, TaskResult, WebFetchTask};
 use crate::identity::NodeIdentity;
 use crate::inference::{
@@ -20,7 +20,7 @@ use crate::inference::{
     BatchAggregator, BatchConfig, BatchResponse, BatchError, BatchStats,
 };
 use crate::job::{JobManager, PricingStrategy, network as job_network};
-use crate::p2p::Network;
+use crate::p2p::{Network, ProviderTracker};
 use crate::skills::SkillRegistry;
 use crate::tools::ToolRegistry;
 use crate::wallet::{Wallet, WalletConfig};
@@ -45,12 +45,16 @@ pub struct Runtime {
     pub model_distributor: Arc<ModelDistributor>,
     /// Job provider for handling incoming requests
     pub job_provider: Arc<JobProvider>,
+    /// Remote executor for P2P task offloading
+    pub remote_executor: Arc<RemoteExecutor>,
     /// Batch aggregator for multi-agent inference
     pub batch_aggregator: Arc<BatchAggregator>,
     /// Tool registry
     pub tools: Arc<ToolRegistry>,
     /// Skill registry
     pub skills: Arc<SkillRegistry>,
+    /// Provider tracker for discovering LLM providers on the network
+    pub provider_tracker: Arc<ProviderTracker>,
     /// Local peer ID
     pub local_peer_id: PeerId,
     /// Configuration
@@ -119,13 +123,6 @@ impl Runtime {
         };
         let inference = Arc::new(InferenceEngine::new(inference_config)?);
 
-        // Create task executor with inference engine wired in
-        let executor = TaskExecutor::new(resource_monitor.clone(), router_config, executor_config)
-            .with_job_manager(job_manager.clone())
-            .with_network(network.clone())
-            .with_inference_engine(inference.clone());
-        let executor = Arc::new(executor);
-
         // Create model distributor
         let model_distributor = Arc::new(ModelDistributor::new(config.inference.models_dir.clone()));
 
@@ -135,6 +132,22 @@ impl Runtime {
             network.clone(),
             local_peer_id,
         ));
+
+        // Create remote executor for P2P task offloading
+        let remote_executor = Arc::new(RemoteExecutor::new(
+            job_manager.clone(),
+            network.clone(),
+            local_peer_id,
+            RemoteExecutorConfig::default(),
+        ));
+
+        // Create task executor with inference engine and remote executor wired in
+        let executor = TaskExecutor::new(resource_monitor.clone(), router_config, executor_config)
+            .with_job_manager(job_manager.clone())
+            .with_network(network.clone())
+            .with_inference_engine(inference.clone())
+            .with_remote_executor(remote_executor.clone());
+        let executor = Arc::new(executor);
 
         // Create batch aggregator for multi-agent inference
         let batch_config = BatchConfig {
@@ -163,6 +176,13 @@ impl Runtime {
             Err(e) => tracing::warn!(error = %e, "Failed to scan skills directory"),
         }
 
+        // Create provider tracker for network LLM provider discovery
+        let provider_tracker = Arc::new(ProviderTracker::new(config.provider_sharing.clone()));
+
+        if config.provider_sharing.enabled {
+            tracing::info!("LLM provider sharing enabled");
+        }
+
         Ok(Self {
             identity,
             database,
@@ -173,21 +193,85 @@ impl Runtime {
             inference,
             model_distributor,
             job_provider,
+            remote_executor,
             batch_aggregator,
             tools,
             skills,
+            provider_tracker,
             local_peer_id,
             config,
         })
     }
 
-    /// Subscribe to job-related GossipSub topics.
+    /// Subscribe to job-related and provider GossipSub topics.
     pub async fn subscribe_to_job_topics(&self) -> anyhow::Result<()> {
         let mut network = self.network.write().await;
         network.subscribe(job_network::topics::JOB_REQUESTS)?;
         network.subscribe(job_network::topics::JOB_BIDS)?;
         network.subscribe(job_network::topics::JOB_STATUS)?;
-        tracing::info!("Subscribed to job marketplace topics");
+        network.subscribe(crate::p2p::provider::PROVIDER_TOPIC)?;
+        tracing::info!("Subscribed to job marketplace and provider topics");
+        Ok(())
+    }
+
+    /// Build and broadcast our provider manifest to the network.
+    pub async fn advertise_provider(&self) -> anyhow::Result<()> {
+        if !self.config.provider_sharing.enabled {
+            return Ok(());
+        }
+
+        // Build model offerings from local inference engine
+        let models = self.inference.available_models().await;
+        let mut offerings = Vec::new();
+
+        for model_info in models {
+            offerings.push(crate::p2p::ModelOffering {
+                model_name: model_info.name.clone(),
+                context_size: model_info.context_length,
+                price_per_1k_tokens: (self.config.economy.inference_price_per_1k as f64
+                    * self.config.provider_sharing.price_multiplier) as u64,
+                max_tokens_per_request: model_info.context_length,
+                quantization: Some(format!("{:?}", model_info.quantization)),
+                backend: if self.config.inference.use_ollama {
+                    crate::p2p::ProviderBackend::Ollama
+                } else {
+                    crate::p2p::ProviderBackend::Gguf
+                },
+            });
+        }
+
+        if offerings.is_empty() {
+            return Ok(());
+        }
+
+        let rate_limits = crate::p2p::ProviderRateLimits {
+            max_requests_per_hour: self.config.provider_sharing.max_requests_per_hour,
+            max_tokens_per_day: self.config.provider_sharing.max_tokens_per_day,
+            max_concurrent_requests: self.config.provider_sharing.max_concurrent_requests,
+        };
+
+        let mut manifest = crate::p2p::ProviderManifest::new(
+            self.local_peer_id.to_string(),
+            offerings,
+            rate_limits,
+        );
+
+        // Sign the manifest
+        let identity = self.identity.clone();
+        manifest.sign(|data| identity.sign(data).to_bytes().to_vec());
+
+        // Broadcast via GossipSub
+        let data = rmp_serde::to_vec(&manifest)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize provider manifest: {}", e))?;
+
+        let mut network = self.network.write().await;
+        network.publish(crate::p2p::provider::PROVIDER_TOPIC, data)?;
+
+        tracing::info!(
+            models = manifest.models.len(),
+            "Advertised provider manifest to network"
+        );
+
         Ok(())
     }
 
@@ -350,6 +434,19 @@ impl Runtime {
                             );
                         }
                         _ => {}
+                    }
+                }
+            }
+            t if t == crate::p2p::provider::PROVIDER_TOPIC => {
+                if let Ok(manifest) = rmp_serde::from_slice::<crate::p2p::ProviderManifest>(&data) {
+                    // Don't track our own advertisements
+                    if manifest.peer_id != self.local_peer_id.to_string() {
+                        tracing::info!(
+                            peer = %manifest.peer_id,
+                            models = manifest.models.len(),
+                            "Received provider advertisement"
+                        );
+                        self.provider_tracker.update_provider(manifest).await;
                     }
                 }
             }

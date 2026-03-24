@@ -152,6 +152,9 @@ pub enum Capability {
 
     /// Can provide web access (HTTP 402 proxy)
     WebProxy,
+
+    /// Can share LLM inference capacity with network peers
+    LlmProvider,
 }
 
 impl std::fmt::Display for Capability {
@@ -162,6 +165,7 @@ impl std::fmt::Display for Capability {
             Capability::Storage => write!(f, "storage"),
             Capability::Relay => write!(f, "relay"),
             Capability::WebProxy => write!(f, "web-proxy"),
+            Capability::LlmProvider => write!(f, "llm-provider"),
         }
     }
 }

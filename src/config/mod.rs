@@ -37,6 +37,10 @@ pub struct Config {
 
     /// Token economy configuration
     pub economy: EconomyConfig,
+
+    /// LLM provider sharing configuration
+    #[serde(default)]
+    pub provider_sharing: ProviderSharingConfig,
 }
 
 impl Config {
@@ -368,6 +372,38 @@ impl Default for EconomyConfig {
             accept_paid_jobs: true,
             max_job_payment: 0,            // Unlimited
             min_balance_for_paid_jobs: 0,  // No minimum
+        }
+    }
+}
+
+/// LLM provider sharing configuration.
+///
+/// Controls whether this node shares its inference capacity with network peers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderSharingConfig {
+    /// Enable sharing local inference with network peers
+    pub enabled: bool,
+    /// Advertise available models to network
+    pub advertise_models: bool,
+    /// Maximum requests per hour from all peers combined
+    pub max_requests_per_hour: u32,
+    /// Maximum tokens per day from all peers combined
+    pub max_tokens_per_day: u64,
+    /// Maximum concurrent inference requests from peers
+    pub max_concurrent_requests: u32,
+    /// Price multiplier on base economy prices (1.0 = base price)
+    pub price_multiplier: f64,
+}
+
+impl Default for ProviderSharingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            advertise_models: true,
+            max_requests_per_hour: 60,
+            max_tokens_per_day: 100_000,
+            max_concurrent_requests: 2,
+            price_multiplier: 1.0,
         }
     }
 }

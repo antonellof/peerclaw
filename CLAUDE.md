@@ -43,7 +43,7 @@ cargo test module_name::
 One statically-linked binary operates in multiple modes based on flags/subcommands. Every peer runs the same binary - roles (resource provider, agent host, gateway) are determined at runtime.
 
 **CLI Structure:**
-- `peerclaw serve` - Start peer node (with `--gpu`, `--storage`, `--web` flags)
+- `peerclaw serve` - Start peer node (with `--gpu`, `--storage`, `--web`, `--share-inference`, `--agent` flags)
 - `peerclaw run <model>` - Ollama-style interactive chat
 - `peerclaw chat` - Full-featured chat with slash commands (rustyline + tab completion)
 - `peerclaw models list|download` - Model management
@@ -61,6 +61,7 @@ One statically-linked binary operates in multiple modes based on flags/subcomman
 | Module | Location | Purpose |
 |--------|----------|---------|
 | Node | `src/node.rs` | Orchestrates all subsystems |
+| Agent | `src/agent/` | Agent runtime with ReAct loop, budget tracking, tool execution |
 | P2P Network | `src/p2p/` | libp2p networking (Kademlia, GossipSub, mDNS) |
 | Inference | `src/inference/` | GGUF model loading, caching, batch processing |
 | Vector Store | `src/vector/` | vectX semantic search (HNSW, BM25, hybrid) |
@@ -147,7 +148,22 @@ The `ironclaw/` directory contains additional tools and channel adapters:
 - [x] Rustyline chat CLI (tab completion, history, arrow keys)
 - [x] Zero clippy warnings, comprehensive code cleanup
 
-### Planned (v0.4)
+### Implemented (v0.4)
+- [x] LLM Provider Sharing protocol (share inference across P2P network with CLAW tokens)
+- [x] Provider advertisement & discovery via GossipSub
+- [x] Remote execution wired (RemoteExecutor → TaskExecutor → P2P job flow)
+- [x] Agent Runtime with ReAct loop (LLM → tool calls → execute → repeat)
+- [x] Budget tracking (per-request, per-hour, per-day, total)
+- [x] Agent spec parsing from TOML (typed AgentSpec)
+- [x] Interactive dashboard: Tasks tab (create, monitor, view results)
+- [x] Interactive dashboard: Providers tab (configure sharing, view network providers)
+- [x] Clickable topology nodes (node detail panel with tasks, models, stats)
+- [x] Task management API (POST/GET /api/tasks, /api/tasks/:id)
+- [x] Provider API (GET/POST /api/providers, /api/providers/config, /api/nodes/:id)
+- [x] `--share-inference`, `--provider-max-requests`, `--provider-max-tokens-day` CLI flags
+- [x] Example agent: `examples/agents/assistant.toml` (personal AI assistant)
+
+### Planned (v0.5)
 - [ ] Distributed inference (pipeline parallelism)
 - [ ] Dynamic WASM tool building
 - [ ] Multi-agent collaboration
