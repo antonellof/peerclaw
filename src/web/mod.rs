@@ -1,11 +1,8 @@
-//! Web dashboard with real-time monitoring and chat interface.
+//! Web UI: chat-first assistant at `/`, node console at `/console`.
 //!
-//! Provides a web UI for:
-//! - Network topology visualization
-//! - CPU/GPU/RAM monitoring
-//! - Job marketplace status
-//! - AI chat interface
-//! - OpenAI-compatible API (/v1/chat/completions, /v1/models)
+//! - `/` — ChatGPT-style assistant (slash commands, `/api/chat`)
+//! - `/console` — operators: overview, agent tasks, swarm, jobs, providers, network
+//! - OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`)
 
 pub mod openai;
 
@@ -130,9 +127,10 @@ pub struct AgentTaskRequest {
 /// Create the web router.
 pub fn create_router(state: Arc<WebState>) -> Router {
     Router::new()
-        // Dashboard routes
-        .route("/", get(index))
-        .route("/chat", get(index)) // Redirect to main dashboard (has Chat tab)
+        // Chat-first assistant; full operator UI under /console
+        .route("/", get(assistant_index))
+        .route("/chat", get(assistant_index))
+        .route("/console", get(console_index))
         .route("/api/status", get(api_status))
         .route("/api/peers", get(api_peers))
         .route("/api/jobs", get(api_jobs))
@@ -259,7 +257,7 @@ pub async fn start_server(
 ) -> anyhow::Result<()> {
     let app = create_router(state);
 
-    tracing::info!("Web UI starting on http://{}", addr);
+    tracing::info!("Web: assistant http://{}  console http://{}/console", addr, addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
@@ -269,12 +267,12 @@ pub async fn start_server(
 
 // === API Endpoints ===
 
-async fn index() -> Html<&'static str> {
-    Html(include_str!("dashboard.html"))
+async fn assistant_index() -> Html<&'static str> {
+    Html(include_str!("chat.html"))
 }
 
-async fn chat_page() -> Html<&'static str> {
-    Html(include_str!("chat.html"))
+async fn console_index() -> Html<&'static str> {
+    Html(include_str!("dashboard.html"))
 }
 
 #[derive(Serialize)]

@@ -137,8 +137,13 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         );
     }
 
-    // Open database
-    let database = Database::open(&config.database.path)?;
+    // Open database (redb: single process per file — stop other `peerclaw serve` if lock fails)
+    let database = Database::open(&config.database.path).map_err(|e| {
+        anyhow::anyhow!(
+            "{e}\n\nHint: only one node can use {:?} at a time. Stop other `peerclaw` processes (e.g. `pgrep -fl peerclaw`) or use a different data directory via config.",
+            config.database.path
+        )
+    })?;
     tracing::info!("Database opened at {:?}", config.database.path);
 
     // Create runtime with all subsystems
@@ -218,8 +223,8 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         "started_at": chrono::Utc::now().to_rfc3339(),
                     });
 
-                    if let Ok(db) = Database::open(&config.database.path) {
-                        let _ = db.store_agent(&agent_id, &agent_state);
+                    if let Err(err) = runtime.database.store_agent(&agent_id, &agent_state) {
+                        tracing::warn!(%err, "Failed to persist agent state to database");
                     }
 
                     // Register agent in swarm manager for visualization
@@ -284,7 +289,11 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                 tracing::error!("Web server error: {}", e);
             }
         });
-        tracing::info!("Web UI available at http://{}", config.web.listen_addr);
+        tracing::info!(
+            "Assistant http://{}  ·  Node console http://{}/console",
+            config.web.listen_addr,
+            config.web.listen_addr
+        );
     }
 
     // Main loop
