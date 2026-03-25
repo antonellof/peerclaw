@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react"
 
+import { peerclawWsUrl } from "@/lib/api"
+
 type WsStatusPayload = {
   cpu_usage?: number
   ram_used_mb?: number
@@ -19,8 +21,7 @@ export function useControlWebSocket(handlers: {
   })
 
   useEffect(() => {
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws`)
+    const ws = new WebSocket(peerclawWsUrl())
 
     ws.onmessage = (ev) => {
       try {

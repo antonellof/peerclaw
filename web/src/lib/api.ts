@@ -1,5 +1,40 @@
 /** Typed wrappers for PeerClaw HTTP APIs (same paths as embedded HTML). */
 
+/** When the UI is served separately (e.g. Vite on :5173), set `VITE_PEERCLAW_API=http://127.0.0.1:8080` so `/api` and `/v1` hit the node. */
+function peerclawApiBase(): string {
+  const raw = import.meta.env.VITE_PEERCLAW_API as string | undefined
+  const t = raw?.trim()
+  if (!t) return ""
+  return t.replace(/\/$/, "")
+}
+
+export function apiUrl(path: string): string {
+  const p = path.startsWith("/") ? path : `/${path}`
+  const b = peerclawApiBase()
+  return b ? `${b}${p}` : p
+}
+
+/** WebSocket URL for control channel; follows `VITE_PEERCLAW_API` host when set. */
+export function peerclawWsUrl(): string {
+  const b = peerclawApiBase()
+  if (b) {
+    let u: URL
+    try {
+      u = new URL(b)
+    } catch {
+      return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`
+    }
+    const wsProto = u.protocol === "https:" ? "wss:" : "ws:"
+    return `${wsProto}//${u.host}/ws`
+  }
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
+  return `${proto}//${window.location.host}/ws`
+}
+
+function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(apiUrl(path), init)
+}
+
 export type StatusResponse = {
   peer_id: string
   connected_peers: number
@@ -16,7 +51,7 @@ export type StatusResponse = {
 }
 
 export async function fetchStatus(): Promise<StatusResponse> {
-  const r = await fetch("/api/status")
+  const r = await apiFetch("/api/status")
   if (!r.ok) throw new Error(`status ${r.status}`)
   return r.json()
 }
@@ -24,7 +59,7 @@ export async function fetchStatus(): Promise<StatusResponse> {
 export type PeerInfo = { id: string; connected: boolean }
 
 export async function fetchPeers(): Promise<PeerInfo[]> {
-  const r = await fetch("/api/peers")
+  const r = await apiFetch("/api/peers")
   if (!r.ok) throw new Error(`peers ${r.status}`)
   return r.json()
 }
@@ -34,7 +69,7 @@ export type OnboardingStep = { id: string; ok: boolean; detail: string }
 export type OnboardingResponse = { peer_id: string; steps: OnboardingStep[] }
 
 export async function fetchOnboarding(): Promise<OnboardingResponse> {
-  const r = await fetch("/api/onboarding")
+  const r = await apiFetch("/api/onboarding")
   if (!r.ok) throw new Error(`onboarding ${r.status}`)
   return r.json()
 }
@@ -51,7 +86,7 @@ export type WebJobInfo = {
 }
 
 export async function fetchJobs(): Promise<WebJobInfo[]> {
-  const r = await fetch("/api/jobs")
+  const r = await apiFetch("/api/jobs")
   if (!r.ok) throw new Error(`jobs ${r.status}`)
   return r.json()
 }
@@ -61,7 +96,7 @@ export async function submitJob(payload: {
   budget: number
   payload: string
 }): Promise<{ success: boolean; job_id?: string; error?: string }> {
-  const r = await fetch("/api/jobs/submit", {
+  const r = await apiFetch("/api/jobs/submit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -85,7 +120,7 @@ export type WebTask = {
 }
 
 export async function fetchTasks(): Promise<WebTask[]> {
-  const r = await fetch("/api/tasks")
+  const r = await apiFetch("/api/tasks")
   if (!r.ok) throw new Error(`tasks ${r.status}`)
   return r.json()
 }
@@ -144,29 +179,57 @@ export function parseTaskDetailJson(data: unknown): TaskDetailResult {
   return { ok: true, task }
 }
 
+function looksLikeHtml(s: string): boolean {
+  const t = s.trim().toLowerCase()
+  return t.startsWith("<!doctype") || t.startsWith("<html")
+}
+
 export async function fetchTaskDetail(id: string): Promise<TaskDetailResult> {
-  const r = await fetch(`/api/tasks/${encodeURIComponent(id)}`)
+  const tid = id.trim()
+  if (!tid) {
+    return { ok: false, message: "Missing task id." }
+  }
+
+  const r = await apiFetch(`/api/tasks/${encodeURIComponent(tid)}`)
   const text = await r.text()
+  const trimmed = text.trim()
 
   if (!r.ok) {
-    const snippet = text.trim().slice(0, 120)
+    if (looksLikeHtml(text)) {
+      return {
+        ok: false,
+        message:
+          `HTTP ${r.status}: response is HTML, not the PeerClaw API. ` +
+          `Use \`npm run dev\` (proxy), open the app from \`peerclaw serve --web\`, or set VITE_PEERCLAW_API to your node URL.`,
+      }
+    }
+    try {
+      const data = JSON.parse(trimmed) as unknown
+      const parsed = parseTaskDetailJson(data)
+      if (!parsed.ok) return parsed
+    } catch {
+      /* fall through */
+    }
+    const snippet = trimmed.slice(0, 120)
     return {
       ok: false,
       message: `HTTP ${r.status}${snippet ? `: ${snippet}` : ""}`,
     }
   }
 
-  if (!text.trim()) {
+  if (!trimmed) {
     return { ok: false, message: "Empty response from /api/tasks/:id." }
   }
 
   let data: unknown
   try {
-    data = JSON.parse(text) as unknown
+    data = JSON.parse(trimmed) as unknown
   } catch {
     return {
       ok: false,
-      message: "Server returned non-JSON (check proxy / route). First bytes look like HTML?",
+      message: looksLikeHtml(text)
+        ? "Server returned HTML instead of JSON — the UI is not reaching PeerClaw’s /api (check dev proxy or VITE_PEERCLAW_API)."
+        : "Server returned non-JSON (check proxy / route).",
     }
   }
 
@@ -178,8 +241,9 @@ export async function createTask(payload: {
   description: string
   model?: string | null
   budget?: number
+  use_mcp?: boolean
 }): Promise<{ success: boolean; task_id?: string; error?: string }> {
-  const r = await fetch("/api/tasks", {
+  const r = await apiFetch("/api/tasks", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -235,19 +299,19 @@ export type SwarmTimelineResponse = {
 }
 
 export async function fetchSwarmAgents(): Promise<SwarmAgentsResponse> {
-  const r = await fetch("/api/swarm/agents")
+  const r = await apiFetch("/api/swarm/agents")
   if (!r.ok) throw new Error(`swarm agents ${r.status}`)
   return r.json()
 }
 
 export async function fetchSwarmTopology(): Promise<SwarmTopologyResponse> {
-  const r = await fetch("/api/swarm/topology")
+  const r = await apiFetch("/api/swarm/topology")
   if (!r.ok) throw new Error(`swarm topology ${r.status}`)
   return r.json()
 }
 
 export async function fetchSwarmTimeline(): Promise<SwarmTimelineResponse> {
-  const r = await fetch("/api/swarm/timeline")
+  const r = await apiFetch("/api/swarm/timeline")
   if (!r.ok) throw new Error(`swarm timeline ${r.status}`)
   return r.json()
 }
@@ -275,13 +339,13 @@ export type ProviderConfigResponse = {
 }
 
 export async function fetchProviders(): Promise<ProviderInfo[]> {
-  const r = await fetch("/api/providers")
+  const r = await apiFetch("/api/providers")
   if (!r.ok) throw new Error(`providers ${r.status}`)
   return r.json()
 }
 
 export async function fetchProviderConfig(): Promise<ProviderConfigResponse> {
-  const r = await fetch("/api/providers/config")
+  const r = await apiFetch("/api/providers/config")
   if (!r.ok) throw new Error(`provider config ${r.status}`)
   return r.json()
 }
@@ -293,7 +357,7 @@ export async function setProviderConfig(payload: {
   max_tokens_per_day?: number
   max_concurrent_requests?: number
 }): Promise<{ success?: boolean; error?: string }> {
-  const r = await fetch("/api/providers/config", {
+  const r = await apiFetch("/api/providers/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -313,7 +377,7 @@ export type NodeDetailResponse = {
 }
 
 export async function fetchNodeDetail(nodeId: string): Promise<NodeDetailResponse> {
-  const r = await fetch(`/api/nodes/${encodeURIComponent(nodeId)}`)
+  const r = await apiFetch(`/api/nodes/${encodeURIComponent(nodeId)}`)
   if (!r.ok) throw new Error(`node ${r.status}`)
   return r.json()
 }
@@ -329,13 +393,13 @@ export type SkillInfo = {
 }
 
 export async function fetchSkillsLocal(): Promise<SkillInfo[]> {
-  const r = await fetch("/api/skills/local")
+  const r = await apiFetch("/api/skills/local")
   if (!r.ok) throw new Error(`skills local ${r.status}`)
   return r.json()
 }
 
 export async function fetchSkillsNetwork(): Promise<SkillInfo[]> {
-  const r = await fetch("/api/skills/network")
+  const r = await apiFetch("/api/skills/network")
   if (!r.ok) throw new Error(`skills network ${r.status}`)
   return r.json()
 }
@@ -350,20 +414,20 @@ export type SkillsMetaResponse = {
 }
 
 export async function fetchSkillsMeta(): Promise<SkillsMetaResponse> {
-  const r = await fetch("/api/skills/meta")
+  const r = await apiFetch("/api/skills/meta")
   if (!r.ok) throw new Error(`skills meta ${r.status}`)
   return r.json()
 }
 
 export async function scanSkills(): Promise<{ ok: boolean; loaded?: number; error?: string }> {
-  const r = await fetch("/api/skills/scan", { method: "POST" })
+  const r = await apiFetch("/api/skills/scan", { method: "POST" })
   return r.json()
 }
 
 export type SkillStudioListEntry = { slug: string; layout: string }
 
 export async function fetchSkillStudioList(): Promise<SkillStudioListEntry[]> {
-  const r = await fetch("/api/skills/studio")
+  const r = await apiFetch("/api/skills/studio")
   if (!r.ok) throw new Error(`skill studio list ${r.status}`)
   return r.json()
 }
@@ -371,7 +435,7 @@ export async function fetchSkillStudioList(): Promise<SkillStudioListEntry[]> {
 export type SkillStudioGetResponse = { slug: string; content: string; layout: string }
 
 export async function fetchSkillStudio(slug: string): Promise<SkillStudioGetResponse> {
-  const r = await fetch(`/api/skills/studio/${encodeURIComponent(slug)}`)
+  const r = await apiFetch(`/api/skills/studio/${encodeURIComponent(slug)}`)
   if (!r.ok) {
     const j = (await r.json().catch(() => null)) as { error?: string } | null
     throw new Error(j?.error ?? `load ${r.status}`)
@@ -383,7 +447,7 @@ export async function saveSkillStudio(
   slug: string,
   content: string,
 ): Promise<{ ok: boolean; slug?: string; path?: string }> {
-  const r = await fetch(`/api/skills/studio/${encodeURIComponent(slug)}`, {
+  const r = await apiFetch(`/api/skills/studio/${encodeURIComponent(slug)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
@@ -402,7 +466,7 @@ export async function skillStudioAi(payload: {
   max_tokens?: number
   temperature?: number
 }): Promise<SkillStudioAiResponse> {
-  const r = await fetch("/api/skills/studio/ai", {
+  const r = await apiFetch("/api/skills/studio/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -412,25 +476,60 @@ export async function skillStudioAi(payload: {
   return { text: j.text, tokens: j.tokens }
 }
 
+export type McpToolListItem = { id: string; description: string | null }
+
 export type McpStatusResponse = {
   mode: string
   in_core: boolean
   config: {
     enabled: boolean
-    servers: { name: string; url: string }[]
+    servers: Array<{
+      name: string
+      url: string
+      env?: Record<string, string>
+      command?: string | null
+      args?: string[]
+    }>
     timeout_secs: number
     auto_reconnect: boolean
   }
   config_path: string
+  connected_servers: string[]
+  tool_count: number
+  tools: McpToolListItem[]
   mcp_toml_snippet: string
   hint: string
   spec_url: string
 }
 
+export type McpConfigJson = {
+  enabled: boolean
+  timeout_secs: number
+  auto_reconnect: boolean
+  servers: Array<{
+    name: string
+    url: string
+    command?: string
+    args?: string[]
+    env?: Record<string, string>
+  }>
+}
+
 export async function fetchMcpStatus(): Promise<McpStatusResponse> {
-  const r = await fetch("/api/mcp/status")
+  const r = await apiFetch("/api/mcp/status")
   if (!r.ok) throw new Error(`mcp ${r.status}`)
   return r.json()
+}
+
+export async function putMcpConfig(cfg: McpConfigJson): Promise<{ ok: boolean }> {
+  const r = await apiFetch("/api/mcp/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cfg),
+  })
+  const j = (await r.json().catch(() => null)) as { ok?: boolean; error?: string } | null
+  if (!r.ok) throw new Error(j?.error ?? `mcp config ${r.status}`)
+  return { ok: !!j?.ok }
 }
 
 export type ChatResponse = {
@@ -447,8 +546,10 @@ export async function postChat(payload: {
   max_tokens?: number
   temperature?: number
   session_id?: string | null
+  agentic?: boolean
+  use_mcp?: boolean
 }): Promise<ChatResponse> {
-  const r = await fetch("/api/chat", {
+  const r = await apiFetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -457,6 +558,8 @@ export async function postChat(payload: {
       max_tokens: payload.max_tokens,
       temperature: payload.temperature,
       ...(payload.session_id ? { session_id: payload.session_id } : {}),
+      ...(payload.agentic !== undefined ? { agentic: payload.agentic } : {}),
+      ...(payload.use_mcp !== undefined ? { use_mcp: payload.use_mcp } : {}),
     }),
   })
   return r.json()
@@ -470,6 +573,8 @@ export async function postChatStream(
     max_tokens?: number
     temperature?: number
     session_id?: string | null
+    agentic?: boolean
+    use_mcp?: boolean
   },
   onDelta: (text: string) => void,
   signal?: AbortSignal,
@@ -480,9 +585,11 @@ export async function postChatStream(
     max_tokens: payload.max_tokens,
     temperature: payload.temperature,
     ...(payload.session_id ? { session_id: payload.session_id } : {}),
+    ...(payload.agentic !== undefined ? { agentic: payload.agentic } : {}),
+    ...(payload.use_mcp !== undefined ? { use_mcp: payload.use_mcp } : {}),
   })
 
-  const r = await fetch("/api/chat/stream", {
+  const r = await apiFetch("/api/chat/stream", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -500,6 +607,8 @@ export async function postChatStream(
       max_tokens: payload.max_tokens,
       temperature: payload.temperature,
       session_id: payload.session_id,
+      agentic: payload.agentic,
+      use_mcp: payload.use_mcp,
     })
     if (j.response) onDelta(j.response)
     return j
@@ -565,7 +674,7 @@ export type OpenAiModel = { id: string; object?: string }
 export type ModelsListResponse = { data?: OpenAiModel[] }
 
 export async function fetchOpenAiModels(): Promise<OpenAiModel[]> {
-  const r = await fetch("/v1/models")
+  const r = await apiFetch("/v1/models")
   if (!r.ok) throw new Error(`models ${r.status}`)
   const j: ModelsListResponse = await r.json()
   return j.data ?? []

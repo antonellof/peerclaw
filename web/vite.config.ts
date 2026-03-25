@@ -22,4 +22,15 @@ export default defineConfig({
       "/embed": { target: "http://127.0.0.1:8080", changeOrigin: true },
     },
   },
+  preview: {
+    port: 4173,
+    strictPort: true,
+    proxy: {
+      "/api/chat/stream": { target: "http://127.0.0.1:8080", changeOrigin: true },
+      "/api": { target: "http://127.0.0.1:8080", changeOrigin: true },
+      "/v1": { target: "http://127.0.0.1:8080", changeOrigin: true },
+      "/ws": { target: "ws://127.0.0.1:8080", ws: true },
+      "/embed": { target: "http://127.0.0.1:8080", changeOrigin: true },
+    },
+  },
 })
