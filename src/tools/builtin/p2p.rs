@@ -14,6 +14,7 @@ use crate::tools::tool::{
     optional_bool, optional_i64, optional_str, require_str, ApprovalRequirement, Tool, ToolContext,
     ToolDomain, ToolError, ToolOutput,
 };
+use crate::tools::{describe_p2p_job_via_node, submit_p2p_job_via_node};
 
 /// Job submission tool - submit work to the P2P network.
 pub struct JobSubmitTool {
@@ -50,36 +51,28 @@ impl Tool for JobSubmitTool {
             "properties": {
                 "type": {
                     "type": "string",
-                    "description": "Job type: inference, compute, storage, tool",
-                    "enum": ["inference", "compute", "storage", "tool"]
+                    "description": "P2P marketplace job: inference, web_fetch, wasm (matches node job handler)",
+                    "enum": ["inference", "web_fetch", "wasm", "compute", "storage"]
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Prompt for inference jobs"
+                    "description": "For inference: text prompt (payload sent to providers)"
                 },
-                "model": {
+                "url": {
                     "type": "string",
-                    "description": "Model to use for inference jobs"
+                    "description": "For web_fetch: target URL"
+                },
+                "tool_name": {
+                    "type": "string",
+                    "description": "For wasm: WASM tool identifier / name"
+                },
+                "payload": {
+                    "type": "string",
+                    "description": "Raw payload string when type is compute or storage (JSON recommended)"
                 },
                 "max_budget": {
                     "type": "number",
                     "description": "Maximum budget in PCLAW tokens"
-                },
-                "timeout_secs": {
-                    "type": "integer",
-                    "description": "Job timeout in seconds (default: 300)"
-                },
-                "prefer_local": {
-                    "type": "boolean",
-                    "description": "Prefer local execution if possible (default: true)"
-                },
-                "tool_name": {
-                    "type": "string",
-                    "description": "Tool name for tool-type jobs"
-                },
-                "tool_params": {
-                    "type": "object",
-                    "description": "Tool parameters for tool-type jobs"
                 }
             },
             "required": ["type"]
@@ -93,74 +86,66 @@ impl Tool for JobSubmitTool {
     ) -> Result<ToolOutput, ToolError> {
         let start = Instant::now();
 
+        let Some(ref tx) = ctx.node_tool_tx else {
+            return Err(ToolError::ExecutionFailed(
+                "job_submit requires a running `peerclaw serve` node with the P2P runtime.".into(),
+            ));
+        };
+
         let job_type = require_str(&params, "type")?;
-        let timeout_secs = optional_i64(&params, "timeout_secs", 300) as u64;
-        let prefer_local = optional_bool(&params, "prefer_local", true);
         let max_budget = params
             .get("max_budget")
             .and_then(|v| v.as_f64())
-            .unwrap_or(10.0);
+            .unwrap_or(5.0);
 
-        // Generate job ID
-        let job_id = format!("job_{}", &uuid::Uuid::new_v4().to_string()[..8]);
-
-        // Build job request based on type
-        let job_details = match job_type {
-            "inference" => {
-                let prompt = require_str(&params, "prompt")?;
-                let model = optional_str(&params, "model").unwrap_or("default");
-                serde_json::json!({
-                    "type": "inference",
-                    "prompt": prompt,
-                    "model": model,
-                    "max_tokens": 1000,
-                })
-            }
-            "tool" => {
-                let tool_name = require_str(&params, "tool_name")?;
-                let tool_params = params
-                    .get("tool_params")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({}));
-                serde_json::json!({
-                    "type": "tool",
-                    "tool_name": tool_name,
-                    "tool_params": tool_params,
-                })
-            }
-            "compute" | "storage" => {
-                serde_json::json!({
-                    "type": job_type,
-                    "params": params.clone(),
-                })
-            }
+        let payload = match job_type {
+            "inference" => optional_str(&params, "prompt")
+                .or_else(|| optional_str(&params, "payload"))
+                .ok_or_else(|| {
+                    ToolError::InvalidParameters("inference requires `prompt` or `payload`".into())
+                })?
+                .to_string(),
+            "web_fetch" => optional_str(&params, "url")
+                .or_else(|| optional_str(&params, "payload"))
+                .ok_or_else(|| {
+                    ToolError::InvalidParameters("web_fetch requires `url` or `payload`".into())
+                })?
+                .to_string(),
+            "wasm" => optional_str(&params, "tool_name")
+                .or_else(|| optional_str(&params, "payload"))
+                .ok_or_else(|| {
+                    ToolError::InvalidParameters("wasm requires `tool_name` or `payload`".into())
+                })?
+                .to_string(),
+            "compute" | "storage" => require_str(&params, "payload")?.to_string(),
             _ => {
                 return Err(ToolError::InvalidParameters(format!(
-                    "Unknown job type: {}",
+                    "Unknown job type: {} (use inference, web_fetch, wasm, compute, storage)",
                     job_type
-                )))
+                )));
             }
         };
 
-        // TODO: Actually submit to JobManager and P2P network
-        // For now, return a placeholder response
+        let res = submit_p2p_job_via_node(tx, job_type.to_string(), max_budget, payload)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(e))?;
+
+        if !res.success {
+            return Err(ToolError::ExecutionFailed(
+                res.error.unwrap_or_else(|| "job submit failed".into()),
+            ));
+        }
+
         let result = serde_json::json!({
-            "job_id": job_id,
+            "job_id": res.job_id,
             "status": "submitted",
             "type": job_type,
-            "details": job_details,
             "max_budget": max_budget,
-            "timeout_secs": timeout_secs,
-            "prefer_local": prefer_local,
             "submitted_by": ctx.peer_id,
             "submitted_at": chrono::Utc::now().to_rfc3339(),
         });
 
-        tracing::info!(
-            job_id = %job_id,
-            job_type = %job_type,
-            "Job submitted to network"
-        );
+        tracing::info!(job_id = ?res.job_id, job_type = %job_type, "P2P job submitted via agent tool");
 
         Ok(ToolOutput::success(result, start.elapsed()))
     }
@@ -230,27 +215,28 @@ impl Tool for JobStatusTool {
     async fn execute(
         &self,
         params: serde_json::Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
         let start = Instant::now();
+
+        let Some(ref tx) = ctx.node_tool_tx else {
+            return Err(ToolError::ExecutionFailed(
+                "job_status requires a running `peerclaw serve` node.".into(),
+            ));
+        };
 
         let job_id = require_str(&params, "job_id")?;
         let wait = optional_bool(&params, "wait", false);
         let timeout = optional_i64(&params, "timeout", 30) as u64;
 
-        // TODO: Actually query JobManager
-        // For now, return a placeholder response
-        let result = serde_json::json!({
-            "job_id": job_id,
-            "status": "pending",
-            "progress": 0,
-            "result": null,
-            "error": null,
-            "executed_by": null,
-            "tokens_spent": 0,
-            "waited": wait,
-            "timeout": timeout,
-        });
+        let mut result = describe_p2p_job_via_node(tx, job_id.to_string())
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(e))?;
+
+        if let serde_json::Value::Object(ref mut m) = result {
+            m.insert("wait_requested".into(), serde_json::json!(wait));
+            m.insert("wait_timeout_secs".into(), serde_json::json!(timeout));
+        }
 
         Ok(ToolOutput::success(result, start.elapsed()))
     }

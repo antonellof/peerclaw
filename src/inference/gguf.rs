@@ -818,7 +818,7 @@ mod tests {
     #[test]
     fn test_placeholder_backend() {
         let backend = PlaceholderBackend;
-        let config = GgufConfig::default();
+        let _config = GgufConfig::default();
 
         // Test with a non-existent path (placeholder doesn't check)
         let handle = GgufModelHandle::placeholder(

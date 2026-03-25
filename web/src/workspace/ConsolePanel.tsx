@@ -4,6 +4,7 @@ import { ConsoleJobsPage } from "@/pages/console/ConsoleJobsPage"
 import { ConsoleOverviewPage } from "@/pages/console/ConsoleOverviewPage"
 import { ConsoleProvidersPage } from "@/pages/console/ConsoleProvidersPage"
 import { ConsoleSkillsPage } from "@/pages/console/ConsoleSkillsPage"
+import { ConsoleMcpPage } from "@/pages/console/ConsoleMcpPage"
 
 const TITLES: Partial<Record<WorkspaceView, string>> = {
   home: "Home",
@@ -11,6 +12,7 @@ const TITLES: Partial<Record<WorkspaceView, string>> = {
   jobs: "Jobs",
   providers: "Providers",
   skills: "Skills",
+  mcp: "MCP",
 }
 
 const SHOW_TOP_BAR: Record<Exclude<WorkspaceView, "chat">, boolean> = {
@@ -19,6 +21,7 @@ const SHOW_TOP_BAR: Record<Exclude<WorkspaceView, "chat">, boolean> = {
   jobs: true,
   providers: true,
   skills: true,
+  mcp: true,
 }
 
 export function ConsolePanel({ view }: { view: Exclude<WorkspaceView, "chat"> }) {
@@ -38,6 +41,7 @@ export function ConsolePanel({ view }: { view: Exclude<WorkspaceView, "chat"> })
         {view === "jobs" && <ConsoleJobsPage />}
         {view === "providers" && <ConsoleProvidersPage />}
         {view === "skills" && <ConsoleSkillsPage />}
+        {view === "mcp" && <ConsoleMcpPage />}
       </div>
     </div>
   )

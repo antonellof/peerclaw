@@ -247,6 +247,11 @@ impl McpManager {
         self.clients.read().len()
     }
 
+    /// Names of servers with an active MCP session.
+    pub fn connected_server_names(&self) -> Vec<String> {
+        self.clients.read().keys().cloned().collect()
+    }
+
     /// Get tool count
     pub fn tool_count(&self) -> usize {
         self.tools.read().len()

@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 
 use crate::executor::task::{ChatMessage, ExecutionTask, InferenceTask, MessageRole, TaskData};
 use crate::executor::TaskExecutor;
-use crate::tools::{ToolContext, ToolRegistry};
+use crate::tools::{NodeToolTx, ToolContext, ToolRegistry};
 
 use super::budget::BudgetTracker;
 use super::spec::AgentSpec;
@@ -100,6 +100,7 @@ impl AgentRuntime {
         tools: Arc<ToolRegistry>,
         budget: BudgetTracker,
         peer_id: String,
+        node_tool_tx: Option<NodeToolTx>,
     ) -> Self {
         let tool_context = ToolContext {
             session_id: config.id.clone(),
@@ -108,6 +109,7 @@ impl AgentRuntime {
             working_dir: std::env::current_dir().unwrap_or_default(),
             sandboxed: false,
             available_secrets: vec![],
+            node_tool_tx,
         };
 
         Self {
@@ -127,6 +129,7 @@ impl AgentRuntime {
         executor: Arc<TaskExecutor>,
         tools: Arc<ToolRegistry>,
         peer_id: String,
+        node_tool_tx: Option<NodeToolTx>,
     ) -> Self {
         let config = AgentConfig::from_spec(spec);
         let budget = BudgetTracker::new(
@@ -135,7 +138,7 @@ impl AgentRuntime {
             spec.budget.per_day,
             spec.budget.total,
         );
-        Self::new(config, executor, tools, budget, peer_id)
+        Self::new(config, executor, tools, budget, peer_id, node_tool_tx)
     }
 
     /// Run a task through the agentic loop.

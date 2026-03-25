@@ -390,6 +390,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
           task_type: agentTaskType,
           description: content,
           budget,
+          model,
+          use_mcp: chatPreferences.useMcp,
         })
         if (!res.success || !res.task_id) {
           setMessages((m) => [
@@ -436,6 +438,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
           max_tokens: settings.maxTokens,
           temperature: settings.temperature,
           session_id: sessionId,
+          agentic: chatPreferences.useAgentic,
+          use_mcp: chatPreferences.useMcp,
         },
         (text) => {
           setMessages((m) =>
@@ -667,6 +671,32 @@ export function ChatPanel({ onRegisterControls }: Props) {
                 Agent goal
               </button>
             </div>
+            <button
+              type="button"
+              title="Node tools + P2P job_submit / job_status ReAct loop"
+              className={cn(
+                "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+                chatPreferences.useAgentic
+                  ? "border-primary/60 bg-primary/15 text-foreground"
+                  : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50",
+              )}
+              onClick={() => setChatPreferences({ useAgentic: !chatPreferences.useAgentic })}
+            >
+              Tools
+            </button>
+            <button
+              type="button"
+              title="Use MCP tools from configured servers (MCP page)"
+              className={cn(
+                "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+                chatPreferences.useMcp
+                  ? "border-primary/60 bg-primary/15 text-foreground"
+                  : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50",
+              )}
+              onClick={() => setChatPreferences({ useMcp: !chatPreferences.useMcp })}
+            >
+              MCP
+            </button>
             {composerMode === "agent" && (
               <>
                 <select

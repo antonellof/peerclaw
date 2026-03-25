@@ -26,7 +26,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Json, Response,
     },
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
 use libp2p::PeerId;
@@ -54,6 +54,7 @@ pub struct InferenceRequest {
 }
 
 /// Response to inference request
+#[derive(Clone)]
 pub struct InferenceResponse {
     pub text: String,
     pub tokens_generated: u32,
@@ -145,8 +146,14 @@ pub struct WebState {
     pub skills: Option<Arc<crate::skills::SkillRegistry>>,
     /// Bounded chat history keyed by `session_id` for `/api/chat`.
     pub chat_sessions: Arc<RwLock<HashMap<String, Vec<ChatMessage>>>>,
-    /// MCP client configuration (sidecar / stdio servers documented in `GET /api/mcp/status`).
-    pub mcp_config: crate::mcp::McpConfig,
+    /// MCP settings (mutable from `PUT /api/mcp/config`; in-memory until you edit `config.toml`).
+    pub mcp_config: Arc<RwLock<crate::mcp::McpConfig>>,
+    /// Live MCP connections + tool catalog when `reload_mcp_manager` has run successfully.
+    pub mcp_manager: Arc<RwLock<Option<Arc<crate::mcp::McpManager>>>>,
+    /// Tool registry from the node (`peerclaw serve`); powers agentic chat ReAct loop.
+    pub tools: Option<Arc<crate::tools::ToolRegistry>>,
+    /// Channel to `job_submit` / `job_status` handlers on the serve loop (P2P marketplace).
+    pub node_tool_tx: Option<crate::tools::NodeToolTx>,
     /// Resolved skills directory (matches `SkillRegistry` when `skills` is set).
     pub skills_dir: PathBuf,
     /// Host `config.toml` path (for UI copy hints).
@@ -203,6 +210,7 @@ fn api_router() -> Router<Arc<WebState>> {
             get(api_skills_studio_get).put(api_skills_studio_put),
         )
         .route("/mcp/status", get(api_mcp_status))
+        .route("/mcp/config", put(api_mcp_put_config))
         .route("/jobs/submit", post(api_submit_job))
         .route("/chat", post(api_chat))
         .route("/chat/stream", post(api_chat_stream))
@@ -267,7 +275,10 @@ pub fn create_web_state(
         ws_control_tx: new_ws_control_plane(),
         skills: None,
         chat_sessions: Arc::new(RwLock::new(HashMap::new())),
-        mcp_config: crate::mcp::McpConfig::default(),
+        mcp_config: Arc::new(RwLock::new(crate::mcp::McpConfig::default())),
+        mcp_manager: Arc::new(RwLock::new(None)),
+        tools: None,
+        node_tool_tx: None,
         skills_dir: crate::bootstrap::base_dir().join("skills"),
         config_path: crate::bootstrap::base_dir().join("config.toml"),
     })
@@ -297,7 +308,10 @@ pub fn create_web_state_with_channels(
         ws_control_tx: new_ws_control_plane(),
         skills: None,
         chat_sessions: Arc::new(RwLock::new(HashMap::new())),
-        mcp_config: crate::mcp::McpConfig::default(),
+        mcp_config: Arc::new(RwLock::new(crate::mcp::McpConfig::default())),
+        mcp_manager: Arc::new(RwLock::new(None)),
+        tools: None,
+        node_tool_tx: None,
         skills_dir: crate::bootstrap::base_dir().join("skills"),
         config_path: crate::bootstrap::base_dir().join("config.toml"),
     })
@@ -326,7 +340,10 @@ pub fn create_web_state_with_inference(
         ws_control_tx: new_ws_control_plane(),
         skills: None,
         chat_sessions: Arc::new(RwLock::new(HashMap::new())),
-        mcp_config: crate::mcp::McpConfig::default(),
+        mcp_config: Arc::new(RwLock::new(crate::mcp::McpConfig::default())),
+        mcp_manager: Arc::new(RwLock::new(None)),
+        tools: None,
+        node_tool_tx: None,
         skills_dir: crate::bootstrap::base_dir().join("skills"),
         config_path: crate::bootstrap::base_dir().join("config.toml"),
     })
@@ -355,7 +372,10 @@ pub fn create_web_state_with_swarm(
         ws_control_tx: new_ws_control_plane(),
         skills: None,
         chat_sessions: Arc::new(RwLock::new(HashMap::new())),
-        mcp_config: crate::mcp::McpConfig::default(),
+        mcp_config: Arc::new(RwLock::new(crate::mcp::McpConfig::default())),
+        mcp_manager: Arc::new(RwLock::new(None)),
+        tools: None,
+        node_tool_tx: None,
         skills_dir: crate::bootstrap::base_dir().join("skills"),
         config_path: crate::bootstrap::base_dir().join("config.toml"),
     })
@@ -850,12 +870,218 @@ Output rules:
     }))
 }
 
+const AGENTIC_MAX_ITERS: u32 = 24;
+
+fn default_chat_agentic() -> bool {
+    true
+}
+
+async fn build_agentic_system_prefix(
+    registry: Option<&crate::tools::ToolRegistry>,
+    mcp: Option<&crate::mcp::McpManager>,
+    include_mcp_catalog: bool,
+) -> String {
+    use crate::tools::ToolLocation;
+    let mut s = String::from(
+        "To call a tool, use exactly this format (multiple blocks allowed):\n\n\
+         <tool_call>\nname: tool_name_or_server_colon_tool\nargs: {\"key\": \"value\"}\n</tool_call>\n\n",
+    );
+    if let Some(registry) = registry {
+        s.push_str(
+            "You are a helpful assistant on a PeerClaw node with **local tools** and optional **MCP** tools. \
+             The P2P marketplace is available via `job_submit` and `job_status` (budget in PCLAW) for inference, web_fetch, wasm, compute, and storage jobs on the network.\n\n\
+             Use **exact** names from \"Local tools\". For MCP, use the full id `server:tool_name` from \"MCP tools\".\n\
+             After tool results, continue until you can answer the user without more tools.\n\n\
+             ### Local tools\n",
+        );
+        let mut infos = registry.list_tools().await;
+        infos.retain(|t| matches!(t.location, ToolLocation::Local));
+        infos.sort_by(|a, b| a.name.cmp(&b.name));
+        for t in infos {
+            s.push_str(&format!("- **{}**: {}\n", t.name, t.description));
+        }
+    } else {
+        s.push_str(
+            "You are a helpful assistant with **MCP (Model Context Protocol)** tools only (no PeerClaw local tool registry on this endpoint).\n\n\
+             Tool names MUST be MCP ids: `server:tool_name` as listed below.\n\
+             After tool results, continue until you can answer the user without more tools.\n",
+        );
+    }
+    if include_mcp_catalog {
+        if let Some(manager) = mcp {
+            if manager.tool_count() > 0 {
+                s.push_str("\n### MCP tools\n");
+                let mut entries = manager.list_tools_with_ids();
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                for (id, tool) in entries {
+                    s.push_str(&format!(
+                        "- **{}**: {}\n",
+                        id,
+                        tool.description.as_deref().unwrap_or("(no description)")
+                    ));
+                }
+            }
+        }
+    }
+    s
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_unified_agentic_inference(
+    state: &WebState,
+    registry: Option<Arc<crate::tools::ToolRegistry>>,
+    mcp: Option<Arc<crate::mcp::McpManager>>,
+    include_mcp_catalog: bool,
+    conversation_body: String,
+    model: String,
+    max_tokens: u32,
+    temperature: f32,
+) -> Result<(InferenceResponse, Vec<String>), String> {
+    let Some(tx) = &state.inference_tx else {
+        return Err("Inference not available".into());
+    };
+    let prefix = build_agentic_system_prefix(
+        registry.as_deref(),
+        mcp.as_deref(),
+        include_mcp_catalog,
+    )
+    .await;
+    let mut conversation = format!("{prefix}\n\n{conversation_body}");
+    let mut tool_logs: Vec<String> = Vec::new();
+    let mut total_tokens: u32 = 0;
+    let tool_session = uuid::Uuid::new_v4().to_string();
+
+    for _ in 1..=AGENTIC_MAX_ITERS {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        let request = InferenceRequest {
+            prompt: conversation.clone(),
+            model: model.clone(),
+            max_tokens,
+            temperature,
+            response_tx,
+            stream_delta_tx: None,
+        };
+        tx.send(request)
+            .await
+            .map_err(|_| "failed to queue inference".to_string())?;
+        let inf = match tokio::time::timeout(Duration::from_secs(120), response_rx).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(_)) => return Err("inference cancelled".into()),
+            Err(_) => return Err("inference timeout (120s)".into()),
+        };
+        total_tokens = total_tokens.saturating_add(inf.tokens_generated);
+        let text = inf.text;
+        let calls = crate::agent::parse_tool_calls(&text);
+        if calls.is_empty() {
+            let cleaned = crate::agent::extract_answer(&text);
+            return Ok((
+                InferenceResponse {
+                    text: cleaned,
+                    tokens_generated: total_tokens,
+                    tokens_per_second: inf.tokens_per_second,
+                    location: inf.location,
+                    provider_peer_id: inf.provider_peer_id,
+                },
+                tool_logs,
+            ));
+        }
+        conversation.push_str("\n\nAssistant:\n");
+        conversation.push_str(&text);
+        conversation.push_str("\n\nUser:\nHere are the tool results:\n");
+        for call in calls {
+            let summary = if call.name.contains(':') {
+                match &mcp {
+                    Some(m) => {
+                        let res = m.call_tool(&call.name, call.args.clone()).await;
+                        match res {
+                            Ok(r) => serde_json::to_string(&r)
+                                .unwrap_or_else(|_| "(unserializable result)".into()),
+                            Err(e) => format!("ERROR: {e}"),
+                        }
+                    }
+                    None => "ERROR: MCP tool requested but MCP is not enabled or has no connected tools"
+                        .to_string(),
+                }
+            } else {
+                match &registry {
+                    Some(reg) => {
+                        let ctx = crate::tools::ToolContext {
+                            session_id: tool_session.clone(),
+                            job_id: None,
+                            peer_id: state.local_peer_id.to_string(),
+                            working_dir: std::env::current_dir().unwrap_or_default(),
+                            sandboxed: false,
+                            available_secrets: vec![],
+                            node_tool_tx: state.node_tool_tx.clone(),
+                        };
+                        match reg
+                            .execute_local(&call.name, call.args.clone(), &ctx)
+                            .await
+                        {
+                            Ok(r) => serde_json::to_string(&r)
+                                .unwrap_or_else(|_| "(unserializable)".into()),
+                            Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+                        }
+                    }
+                    None => "ERROR: Local tool name used but only MCP tools are available; use server:tool_name from the MCP list."
+                        .to_string(),
+                }
+            };
+            let preview = if summary.chars().count() > 220 {
+                let short: String = summary.chars().take(217).collect();
+                format!("{short}…")
+            } else {
+                summary.clone()
+            };
+            tool_logs.push(format!(
+                "[{}] {} → {}",
+                chrono::Utc::now().format("%H:%M:%S"),
+                call.name,
+                preview
+            ));
+            conversation.push_str(&format!("- {} → {}\n", call.name, summary));
+        }
+    }
+    Err("Agentic: max tool iterations reached".into())
+}
+
+/// Disconnect existing MCP sessions and reconnect from the current [`WebState::mcp_config`].
+pub async fn reload_mcp_manager(state: &WebState) {
+    let cfg = state.mcp_config.read().await.clone();
+    if let Some(old) = state.mcp_manager.write().await.take() {
+        let _ = old.disconnect_all().await;
+    }
+    if !cfg.enabled || cfg.servers.is_empty() {
+        tracing::info!("MCP disabled or no servers configured");
+        return;
+    }
+    let manager = Arc::new(crate::mcp::McpManager::new(cfg));
+    match manager.connect_all().await {
+        Ok(()) => {
+            let n_tools = manager.tool_count();
+            let n_srv = manager.server_count();
+            *state.mcp_manager.write().await = Some(manager);
+            tracing::info!(servers = n_srv, tools = n_tools, "MCP manager ready");
+        }
+        Err(e) => tracing::warn!("MCP connect_all failed: {}", e),
+    }
+}
+
+#[derive(Serialize)]
+struct McpToolListItem {
+    id: String,
+    description: Option<String>,
+}
+
 #[derive(Serialize)]
 struct McpStatusResponse {
     mode: &'static str,
     in_core: bool,
     config: crate::mcp::McpConfig,
     config_path: String,
+    connected_servers: Vec<String>,
+    tool_count: usize,
+    tools: Vec<McpToolListItem>,
     /// Example `config.toml` fragment matching `McpConfig` / `McpServerConfig`.
     mcp_toml_snippet: &'static str,
     hint: &'static str,
@@ -863,11 +1089,33 @@ struct McpStatusResponse {
 }
 
 async fn api_mcp_status(State(state): State<Arc<WebState>>) -> Json<McpStatusResponse> {
+    let config = state.mcp_config.read().await.clone();
+    let (connected_servers, tools, tool_count) = {
+        let g = state.mcp_manager.read().await;
+        if let Some(m) = g.as_ref() {
+            let connected_servers = m.connected_server_names();
+            let catalog: Vec<McpToolListItem> = m
+                .list_tools_with_ids()
+                .into_iter()
+                .map(|(id, t)| McpToolListItem {
+                    id,
+                    description: t.description.clone(),
+                })
+                .collect();
+            let tool_count = catalog.len();
+            (connected_servers, catalog, tool_count)
+        } else {
+            (vec![], vec![], 0)
+        }
+    };
     Json(McpStatusResponse {
         mode: "sidecar_ready",
         in_core: false,
-        config: state.mcp_config.clone(),
+        config,
         config_path: state.config_path.display().to_string(),
+        connected_servers,
+        tool_count,
+        tools,
         mcp_toml_snippet: r#"[mcp]
 enabled = true
 timeout_secs = 30
@@ -875,11 +1123,42 @@ auto_reconnect = true
 
 [[mcp.servers]]
 name = "example"
-url = "http://127.0.0.1:3000/mcp"
+url = "stdio://local"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
 "#,
-        hint: "Run MCP servers as separate OS processes (stdio or HTTP) and bridge tools into agents from the host; core types are in src/mcp for optional embedding.",
+        hint: "stdio servers need command + args; HTTP MCP is not implemented in the client yet. Enable “Use MCP” in chat or agent when tools appear below.",
         spec_url: "https://modelcontextprotocol.io",
     })
+}
+
+async fn api_mcp_put_config(
+    State(state): State<Arc<WebState>>,
+    Json(cfg): Json<crate::mcp::McpConfig>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if cfg.servers.len() > 24 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "ok": false, "error": "too many servers (max 24)" })),
+        ));
+    }
+    for s in &cfg.servers {
+        if s.name.trim().is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "error": "server name must be non-empty" })),
+            ));
+        }
+        if s.url.trim().is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "error": "server url must be non-empty" })),
+            ));
+        }
+    }
+    *state.mcp_config.write().await = cfg;
+    reload_mcp_manager(state.as_ref()).await;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[derive(Serialize)]
@@ -977,6 +1256,12 @@ struct ChatRequest {
     temperature: Option<f32>,
     /// When set, prior turns for this id are prepended (bounded) and new turns are stored server-side.
     session_id: Option<String>,
+    /// When true (default), run a ReAct loop with the node's ToolRegistry (`job_submit`, shell, …) and optional MCP.
+    #[serde(default = "default_chat_agentic")]
+    agentic: bool,
+    /// When true, include MCP tool ids in the system prefix and route `server:tool` calls to MCP.
+    #[serde(default)]
+    use_mcp: bool,
 }
 
 #[derive(Serialize)]
@@ -1017,6 +1302,126 @@ async fn api_chat(
     } else {
         user_message.clone()
     };
+
+    let mcp_arc = state.mcp_manager.read().await.clone();
+    let mcp_for_agentic = if req.use_mcp {
+        mcp_arc.clone().filter(|m| m.tool_count() > 0)
+    } else {
+        None
+    };
+    let include_mcp_catalog = req.use_mcp && mcp_for_agentic.is_some();
+
+    if req.agentic {
+        if let Some(registry) = state.tools.clone() {
+            if state.inference_tx.is_some() {
+                let body = format!("### User thread\n{prompt_for_model}");
+                match run_unified_agentic_inference(
+                    state.as_ref(),
+                    Some(registry),
+                    mcp_for_agentic.clone(),
+                    include_mcp_catalog,
+                    body,
+                    model.clone(),
+                    max_tokens,
+                    temperature,
+                )
+                .await
+                {
+                    Ok((response, _)) => {
+                        if let Some(ref sid) = req.session_id {
+                            let mut sessions = state.chat_sessions.write().await;
+                            let entry = sessions.entry(sid.clone()).or_default();
+                            entry.push(ChatMessage {
+                                role: "user".into(),
+                                content: user_message,
+                            });
+                            entry.push(ChatMessage {
+                                role: "assistant".into(),
+                                content: response.text.clone(),
+                            });
+                            const MAX_MSGS: usize = 80;
+                            if entry.len() > MAX_MSGS {
+                                let drain = entry.len() - MAX_MSGS;
+                                entry.drain(0..drain);
+                            }
+                        }
+                        return Json(ChatResponse {
+                            response: response.text,
+                            tokens: response.tokens_generated,
+                            tokens_per_second: response.tokens_per_second,
+                            location: response.location,
+                            provider_peer_id: response.provider_peer_id,
+                        });
+                    }
+                    Err(e) => {
+                        return Json(ChatResponse {
+                            response: format!("Agentic: {e}"),
+                            tokens: 0,
+                            tokens_per_second: 0.0,
+                            location: "error".to_string(),
+                            provider_peer_id: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if req.use_mcp {
+        if let Some(mcp) = mcp_arc {
+            if mcp.tool_count() > 0 && state.inference_tx.is_some() {
+                let body = format!("### User thread\n{prompt_for_model}");
+                match run_unified_agentic_inference(
+                    state.as_ref(),
+                    None,
+                    Some(mcp),
+                    true,
+                    body,
+                    model.clone(),
+                    max_tokens,
+                    temperature,
+                )
+                .await
+                {
+                    Ok((response, _)) => {
+                        if let Some(ref sid) = req.session_id {
+                            let mut sessions = state.chat_sessions.write().await;
+                            let entry = sessions.entry(sid.clone()).or_default();
+                            entry.push(ChatMessage {
+                                role: "user".into(),
+                                content: user_message,
+                            });
+                            entry.push(ChatMessage {
+                                role: "assistant".into(),
+                                content: response.text.clone(),
+                            });
+                            const MAX_MSGS: usize = 80;
+                            if entry.len() > MAX_MSGS {
+                                let drain = entry.len() - MAX_MSGS;
+                                entry.drain(0..drain);
+                            }
+                        }
+                        return Json(ChatResponse {
+                            response: response.text,
+                            tokens: response.tokens_generated,
+                            tokens_per_second: response.tokens_per_second,
+                            location: response.location,
+                            provider_peer_id: response.provider_peer_id,
+                        });
+                    }
+                    Err(e) => {
+                        return Json(ChatResponse {
+                            response: format!("Agentic: {e}"),
+                            tokens: 0,
+                            tokens_per_second: 0.0,
+                            location: "error".to_string(),
+                            provider_peer_id: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
 
     // If we have an inference channel, use it
     if let Some(tx) = &state.inference_tx {
@@ -1126,6 +1531,199 @@ async fn api_chat_stream(
     } else {
         user_message.clone()
     };
+
+    let mcp_arc = state.mcp_manager.read().await.clone();
+    let mcp_for_agentic = if req.use_mcp {
+        mcp_arc.clone().filter(|m| m.tool_count() > 0)
+    } else {
+        None
+    };
+    let include_mcp_catalog = req.use_mcp && mcp_for_agentic.is_some();
+
+    if req.agentic {
+        if let Some(registry) = state.tools.clone() {
+            if state.inference_tx.is_some() {
+                let body = format!("### User thread\n{prompt_for_model}");
+                let state_spawn = state.clone();
+                let sessions = state.chat_sessions.clone();
+                let session_id = req.session_id.clone();
+                let user_message_for_session = user_message.clone();
+                let model_spawn = model.clone();
+                let mcp_clone = mcp_for_agentic.clone();
+                let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(128);
+                tokio::spawn(async move {
+                    match run_unified_agentic_inference(
+                        state_spawn.as_ref(),
+                        Some(registry),
+                        mcp_clone,
+                        include_mcp_catalog,
+                        body,
+                        model_spawn,
+                        max_tokens,
+                        temperature,
+                    )
+                    .await
+                    {
+                        Ok((response, _)) => {
+                            let payload =
+                                serde_json::json!({ "type": "delta", "text": response.text }).to_string();
+                            if sse_tx
+                                .send(Ok(Event::default().data(payload)))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            if let Some(ref sid) = session_id {
+                                let mut map = sessions.write().await;
+                                let entry = map.entry(sid.clone()).or_default();
+                                entry.push(ChatMessage {
+                                    role: "user".into(),
+                                    content: user_message_for_session,
+                                });
+                                entry.push(ChatMessage {
+                                    role: "assistant".into(),
+                                    content: response.text.clone(),
+                                });
+                                const MAX_MSGS: usize = 80;
+                                if entry.len() > MAX_MSGS {
+                                    let drain = entry.len() - MAX_MSGS;
+                                    entry.drain(0..drain);
+                                }
+                            }
+                            let done = serde_json::json!({
+                                "type": "done",
+                                "response": response.text,
+                                "tokens": response.tokens_generated,
+                                "tokens_per_second": response.tokens_per_second,
+                                "location": response.location,
+                                "provider_peer_id": response.provider_peer_id,
+                            })
+                            .to_string();
+                            let _ = sse_tx.send(Ok(Event::default().data(done))).await;
+                        }
+                        Err(e) => {
+                            let txt = format!("Agentic: {e}");
+                            let payload = serde_json::json!({ "type": "delta", "text": txt }).to_string();
+                            if sse_tx
+                                .send(Ok(Event::default().data(payload)))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            let done = serde_json::json!({
+                                "type": "done",
+                                "response": txt,
+                                "tokens": 0,
+                                "tokens_per_second": 0.0,
+                                "location": "error",
+                                "provider_peer_id": null,
+                            })
+                            .to_string();
+                            let _ = sse_tx.send(Ok(Event::default().data(done))).await;
+                        }
+                    }
+                });
+                let stream = ReceiverStream::new(sse_rx);
+                return Ok(Sse::new(stream)
+                    .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+                    .into_response());
+            }
+        }
+    }
+
+    if req.use_mcp {
+        if let Some(mcp) = mcp_arc {
+            if mcp.tool_count() > 0 && state.inference_tx.is_some() {
+                let body = format!("### User thread\n{prompt_for_model}");
+                let state_spawn = state.clone();
+                let sessions = state.chat_sessions.clone();
+                let session_id = req.session_id.clone();
+                let user_message_for_session = user_message.clone();
+                let model_spawn = model.clone();
+                let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(128);
+                tokio::spawn(async move {
+                    match run_unified_agentic_inference(
+                        state_spawn.as_ref(),
+                        None,
+                        Some(mcp),
+                        true,
+                        body,
+                        model_spawn,
+                        max_tokens,
+                        temperature,
+                    )
+                    .await
+                    {
+                        Ok((response, _)) => {
+                            let payload =
+                                serde_json::json!({ "type": "delta", "text": response.text }).to_string();
+                            if sse_tx
+                                .send(Ok(Event::default().data(payload)))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            if let Some(ref sid) = session_id {
+                                let mut map = sessions.write().await;
+                                let entry = map.entry(sid.clone()).or_default();
+                                entry.push(ChatMessage {
+                                    role: "user".into(),
+                                    content: user_message_for_session,
+                                });
+                                entry.push(ChatMessage {
+                                    role: "assistant".into(),
+                                    content: response.text.clone(),
+                                });
+                                const MAX_MSGS: usize = 80;
+                                if entry.len() > MAX_MSGS {
+                                    let drain = entry.len() - MAX_MSGS;
+                                    entry.drain(0..drain);
+                                }
+                            }
+                            let done = serde_json::json!({
+                                "type": "done",
+                                "response": response.text,
+                                "tokens": response.tokens_generated,
+                                "tokens_per_second": response.tokens_per_second,
+                                "location": response.location,
+                                "provider_peer_id": response.provider_peer_id,
+                            })
+                            .to_string();
+                            let _ = sse_tx.send(Ok(Event::default().data(done))).await;
+                        }
+                        Err(e) => {
+                            let txt = format!("Agentic: {e}");
+                            let payload = serde_json::json!({ "type": "delta", "text": txt }).to_string();
+                            if sse_tx
+                                .send(Ok(Event::default().data(payload)))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            let done = serde_json::json!({
+                                "type": "done",
+                                "response": txt,
+                                "tokens": 0,
+                                "tokens_per_second": 0.0,
+                                "location": "error",
+                                "provider_peer_id": null,
+                            })
+                            .to_string();
+                            let _ = sse_tx.send(Ok(Event::default().data(done))).await;
+                        }
+                    }
+                });
+                let stream = ReceiverStream::new(sse_rx);
+                return Ok(Sse::new(stream)
+                    .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+                    .into_response());
+            }
+        }
+    }
 
     let Some(tx) = &state.inference_tx else {
         return Err((
@@ -1487,6 +2085,9 @@ struct CreateTaskPayload {
     description: String,
     model: Option<String>,
     budget: Option<f64>,
+    /// When true, run the goal through the MCP tool loop instead of the loaded agent runtime.
+    #[serde(default)]
+    use_mcp: bool,
 }
 
 #[derive(Serialize)]
@@ -1523,7 +2124,18 @@ async fn api_create_task(
     state.task_store.write().await.push(task);
     broadcast_tasks_changed(&state.ws_control_tx);
 
-    // If we have an agent channel, spawn execution
+    let agentic_ready = state.inference_tx.is_some() && state.tools.is_some();
+
+    let mcp_ready = req.use_mcp
+        && state.inference_tx.is_some()
+        && state
+            .mcp_manager
+            .read()
+            .await
+            .as_ref()
+            .map(|m| m.tool_count() > 0)
+            .unwrap_or(false);
+
     if let Some(tx) = &state.agent_task_tx {
         let store = state.task_store.clone();
         let tid = task_id.clone();
@@ -1618,12 +2230,198 @@ async fn api_create_task(
                 }
             }
         });
-    } else {
-        // No agent runtime - mark as failed
+    } else if agentic_ready {
+        let registry = state.tools.clone().expect("agentic_ready implies tools");
+        let mcp_for = if req.use_mcp {
+            state
+                .mcp_manager
+                .read()
+                .await
+                .clone()
+                .filter(|m| m.tool_count() > 0)
+        } else {
+            None
+        };
+        let include_mcp_catalog = req.use_mcp && mcp_for.is_some();
+        let store = state.task_store.clone();
+        let tid = task_id.clone();
+        let description = req.description.clone();
+        let model = req
+            .model
+            .clone()
+            .unwrap_or_else(|| "llama-3.2-3b".to_string());
+        let ws_tx = state.ws_control_tx.clone();
+        let state_spawn = state.clone();
+
+        tokio::spawn(async move {
+            {
+                let mut tasks = store.write().await;
+                if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
+                    t.status = "running".to_string();
+                    t.logs.push(format!(
+                        "[{}] Agentic run started (local tools + optional MCP)",
+                        chrono::Utc::now().format("%H:%M:%S")
+                    ));
+                }
+            }
+            broadcast_tasks_changed(&ws_tx);
+
+            let body = format!(
+                "### Agent goal\n{description}\n\n\
+                 Use local tools and MCP when enabled. For distributed work use job_submit / job_status. \
+                 Finish with a concise summary for the user.\n"
+            );
+
+            match run_unified_agentic_inference(
+                state_spawn.as_ref(),
+                Some(registry),
+                mcp_for,
+                include_mcp_catalog,
+                body,
+                model,
+                2048,
+                0.35,
+            )
+            .await
+            {
+                Ok((resp, tool_logs)) => {
+                    let n = tool_logs.len() as u32;
+                    let mut tasks = store.write().await;
+                    if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
+                        for line in tool_logs {
+                            t.logs.push(line);
+                        }
+                        t.status = "completed".to_string();
+                        t.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                        t.result = Some(resp.text);
+                        t.tokens_used = resp.tokens_generated;
+                        t.iterations = n.max(1);
+                    }
+                    broadcast_tasks_changed(&ws_tx);
+                }
+                Err(e) => {
+                    let mut tasks = store.write().await;
+                    if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
+                        t.status = "failed".to_string();
+                        t.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                        t.result = Some(format!("Agentic: {e}"));
+                        t.logs.push(format!(
+                            "[{}] {}",
+                            chrono::Utc::now().format("%H:%M:%S"),
+                            e
+                        ));
+                    }
+                    broadcast_tasks_changed(&ws_tx);
+                }
+            }
+        });
+    } else if mcp_ready {
+        let mcp = state
+            .mcp_manager
+            .read()
+            .await
+            .as_ref()
+            .cloned()
+            .expect("mcp_ready implies Some");
+        let store = state.task_store.clone();
+        let tid = task_id.clone();
+        let description = req.description.clone();
+        let model = req
+            .model
+            .clone()
+            .unwrap_or_else(|| "llama-3.2-3b".to_string());
+        let ws_tx = state.ws_control_tx.clone();
+        let state_spawn = state.clone();
+
+        tokio::spawn(async move {
+            {
+                let mut tasks = store.write().await;
+                if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
+                    t.status = "running".to_string();
+                    t.logs.push(format!(
+                        "[{}] MCP-only agentic run started",
+                        chrono::Utc::now().format("%H:%M:%S")
+                    ));
+                }
+            }
+            broadcast_tasks_changed(&ws_tx);
+
+            let body = format!(
+                "### Agent goal\n{description}\n\n\
+                 Use MCP tools when they help. Finish with a concise summary for the user.\n"
+            );
+
+            match run_unified_agentic_inference(
+                state_spawn.as_ref(),
+                None,
+                Some(mcp),
+                true,
+                body,
+                model,
+                2048,
+                0.35,
+            )
+            .await
+            {
+                Ok((resp, tool_logs)) => {
+                    let n = tool_logs.len() as u32;
+                    let mut tasks = store.write().await;
+                    if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
+                        for line in tool_logs {
+                            t.logs.push(line);
+                        }
+                        t.status = "completed".to_string();
+                        t.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                        t.result = Some(resp.text);
+                        t.tokens_used = resp.tokens_generated;
+                        t.iterations = n.max(1);
+                    }
+                    broadcast_tasks_changed(&ws_tx);
+                }
+                Err(e) => {
+                    let mut tasks = store.write().await;
+                    if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
+                        t.status = "failed".to_string();
+                        t.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                        t.result = Some(format!("Agentic: {e}"));
+                        t.logs.push(format!(
+                            "[{}] {}",
+                            chrono::Utc::now().format("%H:%M:%S"),
+                            e
+                        ));
+                    }
+                    broadcast_tasks_changed(&ws_tx);
+                }
+            }
+        });
+    } else if req.use_mcp {
         let mut tasks = state.task_store.write().await;
         if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id) {
             t.status = "failed".to_string();
-            t.result = Some("No agent runtime loaded. Start with --agent flag.".to_string());
+            t.completed_at = Some(chrono::Utc::now().to_rfc3339());
+            t.result = Some(
+                "MCP mode requires inference and at least one connected MCP tool. Without MCP, use a full `peerclaw serve` node (agentic tools) or `--agent` for a spec-driven runtime."
+                    .to_string(),
+            );
+            t.logs.push(format!(
+                "[{}] MCP unavailable (no tools connected or inference off)",
+                chrono::Utc::now().format("%H:%M:%S")
+            ));
+        }
+        broadcast_tasks_changed(&state.ws_control_tx);
+    } else {
+        let mut tasks = state.task_store.write().await;
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id) {
+            t.status = "failed".to_string();
+            t.completed_at = Some(chrono::Utc::now().to_rfc3339());
+            t.result = Some(
+                "No execution path for this task. Use `peerclaw serve` with inference, or `--agent` for a spec-driven agent, or enable MCP in settings when tools are connected."
+                    .to_string(),
+            );
+            t.logs.push(format!(
+                "[{}] No agent runtime, no tool registry, and no MCP path matched",
+                chrono::Utc::now().format("%H:%M:%S")
+            ));
         }
         broadcast_tasks_changed(&state.ws_control_tx);
     }

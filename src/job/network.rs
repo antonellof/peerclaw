@@ -218,7 +218,7 @@ pub fn deserialize_message(data: &[u8]) -> Result<JobMessage, rmp_serde::decode:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::job::{JobRequirements, ResourceType};
+    use crate::job::ResourceType;
     use crate::wallet::to_micro;
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;

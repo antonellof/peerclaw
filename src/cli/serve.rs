@@ -148,8 +148,8 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     })?;
     tracing::info!("Database opened at {:?}", config.database.path);
 
-    // Create runtime with all subsystems
-    let runtime = Runtime::new(identity, database, config.clone()).await?;
+    // Create runtime with all subsystems (Arc: agent tools + web share the same node)
+    let runtime = Arc::new(Runtime::new(identity, database, config.clone()).await?);
 
     // Set pricing strategy if acting as provider
     if args.provider {
@@ -177,6 +177,8 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     // Create channels for web UI
     let (inference_tx, mut inference_rx) = mpsc::channel::<InferenceRequest>(32);
     let (job_submit_tx, mut job_submit_rx) = mpsc::channel::<JobSubmitRequest>(32);
+
+    let (node_tool_tx, mut node_tool_rx) = mpsc::channel::<crate::tools::NodeToolCommand>(64);
 
     // Create swarm manager for agent visualization
     let swarm_manager = Arc::new(crate::swarm::SwarmManager::new(
@@ -212,6 +214,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                             runtime.executor.clone(),
                             runtime.tools.clone(),
                             runtime.local_peer_id.to_string(),
+                            Some(node_tool_tx.clone()),
                         );
 
                         let agent_id = agent_rt.config.id.clone();
@@ -291,7 +294,10 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             ws_control_tx,
             skills: Some(runtime.skills.clone()),
             chat_sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
-            mcp_config: config.mcp.clone(),
+            mcp_config: Arc::new(tokio::sync::RwLock::new(config.mcp.clone())),
+            mcp_manager: Arc::new(tokio::sync::RwLock::new(None)),
+            tools: Some(runtime.tools.clone()),
+            node_tool_tx: Some(node_tool_tx.clone()),
             skills_dir: config
                 .skills
                 .directory
@@ -305,6 +311,10 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
 
     // Start web server if enabled
     if let Some(state) = web_state.clone() {
+        let warm_mcp = state.clone();
+        tokio::spawn(async move {
+            crate::web::reload_mcp_manager(warm_mcp.as_ref()).await;
+        });
         let web_addr = config.web.listen_addr;
         tokio::spawn(async move {
             if let Err(e) = crate::web::start_server(web_addr, state).await {
@@ -372,7 +382,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         state.connected_peers.write().await.retain(|p| p != peer_id);
                     }
                 }
-                handle_network_event(&runtime, e).await;
+                handle_network_event(runtime.as_ref(), e).await;
             }
         }
 
@@ -484,9 +494,39 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         // Handle job submission requests from web UI
         if let Ok(request) = job_submit_rx.try_recv() {
             let response =
-                handle_job_submit(&runtime, request.job_type, request.budget, request.payload)
+                handle_job_submit(runtime.as_ref(), request.job_type, request.budget, request.payload)
                     .await;
             let _ = request.response_tx.send(response);
+        }
+
+        // job_submit / job_status from ToolRegistry (same thread as Runtime — `Runtime` is not `Send`)
+        if let Ok(cmd) = node_tool_rx.try_recv() {
+            use crate::job::JobId;
+            use crate::tools::{NodeToolCommand, P2pJobSubmitResult};
+            match cmd {
+                NodeToolCommand::SubmitP2pJob {
+                    job_type,
+                    budget,
+                    payload,
+                    reply,
+                } => {
+                    let r = handle_job_submit(runtime.as_ref(), job_type, budget, payload).await;
+                    let _ = reply.send(P2pJobSubmitResult {
+                        success: r.success,
+                        job_id: r.job_id,
+                        error: r.error,
+                    });
+                }
+                NodeToolCommand::DescribeP2pJob { job_id, reply } => {
+                    let jid = JobId(job_id);
+                    let jm = runtime.job_manager.read().await;
+                    let res = jm
+                        .describe_job_for_tools(&jid)
+                        .await
+                        .ok_or_else(|| "job not found".to_string());
+                    let _ = reply.send(res);
+                }
+            }
         }
 
         // Handle agent task requests from web UI
@@ -639,7 +679,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
 
         // Auto-accept bids for our pending requests after bid collection period
         if bid_accept_interval.tick().now_or_never().is_some() {
-            auto_accept_bids(&runtime, &mut job_creation_times).await;
+            auto_accept_bids(runtime.as_ref(), &mut job_creation_times).await;
         }
 
         // Periodically advertise our provider manifest
@@ -719,7 +759,7 @@ async fn handle_job_submit(
     payload: String,
 ) -> JobSubmitResponse {
     use crate::job::network::{serialize_message, topics, JobMessage, JobRequestMessage};
-    use crate::job::{JobRequest, ResourceType};
+    use crate::job::{JobRequest, ResourceType, StorageOperation};
     use crate::wallet::to_micro;
 
     tracing::info!(
@@ -738,6 +778,14 @@ async fn handle_job_submit(
         "wasm" => ResourceType::WasmTool {
             tool_name: payload.clone(),
             invocations: 1,
+        },
+        "compute" => ResourceType::Cpu {
+            cores: 1,
+            duration_secs: 300,
+        },
+        "storage" => ResourceType::Storage {
+            operation: StorageOperation::Read,
+            bytes: payload.len() as u64,
         },
         _ => {
             return JobSubmitResponse {

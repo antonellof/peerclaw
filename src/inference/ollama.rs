@@ -51,6 +51,7 @@ struct OllamaOptions {
 
 /// Ollama chat response.
 #[derive(Deserialize)]
+#[allow(dead_code)] // extra API fields we do not surface yet
 struct OllamaChatResponse {
     message: OllamaResponseMessage,
     #[serde(default)]

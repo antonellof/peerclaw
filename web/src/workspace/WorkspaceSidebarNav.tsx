@@ -18,6 +18,7 @@ export const WORKSPACE_VIEW_TITLES: Record<WorkspaceView, string> = {
   jobs: "Jobs",
   providers: "Providers",
   skills: "Skills",
+  mcp: "MCP",
 }
 
 type Props = {

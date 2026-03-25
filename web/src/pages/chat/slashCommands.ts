@@ -261,9 +261,13 @@ Use /tool info <name> when wired to the API.`
       try {
         const m = await fetchMcpStatus()
         const n = m.config?.servers?.length ?? 0
+        const tc = m.tool_count ?? 0
+        const cs = m.connected_servers?.length ? m.connected_servers.join(", ") : "none"
         return `MCP mode: ${m.mode}
 In core: ${m.in_core}
 Servers in config: ${n}
+Connected: ${cs}
+Tools available: ${tc}
 Timeout: ${m.config?.timeout_secs ?? "—"}s
 
 ${m.hint}

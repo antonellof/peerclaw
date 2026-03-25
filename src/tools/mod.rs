@@ -8,9 +8,13 @@
 //! Tools can execute locally or be distributed across the P2P network.
 
 pub mod builtin;
+pub mod node_tool;
 pub mod registry;
 pub mod tool;
 
+pub use node_tool::{
+    describe_p2p_job_via_node, submit_p2p_job_via_node, NodeToolCommand, NodeToolTx, P2pJobSubmitResult,
+};
 pub use registry::{ToolInfo, ToolRegistry};
 pub use tool::{Tool, ToolContext, ToolError, ToolOutput};
 

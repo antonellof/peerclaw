@@ -12,7 +12,7 @@ mod request;
 pub use bid::{select_best_bid, BidId, BidStatus, JobBid};
 pub use execution::{ActualUsage, ExecutionMetrics, Job, JobResult, JobStatus};
 pub use network::{topics as job_topics, JobMessage};
-pub use pricing::{PricingStrategy, ResourcePricing, ResourceType};
+pub use pricing::{PricingStrategy, ResourcePricing, ResourceType, StorageOperation};
 pub use request::{JobId, JobRequest, JobRequirements};
 
 use crate::wallet::{Wallet, WalletError};
@@ -136,6 +136,48 @@ impl JobManager {
             .get(job_id)
             .cloned()
             .unwrap_or_default()
+    }
+
+    /// Snapshot for agent / UI tools (`job_status`).
+    pub async fn describe_job_for_tools(&self, job_id: &JobId) -> Option<serde_json::Value> {
+        let pending = {
+            let req = self.requests.read().await;
+            req.get(job_id).cloned()
+        };
+        if let Some(r) = pending {
+            let bid_count = self.get_bids(job_id).await.len();
+            return Some(serde_json::json!({
+                "job_id": job_id.0,
+                "phase": "awaiting_bids",
+                "resource_type": format!("{:?}", r.resource_type),
+                "max_budget_micro": r.max_budget,
+                "bid_count": bid_count,
+                "timeout_secs": r.timeout_secs,
+            }));
+        }
+        {
+            let active = self.active_jobs.read().await;
+            if let Some(j) = active.get(job_id) {
+                return Some(serde_json::json!({
+                    "job_id": job_id.0,
+                    "phase": "active",
+                    "status": j.status.to_string(),
+                    "provider": j.bid.bidder_id,
+                }));
+            }
+        }
+        let done = self.completed_jobs.read().await;
+        for j in done.iter().rev() {
+            if &j.id == job_id {
+                return Some(serde_json::json!({
+                    "job_id": job_id.0,
+                    "phase": "completed",
+                    "status": j.status.to_string(),
+                    "has_result": j.result.is_some(),
+                }));
+            }
+        }
+        None
     }
 
     /// Accept a bid and create escrow for the job.

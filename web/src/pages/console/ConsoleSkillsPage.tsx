@@ -155,6 +155,7 @@ export function ConsoleSkillsPage() {
               <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                 <span>mode: {mcp.mode}</span>
                 <span>servers: {mcp.config.servers.length}</span>
+                <span>tools: {mcp.tool_count ?? 0}</span>
                 <span>timeout: {mcp.config.timeout_secs}s</span>
               </div>
               <p className="text-xs text-muted-foreground">{mcp.hint}</p>

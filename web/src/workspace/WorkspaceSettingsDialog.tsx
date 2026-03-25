@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Briefcase, BookOpen, Cpu, Home, LayoutGrid, Terminal } from "lucide-react"
+import { Briefcase, BookOpen, Cpu, Home, LayoutGrid, Plug, Terminal } from "lucide-react"
 
 import { fetchOpenAiModels } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -117,6 +117,10 @@ export function WorkspaceSettingsDialog({
                     <BookOpen className="size-4 shrink-0 opacity-80" />
                     <span className="text-sm font-medium">Skills</span>
                   </Button>
+                  <Button variant="outline" className="h-auto justify-start gap-2 py-3 text-left" onClick={() => go("mcp")}>
+                    <Plug className="size-4 shrink-0 opacity-80" />
+                    <span className="text-sm font-medium">MCP servers</span>
+                  </Button>
                   <Button
                     variant="outline"
                     className="h-auto justify-start gap-2 py-3 text-left"
@@ -185,6 +189,29 @@ export function WorkspaceSettingsDialog({
                     onChange={(e) => setChatPreferences({ distributed: e.target.checked })}
                   />
                   <span>Prefer distributed inference when available</span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="size-4 rounded border-input"
+                    checked={chatPreferences.useAgentic}
+                    onChange={(e) => setChatPreferences({ useAgentic: e.target.checked })}
+                  />
+                  <span>
+                    Agentic chat (node tools: <code className="text-foreground">job_submit</code>, shell, files, …).
+                    Turn off for plain single-shot replies.
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="size-4 rounded border-input"
+                    checked={chatPreferences.useMcp}
+                    onChange={(e) => setChatPreferences({ useMcp: e.target.checked })}
+                  />
+                  <span>
+                    Use MCP tools in chat &amp; agent goals (configure under Workspace → MCP servers).
+                  </span>
                 </label>
               </div>
             </ScrollArea>

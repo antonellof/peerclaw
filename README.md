@@ -29,7 +29,8 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 ### P2P Network
 - **Decentralized** — No central server, peers discover each other
 - **libp2p stack** — Kademlia DHT, GossipSub, mDNS, Noise encryption
-- **Job marketplace** — Request → Bid → Execute → Settle workflow
+- **Job marketplace** — Request → Bid → Execute → Settle workflow; signed job messages (Ed25519)
+- **Job resource types** — Inference, web fetch, WASM tool runs, CPU compute, and storage-style requests
 - **Multi-peer clusters** — Test distributed execution locally
 
 ### Token Economy
@@ -45,9 +46,10 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **P2P sharing** — Discover and install skills from other peers
 
 ### Tools & MCP
-- **Builtin tools** — HTTP, filesystem, shell, memory, P2P operations
+- **Builtin tools** — HTTP, web fetch, filesystem, shell, JSON/time, vector memory helpers
+- **P2P job tools** — `job_submit` / `job_status` let agents place work on the marketplace (inference, web fetch, WASM, compute, storage) with PCLAW budget; wired on `peerclaw serve` to the same GossipSub path as the CLI
 - **WASM sandbox** — Wasmtime-based isolation with capability grants
-- **MCP integration** — Connect to external Model Context Protocol servers
+- **MCP integration** — Optional MCP servers (stdio); tools use `server:tool_name` ids alongside local tools
 - **Custom tools** — Build and deploy WASM tools to the network
 
 ### Multi-Platform Messaging
@@ -77,8 +79,9 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 ### Agent Runtime
 - **ReAct loop** — LLM plans, calls tools, iterates until task is solved
 - **Budget enforcement** — Per-request, hourly, daily, and total spend limits
-- **Tool execution** — Agents use builtin tools (web_fetch, shell, file I/O, etc.)
+- **Tool execution** — Builtin tools plus P2P marketplace hooks when running under `peerclaw serve`
 - **TOML agent specs** — Define agents with model, tools, budget, and capabilities
+- **Dashboard tasks** — With `--agent`, tasks go to the spec-driven runtime first; otherwise a unified tool+MCP loop runs when inference and the tool registry are available
 - **Personal assistant** — Research, code, automate, monitor, summarize, analyze
 
 ### LLM Provider Sharing
@@ -89,11 +92,14 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 
 ### Web Dashboard
 - **Network topology** — Interactive D3.js graph, click nodes to see details
-- **Task management** — Create, monitor, and view results of agent tasks
+- **Agentic chat** — Default **Tools** mode: ReAct loop over the node’s tool registry (including `job_submit` / `job_status` for network work); optional **MCP** adds external servers; plain single-shot replies when Tools is off
+- **Chat API** — `POST /api/chat` and `/api/chat/stream` support `agentic`, `use_mcp`, and `session_id` for bounded server-side history
+- **MCP console** — Configure MCP in the UI (`PUT /api/mcp/config`) and inspect connection status
+- **Task management** — Create, monitor, and view results of agent tasks (tool traces in logs when using the unified loop)
 - **Provider settings** — Configure LLM sharing, view discovered network providers
 - **Resource monitoring** — Real-time CPU, RAM, GPU stats
-- **Job tracking** — Active and completed jobs with peer IDs
-- **AI Chat interface** — Send prompts via browser
+- **Job tracking** — List and monitor marketplace jobs; submission is intended via chat/agents (`job_submit`), not a separate submit form
+- **AI Chat interface** — Streaming assistant with workspace preferences (model, temperature, max tokens, distributed inference)
 
 ### Security
 - **WASM sandbox** — Wasmtime for isolated tool execution
@@ -154,15 +160,16 @@ The built-in assistant agent (`examples/agents/assistant.toml`) can solve everyd
 peerclaw serve --web 127.0.0.1:8080 --ollama --agent examples/agents/assistant.toml
 ```
 
-Then open the dashboard at http://127.0.0.1:8080, go to **Tasks**, and try:
+Then open the dashboard at http://127.0.0.1:8080. In **Chat**, leave **Tools** on (default) for the agentic loop, enable **MCP** if you configured servers under Workspace → MCP. Use **Tasks** for longer goals. Example prompts:
 
 | Task | What it does |
 |------|-------------|
-| "Research the latest Rust async patterns and summarize" | Web search + summarize |
+| "Research the latest Rust async patterns and summarize" | Web fetch / search tools + synthesis |
 | "Fetch https://news.ycombinator.com and list the top 5 stories" | Web fetch + extract |
 | "List all .rs files in the current directory" | Shell tool execution |
 | "Read my Cargo.toml and explain the dependencies" | File read + analysis |
 | "What time is it?" | Quick tool call |
+| "Submit a small inference job to the network and poll until done" | `job_submit` + `job_status` (P2P marketplace) |
 
 ### Custom Agent Specs
 
@@ -420,18 +427,23 @@ policy_enforcement = true
 - [x] Budget enforcement (per-request/hour/day/total)
 - [x] Task management API
 - [x] Example agents (assistant, coder, researcher, monitor, data-analyst)
+- [x] Web agentic chat: unified ReAct path (local tools + optional MCP + long-horizon tool iterations)
+- [x] P2P `job_submit` / `job_status` tools connected to the serve node (GossipSub + `JobManager`)
+- [x] Marketplace job types: inference, web_fetch, wasm, compute, storage (web + tool path)
 
 ### Next (v0.5)
 - [ ] Distributed inference (pipeline parallelism)
 - [ ] Multi-agent collaboration
-- [ ] Reputation system
+- [ ] Durable agent runs (checkpoints, resume after restart) and richer observability
+- [ ] Cross-peer tool execution (discovery, quotes, escrow) and marketplace reputation
+- [ ] Human-in-the-loop approvals for high-risk tools
 - [ ] Context compaction for long conversations
 
 ### Future (v1.0)
 - [ ] On-chain settlement
 - [ ] Public tool registry
 - [ ] Governance
-- [ ] Firecracker microVM isolation
+- [ ] Firecracker microVM isolation (and stronger “computer use” sandboxes)
 
 ---
 

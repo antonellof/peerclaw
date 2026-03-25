@@ -6,6 +6,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::node_tool::NodeToolTx;
+
 /// Execution context for tool calls.
 #[derive(Debug, Clone)]
 pub struct ToolContext {
@@ -21,6 +23,8 @@ pub struct ToolContext {
     pub sandboxed: bool,
     /// Available secrets (names only, values fetched on demand)
     pub available_secrets: Vec<String>,
+    /// When set, `job_submit` / `job_status` forward to the running `peerclaw serve` node (P2P marketplace).
+    pub node_tool_tx: Option<NodeToolTx>,
 }
 
 impl ToolContext {
@@ -33,6 +37,7 @@ impl ToolContext {
             working_dir: std::env::current_dir().unwrap_or_default(),
             sandboxed: false,
             available_secrets: vec![],
+            node_tool_tx: None,
         }
     }
 
@@ -45,6 +50,7 @@ impl ToolContext {
             working_dir: std::env::current_dir().unwrap_or_default(),
             sandboxed: false,
             available_secrets: vec![],
+            node_tool_tx: None,
         }
     }
 }

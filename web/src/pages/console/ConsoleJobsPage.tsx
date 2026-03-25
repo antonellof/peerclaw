@@ -1,19 +1,11 @@
 import { useEffect, useState } from "react"
 
-import { fetchJobs, submitJob, type WebJobInfo } from "@/lib/api"
-import { Button } from "@/components/ui/button"
+import { fetchJobs, type WebJobInfo } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 
 export function ConsoleJobsPage() {
   const [jobs, setJobs] = useState<WebJobInfo[]>([])
-  const [jobType, setJobType] = useState("inference")
-  const [budget, setBudget] = useState(1)
-  const [payload, setPayload] = useState("")
-  const [busy, setBusy] = useState(false)
 
   const load = async () => {
     try {
@@ -32,53 +24,29 @@ export function ConsoleJobsPage() {
   const localN = jobs.filter((j) => j.location?.toLowerCase() === "local").length
   const remoteN = jobs.length - localN
 
-  const onSubmit = async () => {
-    setBusy(true)
-    try {
-      await submitJob({ job_type: jobType, budget, payload })
-      setPayload("")
-      await load()
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>Submit job</CardTitle>
+          <CardTitle>P2P jobs</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Job type</Label>
-              <select
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                value={jobType}
-                onChange={(e) => setJobType(e.target.value)}
-              >
-                <option value="inference">Inference</option>
-                <option value="web_fetch">Web fetch</option>
-                <option value="wasm">WASM</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>Budget (PCLAW)</Label>
-              <Input type="number" step={0.1} min={0.1} value={budget} onChange={(e) => setBudget(parseFloat(e.target.value) || 1)} />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Prompt / URL / tool</Label>
-            <Textarea value={payload} onChange={(e) => setPayload(e.target.value)} rows={4} placeholder="Inference prompt, URL, or tool name…" />
-          </div>
-          <Button disabled={busy || !payload.trim()} onClick={() => void onSubmit()}>
-            Submit to network
-          </Button>
+        <CardContent className="space-y-4 text-sm text-muted-foreground">
+          <p>
+            Marketplace jobs are submitted by the <strong className="text-foreground">agent</strong> via the{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs text-foreground">job_submit</code> tool (from chat
+            or an agent goal), not from a form here. Use{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs text-foreground">job_status</code> with the returned{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs text-foreground">job_id</code> to poll until work
+            completes on the network.
+          </p>
+          <p className="text-xs">
+            Types: inference, web_fetch, wasm, compute, storage — budget in PCLAW. GossipSub propagates requests; bids
+            and execution follow the node job protocol.
+          </p>
 
           <div className="rounded-lg border border-border p-4">
             <div className="text-xs font-medium text-muted-foreground">Distribution</div>
-            <div className="mt-2 space-y-2 text-sm">
+            <div className="mt-2 space-y-2 text-sm text-foreground">
               <div className="flex justify-between">
                 <span>Local</span>
                 <span>{localN}</span>

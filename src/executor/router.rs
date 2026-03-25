@@ -262,7 +262,6 @@ impl PeerFilter {
 mod tests {
     use super::*;
     use crate::executor::resource::MonitorConfig;
-    use crate::executor::task::InferenceTask;
 
     fn create_router() -> TaskRouter {
         let monitor = Arc::new(ResourceMonitor::new(MonitorConfig::default()));
