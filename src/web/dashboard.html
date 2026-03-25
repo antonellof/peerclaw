@@ -345,6 +345,18 @@
         .template-chip:hover { border-color: var(--accent); }
         .template-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+        /* Task list rows — avoid inline onmouseout fighting nested children (clicks on “live logs”) */
+        .task-row {
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.15s;
+            background: transparent;
+        }
+        .task-row:hover { background: var(--bg-tertiary); }
+        .task-row.selected { background: var(--bg-tertiary); }
+        .task-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
         /* ---- Cards / Panels ---- */
         .panel {
             background: var(--bg-secondary);
@@ -2115,6 +2127,7 @@
         function renderTasks() {
             const el = document.getElementById('task-list');
             document.getElementById('task-count').textContent = tasks.length + ' tasks';
+            el.onclick = null;
             if (!tasks.length) {
                 el.innerHTML = '<div class="empty-state">No tasks yet. Create one above.</div>';
                 return;
@@ -2123,22 +2136,36 @@
                 const statusColors = {pending:'var(--warning)',running:'var(--accent)',completed:'var(--success)',failed:'var(--danger)'};
                 const color = statusColors[t.status] || 'var(--text-secondary)';
                 const isSelected = t.id === selectedTaskId;
-                const bg = isSelected ? 'var(--bg-tertiary)' : 'transparent';
+                const selClass = isSelected ? ' selected' : '';
                 const hasResult = t.result && t.result.length > 0;
                 const resultPreview = hasResult ? escapeHtml(t.result.substring(0, 400)) + (t.result.length > 400 ? '...' : '') : '';
                 const showResult = (t.status === 'completed' || t.status === 'failed') && hasResult;
                 const logCount = (t.logs || []).length;
+                const safeId = escapeHtml(t.id);
 
-                return `<div onclick="showTaskDetail('${t.id}')" style="padding:0.75rem;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;background:${bg}" onmouseover="this.style.background='var(--bg-tertiary)'" onmouseout="this.style.background='${bg}'">
+                return `<div class="task-row${selClass}" data-task-id="${safeId}" tabindex="0" role="button">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.375rem">
                         <span style="font-size:0.8125rem;font-weight:500">${escapeHtml(t.description.substring(0,100))}${t.description.length>100?'...':''}</span>
                         <span style="font-size:0.6875rem;padding:0.125rem 0.5rem;border-radius:10px;background:${color}22;color:${color};white-space:nowrap;margin-left:0.5rem">${t.status}${t.status==='running'?' ...':''}</span>
                     </div>
                     <div style="font-size:0.6875rem;color:var(--text-secondary)">${t.task_type} | ${t.iterations} iters | ${t.tokens_used} tokens${t.status==='running'?' | '+logCount+' logs':''}</div>
-                    ${showResult ? `<div style="font-size:0.8125rem;color:var(--text-primary);background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;padding:0.75rem;margin-top:0.5rem;white-space:pre-wrap;line-height:1.5;max-height:200px;overflow-y:auto">${resultPreview}</div>` : ''}
-                    ${t.status==='running' ? `<div style="font-size:0.75rem;color:var(--accent);margin-top:0.375rem;display:flex;align-items:center;gap:0.375rem"><span class="status-dot" style="width:6px;height:6px;background:var(--accent)"></span> Running... click to see live logs (${logCount} entries)</div>` : ''}
+                    ${showResult ? `<div style="font-size:0.8125rem;color:var(--text-primary);background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:0.75rem;margin-top:0.5rem;white-space:pre-wrap;line-height:1.5;max-height:200px;overflow-y:auto">${resultPreview}</div>` : ''}
+                    ${t.status==='running' ? `<div class="task-live-hint" style="font-size:0.75rem;color:var(--accent);margin-top:0.375rem;display:flex;align-items:center;gap:0.375rem;pointer-events:none"><span class="status-dot" style="width:6px;height:6px;background:var(--accent)"></span> Open execution log below (${logCount} entries)</div>` : ''}
                 </div>`;
             }).join('');
+
+            el.onclick = (e) => {
+                const row = e.target.closest('.task-row');
+                if (!row || !row.dataset.taskId) return;
+                showTaskDetail(row.dataset.taskId);
+            };
+            el.onkeydown = (e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                const row = e.target.closest('.task-row');
+                if (!row || !row.dataset.taskId) return;
+                e.preventDefault();
+                showTaskDetail(row.dataset.taskId);
+            };
 
             // Auto-open detail for the latest task
             if (tasks.length && !selectedTaskId) {
@@ -2149,12 +2176,25 @@
 
         async function showTaskDetail(id) {
             selectedTaskId = id;
+            renderTasks();
+            const panel = document.getElementById('task-detail-panel');
+            const logsEl = document.getElementById('task-detail-logs');
+            const resultEl = document.getElementById('task-detail-result');
             try {
-                const res = await fetch(`/api/tasks/${id}`);
+                const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`);
                 const t = await res.json();
-                if (t.error) return; // task not found
+                if (t.error) {
+                    panel.style.display = 'block';
+                    document.getElementById('task-detail-title').textContent = 'Task';
+                    document.getElementById('task-detail-status').innerHTML =
+                        '<span style="color:var(--danger)">Could not load task. It may have been cleared or the id is invalid.</span>';
+                    resultEl.textContent = '';
+                    logsEl.textContent = '';
+                    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    return;
+                }
 
-                document.getElementById('task-detail-panel').style.display = 'block';
+                panel.style.display = 'block';
                 document.getElementById('task-detail-title').textContent = t.description || 'Task';
 
                 const statusColors = {pending:'var(--warning)',running:'var(--accent)',completed:'var(--success)',failed:'var(--danger)'};
@@ -2167,7 +2207,6 @@
                 `;
 
                 // Show full result (not truncated)
-                const resultEl = document.getElementById('task-detail-result');
                 if (t.result) {
                     resultEl.textContent = t.result;
                     resultEl.style.display = 'block';
@@ -2179,27 +2218,40 @@
                     resultEl.style.display = 'block';
                 }
 
-                // Show logs with auto-scroll
-                const logsEl = document.getElementById('task-detail-logs');
+                // Logs: use text nodes so arbitrary log text cannot break HTML / clicks
                 const logs = t.logs || [];
+                logsEl.textContent = '';
                 if (logs.length) {
-                    logsEl.innerHTML = logs.map(l => {
-                        // Color-code log entries
+                    logs.forEach((l) => {
+                        const line = document.createElement('div');
+                        line.style.marginBottom = '0.25rem';
                         let logColor = 'var(--text-secondary)';
                         if (l.includes('[tool]')) logColor = 'var(--purple)';
                         else if (l.includes('Error')) logColor = 'var(--danger)';
                         else if (l.includes('Completed')) logColor = 'var(--success)';
                         else if (l.includes('started') || l.includes('iteration')) logColor = 'var(--accent)';
-                        return `<div style="margin-bottom:0.25rem;color:${logColor}">${l}</div>`;
-                    }).join('');
-                    // Auto-scroll to bottom if task is running
+                        line.style.color = logColor;
+                        line.textContent = l;
+                        logsEl.appendChild(line);
+                    });
                     if (t.status === 'running') {
                         logsEl.scrollTop = logsEl.scrollHeight;
                     }
                 } else {
-                    logsEl.innerHTML = '<div style="color:var(--text-secondary)">No logs yet</div>';
+                    const empty = document.createElement('div');
+                    empty.style.color = 'var(--text-secondary)';
+                    empty.textContent = 'No logs yet';
+                    logsEl.appendChild(empty);
                 }
-            } catch(e) { console.error('showTaskDetail error:', e); }
+
+                panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch(e) {
+                console.error('showTaskDetail error:', e);
+                panel.style.display = 'block';
+                document.getElementById('task-detail-status').innerHTML =
+                    '<span style="color:var(--danger)">Failed to load task detail.</span>';
+                panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
         }
 
         function closeTaskDetail() {

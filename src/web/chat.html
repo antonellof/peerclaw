@@ -403,6 +403,7 @@
             color: var(--text-secondary);
             font-style: italic;
         }
+        .message.agent-run .message-text { font-style: normal; }
 
         /* Typing indicator */
         .typing-indicator {
@@ -432,6 +433,77 @@
         @keyframes typing {
             0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
             30% { transform: translateY(-4px); opacity: 1; }
+        }
+
+        /* Composer: Chat vs Agent (ChatGPT / Manus-style) */
+        .composer-toolbar {
+            padding: 0 0 0.65rem;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem 0.75rem;
+        }
+        .mode-seg {
+            display: inline-flex;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            background: var(--bg-secondary);
+        }
+        .mode-btn {
+            padding: 0.4rem 0.85rem;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        .mode-btn:hover { color: var(--text-primary); }
+        .mode-btn.active {
+            background: var(--accent);
+            color: #fff;
+        }
+        .agent-fields {
+            display: none;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8125rem;
+        }
+        .agent-fields.visible { display: flex; }
+        .agent-fields select,
+        .agent-fields input[type="number"] {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.35rem 0.5rem;
+            color: var(--text-primary);
+            font-size: 0.8125rem;
+        }
+        .agent-fields label { color: var(--text-muted); white-space: nowrap; }
+        .composer-console-link {
+            margin-left: auto;
+            font-size: 0.75rem;
+            color: var(--accent);
+            text-decoration: none;
+        }
+        .composer-console-link:hover { text-decoration: underline; }
+        .message.agent-run .message-avatar { background: var(--purple); }
+        .agent-logs {
+            margin: 0.5rem 0 0;
+            padding: 0.65rem 0.75rem;
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.75rem;
+            line-height: 1.45;
+            max-height: 220px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: 'SF Mono', 'Consolas', monospace;
         }
 
         /* Input area */
@@ -508,9 +580,9 @@
             color: white;
             font-weight: 500;
             cursor: pointer;
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.45rem;
             transition: all 0.2s;
         }
 
@@ -770,12 +842,36 @@
                         </div>
                         <div class="quick-action-desc">View prompt-based skills</div>
                     </div>
+                    <div class="quick-action" id="quick-agent-mode">
+                        <div class="quick-action-title">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                            Agent goal
+                        </div>
+                        <div class="quick-action-desc">Multi-step run with tools (set mode below)</div>
+                    </div>
                 </div>
             </div>
             <div id="messages"></div>
         </div>
 
         <div class="input-area">
+            <div class="composer-toolbar">
+                <div class="mode-seg" role="group" aria-label="Reply mode">
+                    <button type="button" class="mode-btn active" data-mode="chat" id="mode-chat">Chat</button>
+                    <button type="button" class="mode-btn" data-mode="agent" id="mode-agent">Agent goal</button>
+                </div>
+                <div class="agent-fields" id="agent-fields" aria-label="Agent options">
+                    <select id="agent-task-type" title="Focus">
+                        <option value="general">General</option>
+                        <option value="research">Research</option>
+                        <option value="code">Code</option>
+                        <option value="monitor">Monitor</option>
+                        <option value="analyze">Analyze</option>
+                    </select>
+                    <label>Budget <input type="number" id="agent-budget" value="5" step="0.5" min="0.5" max="500" title="PCLAW"></label>
+                </div>
+                <a href="/console" class="composer-console-link">Node console →</a>
+            </div>
             <div class="input-wrapper">
                 <div class="autocomplete-menu" id="autocomplete-menu"></div>
                 <textarea
@@ -785,13 +881,13 @@
                     rows="1"
                 ></textarea>
                 <div class="input-actions">
-                    <div class="input-hints">
+                    <div class="input-hints" id="input-hints">
                         <span class="input-hint"><kbd>/</kbd> commands</span>
                         <span class="input-hint"><kbd>Enter</kbd> send</span>
                         <span class="input-hint"><kbd>Shift+Enter</kbd> newline</span>
                     </div>
-                    <button class="send-btn" id="send-btn">
-                        Send
+                    <button class="send-btn" id="send-btn" type="button">
+                        <span class="send-label">Send</span>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="22" y1="2" x2="11" y2="13"/>
                             <polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -848,6 +944,9 @@
         let filteredCommands = [];
         let sessionStats = { tokens: 0, requests: 0, startTime: Date.now() };
         let settings = { temperature: 0.7, maxTokens: 500, distributed: false };
+        let composerMode = 'chat';
+        const agentPolls = new Map();
+        const agentRunFinished = new Set();
 
         // DOM elements
         const messagesContainer = document.getElementById('messages-container');
@@ -914,7 +1013,141 @@
             if (t) t.setAttribute('aria-expanded', 'true');
         }
 
+        function stopAgentPolls() {
+            agentPolls.forEach((intervalId) => clearInterval(intervalId));
+            agentPolls.clear();
+            agentRunFinished.clear();
+        }
+
+        function setComposerMode(mode) {
+            composerMode = mode;
+            document.querySelectorAll('.mode-btn').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+            const af = document.getElementById('agent-fields');
+            if (af) af.classList.toggle('visible', mode === 'agent');
+            const hints = document.getElementById('input-hints');
+            if (hints) {
+                hints.innerHTML = mode === 'agent'
+                    ? '<span class="input-hint">Multi-step run with tools</span><span class="input-hint"><kbd>/</kbd> still works</span>'
+                    : '<span class="input-hint"><kbd>/</kbd> commands</span><span class="input-hint"><kbd>Enter</kbd> send</span><span class="input-hint"><kbd>Shift+Enter</kbd> newline</span>';
+            }
+            chatInput.placeholder = mode === 'agent'
+                ? 'Describe the goal (research, code review, automation…) — requires node with --agent'
+                : 'Type a message or / for commands...';
+            updateSendButtonLabel();
+        }
+
+        function updateSendButtonLabel() {
+            const lab = document.querySelector('#send-btn .send-label');
+            if (lab) lab.textContent = composerMode === 'agent' ? 'Run agent' : 'Send';
+        }
+
+        function addAgentRunMessage(taskId) {
+            const msgEl = document.createElement('div');
+            msgEl.className = 'message system agent-run';
+            msgEl.dataset.agentTaskId = taskId;
+            msgEl.innerHTML = `
+                <div class="message-avatar" style="background:var(--purple)">A</div>
+                <div class="message-content">
+                    <div class="message-header">
+                        <span class="message-author">Agent run</span>
+                        <span class="message-meta agent-run-meta">starting…</span>
+                    </div>
+                    <div class="message-text" style="font-size:0.8125rem;color:var(--text-secondary)">Live execution log (updates every ~1s)</div>
+                    <pre class="agent-logs" id="agent-logs-${taskId.replace(/[^a-zA-Z0-9_-]/g, '_')}"></pre>
+                </div>`;
+            messagesDiv.appendChild(msgEl);
+            scrollToBottom();
+        }
+
+        function findAgentRunRoot(taskId) {
+            return messagesDiv.querySelector('[data-agent-task-id="' + taskId.replace(/"/g, '') + '"]');
+        }
+
+        function updateAgentRunMessage(taskId, t) {
+            const root = findAgentRunRoot(taskId);
+            if (!root) return;
+            const meta = root.querySelector('.agent-run-meta');
+            if (meta) {
+                meta.textContent = `${t.status} · ${t.iterations || 0} iters · ${t.tokens_used || 0} tok`;
+            }
+            const safeId = taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const pre = document.getElementById('agent-logs-' + safeId) || root.querySelector('.agent-logs');
+            if (pre) {
+                pre.textContent = (t.logs || []).join('\n');
+                pre.scrollTop = pre.scrollHeight;
+            }
+        }
+
+        function startAgentPoll(taskId) {
+            if (agentPolls.has(taskId)) clearInterval(agentPolls.get(taskId));
+            const tick = async () => {
+                try {
+                    const res = await fetch('/api/tasks/' + encodeURIComponent(taskId));
+                    const t = await res.json();
+                    if (t.error) return;
+                    updateAgentRunMessage(taskId, t);
+                    if (t.status === 'completed' || t.status === 'failed') {
+                        if (agentRunFinished.has(taskId)) return;
+                        agentRunFinished.add(taskId);
+                        const intv = agentPolls.get(taskId);
+                        if (intv) clearInterval(intv);
+                        agentPolls.delete(taskId);
+                        const summary = t.result
+                            ? t.result
+                            : (t.status === 'failed' ? 'Agent run failed.' : 'Done.');
+                        addMessage({
+                            role: 'assistant',
+                            content: summary,
+                            meta: `${t.status} · ${t.tokens_used || 0} tokens`,
+                        });
+                    }
+                } catch (_) { /* keep polling */ }
+            };
+            tick();
+            const intervalId = setInterval(tick, 1200);
+            agentPolls.set(taskId, intervalId);
+        }
+
+        async function submitAgentGoal(userText) {
+            addMessage({ role: 'user', content: userText });
+            isTyping = true;
+            sendBtn.disabled = true;
+            try {
+                const budgetEl = document.getElementById('agent-budget');
+                let budget = parseFloat(budgetEl?.value || '5');
+                if (!Number.isFinite(budget) || budget < 0.5) budget = 5;
+                const taskType = document.getElementById('agent-task-type')?.value || 'general';
+                const res = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        task_type: taskType,
+                        description: userText,
+                        budget,
+                    }),
+                });
+                const data = await res.json();
+                if (!data.success || !data.task_id) {
+                    addMessage({
+                        role: 'error',
+                        content: data.error || 'Could not start agent. Run the node with --agent /path/to/agent.toml',
+                    });
+                    return;
+                }
+                addAgentRunMessage(data.task_id);
+                startAgentPoll(data.task_id);
+            } catch (err) {
+                addMessage({ role: 'error', content: 'Agent request failed: ' + err.message });
+            } finally {
+                isTyping = false;
+                sendBtn.disabled = false;
+            }
+        }
+
         function startNewChat() {
+            stopAgentPolls();
             messages = [];
             messagesDiv.innerHTML = '';
             sessionStats = { tokens: 0, requests: 0, startTime: Date.now() };
@@ -931,6 +1164,11 @@
             chatInput.addEventListener('keydown', handleKeydown);
             sendBtn.addEventListener('click', sendMessage);
 
+            document.querySelectorAll('.mode-btn').forEach((btn) => {
+                btn.addEventListener('click', () => setComposerMode(btn.dataset.mode));
+            });
+            setComposerMode('chat');
+
             document.getElementById('new-chat-btn')?.addEventListener('click', startNewChat);
 
             document.getElementById('menu-toggle')?.addEventListener('click', () => {
@@ -942,6 +1180,11 @@
 
             document.querySelectorAll('.quick-action').forEach(el => {
                 el.addEventListener('click', () => {
+                    if (el.id === 'quick-agent-mode') {
+                        setComposerMode('agent');
+                        chatInput.focus();
+                        return;
+                    }
                     if (el.dataset.prompt) {
                         chatInput.value = el.dataset.prompt;
                         sendMessage();
@@ -1080,6 +1323,13 @@
                 await handleSlashCommand(content);
                 chatInput.value = '';
                 chatInput.style.height = 'auto';
+                return;
+            }
+
+            if (composerMode === 'agent') {
+                chatInput.value = '';
+                chatInput.style.height = 'auto';
+                await submitAgentGoal(content);
                 return;
             }
 
