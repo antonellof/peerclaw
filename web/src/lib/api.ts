@@ -144,6 +144,74 @@ export async function fetchOnboarding(): Promise<OnboardingResponse> {
   return r.json()
 }
 
+export type GgufPresetRow = { id: string; repo: string }
+
+export type InferenceSettingsResponse = {
+  use_local_gguf: boolean
+  use_ollama: boolean
+  ollama_url: string
+  remote_api_enabled: boolean
+  remote_api_base_url: string
+  remote_api_model: string
+  api_key_configured: boolean
+  models_directory: string
+  gguf_presets: GgufPresetRow[]
+  hint: string
+}
+
+export type InferenceSettingsPut = {
+  use_local_gguf: boolean
+  use_ollama: boolean
+  ollama_url: string
+  remote_api_enabled: boolean
+  remote_api_base_url: string
+  remote_api_model: string
+  remote_api_key?: string
+}
+
+export async function fetchInferenceSettings(): Promise<InferenceSettingsResponse> {
+  const r = await apiFetch("/api/inference/settings")
+  if (!r.ok) {
+    const t = await r.text()
+    throw new Error(t || `inference settings ${r.status}`)
+  }
+  return r.json()
+}
+
+export async function putInferenceSettings(body: InferenceSettingsPut): Promise<InferenceSettingsResponse> {
+  const r = await apiFetch("/api/inference/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const t = await r.text()
+    throw new Error(t || `save inference ${r.status}`)
+  }
+  return r.json()
+}
+
+export type ModelDownloadResponse = {
+  success: boolean
+  path?: string | null
+  bytes?: number | null
+  error?: string | null
+}
+
+export async function downloadGgufModel(body: {
+  preset?: string
+  quant?: string
+  url?: string
+  filename?: string
+}): Promise<ModelDownloadResponse> {
+  const r = await apiFetch("/api/models/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  return r.json()
+}
+
 export type WebJobInfo = {
   id: string
   job_type: string

@@ -1020,6 +1020,8 @@ async fn build_agentic_system_prefix(
          `job_submit` is for **paid P2P marketplace** jobs and needs `type` plus matching fields (e.g. web_fetch job: `\"url\"` on the same object). For normal page fetch use the **web_fetch tool**, not `job_submit`.\n\
          **Invalid (ignored, no tools run):** fake tags such as `<json …>`, `<file_list …>`, `<wallet_balance>`, or `message=\"…\"` as if they were tools. The runtime only recognizes `<tool_call>` blocks (plus a few legacy `<web_fetch>` / `<job_status>` forms). To call `json` or `web_fetch`, always use `<tool_call>` with `name` and `args`.\n\
          If a tool returns a parameter error, fix the arguments or stop using that tool and answer from context.\n\
+         **IMPORTANT:** If `web_fetch` fails (DNS, 404, timeout), do NOT retry the same URL or guess alternative URLs. Answer from your own knowledge instead.\n\
+         Never repeat the same failing tool call. If two consecutive passes have only errors, stop calling tools and answer directly.\n\
          Your final reply must directly satisfy the user's goal, not describe tool failures.\n\n",
     );
     if let Some(registry) = registry {
@@ -1095,6 +1097,9 @@ async fn run_unified_agentic_inference(
     let tool_session = uuid::Uuid::new_v4().to_string();
     // Cap conversation size to ~48k chars; keep system prefix + recent turns.
     const CONV_MAX_CHARS: usize = 48_000;
+    /// Bail out after this many consecutive passes where every tool call fails.
+    const MAX_CONSECUTIVE_FAIL_PASSES: u32 = 3;
+    let mut consecutive_all_fail_passes: u32 = 0;
 
     for iter in 1..=AGENTIC_MAX_ITERS {
         // Compact conversation if it has grown too large (keep prefix + tail).
@@ -1226,6 +1231,8 @@ async fn run_unified_agentic_inference(
             ));
         }
         conversation.push_str("Here are the tool results:\n");
+        let mut pass_failures = 0u32;
+        let call_count = calls.len();
         for call in calls {
             let summary = if call.name.contains(':') {
                 match &mcp {
@@ -1234,11 +1241,17 @@ async fn run_unified_agentic_inference(
                         match res {
                             Ok(r) => serde_json::to_string(&r)
                                 .unwrap_or_else(|_| "(unserializable result)".into()),
-                            Err(e) => format!("ERROR: {e}"),
+                            Err(e) => {
+                                pass_failures += 1;
+                                format!("ERROR: {e}")
+                            }
                         }
                     }
-                    None => "ERROR: MCP tool requested but MCP is not enabled or has no connected tools"
-                        .to_string(),
+                    None => {
+                        pass_failures += 1;
+                        "ERROR: MCP tool requested but MCP is not enabled or has no connected tools"
+                            .to_string()
+                    }
                 }
             } else {
                 match &registry {
@@ -1256,15 +1269,19 @@ async fn run_unified_agentic_inference(
                             .execute_local(&call.name, call.args.clone(), &ctx)
                             .await
                         {
-                            // Feed only `ToolOutput` into the loop — omit `executed_by` / P2P metadata
-                            // so logs and context stay readable.
                             Ok(r) => serde_json::to_string(&r.output)
                                 .unwrap_or_else(|_| "(unserializable)".into()),
-                            Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+                            Err(e) => {
+                                pass_failures += 1;
+                                serde_json::json!({ "error": e.to_string() }).to_string()
+                            }
                         }
                     }
-                    None => "ERROR: Local tool name used but only MCP tools are available; use server:tool_name from the MCP list."
-                        .to_string(),
+                    None => {
+                        pass_failures += 1;
+                        "ERROR: Local tool name used but only MCP tools are available; use server:tool_name from the MCP list."
+                            .to_string()
+                    }
                 }
             };
             let preview = if summary.chars().count() > 220 {
@@ -1284,6 +1301,28 @@ async fn run_unified_agentic_inference(
                 sink.record_tool_step(line, total_tokens).await;
             }
             conversation.push_str(&format!("- {} → {}\n", call.name, summary));
+        }
+
+        // Track consecutive all-fail passes and bail out with a nudge.
+        if pass_failures as usize >= call_count {
+            consecutive_all_fail_passes += 1;
+            if consecutive_all_fail_passes >= MAX_CONSECUTIVE_FAIL_PASSES {
+                conversation.push_str(
+                    "\n(System: All tool calls have failed for multiple consecutive passes. \
+                     STOP calling tools. Answer the user's question directly from your own knowledge. \
+                     Do NOT make any more tool_call blocks.)\n",
+                );
+                if let Some(ref sink) = progress {
+                    sink.append_log(format!(
+                        "[{}] {} consecutive all-fail passes — forcing answer from knowledge",
+                        chrono::Utc::now().format("%H:%M:%S"),
+                        MAX_CONSECUTIVE_FAIL_PASSES
+                    ))
+                    .await;
+                }
+            }
+        } else {
+            consecutive_all_fail_passes = 0;
         }
     }
     Err("Agentic: max tool iterations reached".into())
@@ -2460,7 +2499,7 @@ fn inference_settings_from_live(
 ) -> InferenceSettingsResponse {
     let gguf_presets = crate::models_hf::KNOWN_GGUF_PRESETS
         .iter()
-        .map(|(id, repo, _)| GgufPresetRow { id, repo })
+        .map(|(id, repo, _, _)| GgufPresetRow { id, repo })
         .collect();
     InferenceSettingsResponse {
         use_local_gguf: live.use_local_gguf,
@@ -2485,7 +2524,8 @@ async fn api_inference_settings_get(
             "Inference engine not attached (run peerclaw serve with --web).".into(),
         ));
     };
-    let live = inf.live_settings().read().await;
+    let live_arc = inf.live_settings();
+    let live = live_arc.read().await;
     let models_directory = inf.models_directory().display().to_string();
     Ok(Json(inference_settings_from_live(&live, models_directory)))
 }
@@ -2501,7 +2541,8 @@ async fn api_inference_settings_put(
         ));
     };
     {
-        let mut live = inf.live_settings().write().await;
+        let live_arc = inf.live_settings();
+        let mut live = live_arc.write().await;
         live.use_local_gguf = body.use_local_gguf;
         live.use_ollama = body.use_ollama;
         live.ollama_url = body.ollama_url;
@@ -2525,7 +2566,8 @@ async fn api_inference_settings_put(
             )
         })?;
     }
-    let live = inf.live_settings().read().await;
+    let live_arc = inf.live_settings();
+    let live = live_arc.read().await;
     let models_directory = inf.models_directory().display().to_string();
     Ok(Json(inference_settings_from_live(&live, models_directory)))
 }

@@ -90,7 +90,7 @@ async fn list_models() -> anyhow::Result<()> {
     println!("\x1b[1m═══ Available for Download ═══\x1b[0m");
     println!();
 
-    for (name, _repo, _filename) in crate::models_hf::KNOWN_GGUF_PRESETS {
+    for (name, _repo, _filename, _sep) in crate::models_hf::KNOWN_GGUF_PRESETS {
         println!("  • \x1b[36m{}\x1b[0m", name);
     }
 
@@ -110,7 +110,7 @@ async fn download_model(model: &str, quant: &str) -> anyhow::Result<()> {
         println!("\x1b[33mModel '{}' not in known list.\x1b[0m", model);
         println!();
         println!("Available models:");
-        for (name, _, _) in crate::models_hf::KNOWN_GGUF_PRESETS {
+        for (name, _, _, _) in crate::models_hf::KNOWN_GGUF_PRESETS {
             println!("  • {}", name);
         }
         return Ok(());
