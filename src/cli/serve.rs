@@ -276,8 +276,15 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     };
 
     // Create web state with all features: inference, jobs, swarm, tasks, providers, agent
-    let web_state = if config.web.enabled {
-        Some(Arc::new(crate::web::WebState {
+    let (mut peer_dial_rx, web_state) = if config.web.enabled {
+        let (peer_dial_tx, peer_dial_rx) = mpsc::channel::<String>(32);
+        let p2p_network_hints = std::sync::Arc::new(crate::web::P2pNetworkHints {
+            bootstrap_peers: config.p2p.bootstrap_peers.clone(),
+            mdns_enabled: config.p2p.mdns_enabled,
+            kademlia_enabled: config.p2p.kademlia_enabled,
+            community_peers: crate::web::default_community_peer_directory(),
+        });
+        let state = Some(Arc::new(crate::web::WebState {
             local_peer_id: runtime.local_peer_id,
             resource_monitor: runtime.executor.resource_monitor(),
             wallet_balance: Arc::new(tokio::sync::RwLock::new(0)),
@@ -305,9 +312,12 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                 .clone()
                 .unwrap_or_else(|| crate::bootstrap::base_dir().join("skills")),
             config_path: crate::bootstrap::base_dir().join("config.toml"),
-        }))
+            peer_dial_tx: Some(peer_dial_tx),
+            p2p_network_hints,
+        }));
+        (Some(peer_dial_rx), state)
     } else {
-        None
+        (None, None)
     };
 
     // Start web server if enabled
@@ -384,6 +394,26 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                     }
                 }
                 handle_network_event(runtime.as_ref(), e).await;
+            }
+        }
+
+        if let Some(ref mut rx) = peer_dial_rx {
+            while let Ok(addr_str) = rx.try_recv() {
+                match addr_str.parse::<libp2p::Multiaddr>() {
+                    Ok(ma) => {
+                        let mut network = runtime.network.write().await;
+                        if let Err(e) = network.dial(ma) {
+                            tracing::warn!(
+                                error = %e,
+                                multiaddr = %addr_str,
+                                "web-requested peer dial failed"
+                            );
+                        } else {
+                            tracing::info!(multiaddr = %addr_str, "Dialing peer from web UI");
+                        }
+                    }
+                    Err(_) => tracing::warn!(%addr_str, "invalid multiaddr in dial queue"),
+                }
             }
         }
 

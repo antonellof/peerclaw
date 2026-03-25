@@ -30,7 +30,7 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
-use libp2p::PeerId;
+use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
@@ -117,6 +117,37 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+/// Optional curated public bootstrap entries (extend when the project publishes well-known relays).
+#[derive(Clone, Serialize)]
+pub struct CommunityPeerEntry {
+    pub label: String,
+    pub multiaddr: String,
+}
+
+/// P2P settings snapshot for the console (from `config.toml` at serve time).
+#[derive(Clone, Serialize)]
+pub struct P2pNetworkHints {
+    pub bootstrap_peers: Vec<String>,
+    pub mdns_enabled: bool,
+    pub kademlia_enabled: bool,
+    pub community_peers: Vec<CommunityPeerEntry>,
+}
+
+impl Default for P2pNetworkHints {
+    fn default() -> Self {
+        Self {
+            bootstrap_peers: Vec::new(),
+            mdns_enabled: true,
+            kademlia_enabled: true,
+            community_peers: default_community_peer_directory(),
+        }
+    }
+}
+
+pub fn default_community_peer_directory() -> Vec<CommunityPeerEntry> {
+    vec![]
+}
+
 /// Web server state - contains only Send/Sync safe components.
 pub struct WebState {
     pub local_peer_id: PeerId,
@@ -162,6 +193,10 @@ pub struct WebState {
     pub skills_dir: PathBuf,
     /// Host `config.toml` path (for UI copy hints).
     pub config_path: PathBuf,
+    /// When set, `POST /api/peers/dial` queues a multiaddr for the serve loop to dial.
+    pub peer_dial_tx: Option<mpsc::Sender<String>>,
+    /// Bootstrap list and discovery flags (from node config when running under `serve`).
+    pub p2p_network_hints: Arc<P2pNetworkHints>,
 }
 
 fn new_ws_control_plane() -> broadcast::Sender<serde_json::Value> {
@@ -247,6 +282,8 @@ fn api_router() -> Router<Arc<WebState>> {
         .merge(api_tasks_router())
         .route("/status", get(api_status))
         .route("/onboarding", get(api_onboarding))
+        .route("/peers/dial", post(api_peers_dial))
+        .route("/peers/network", get(api_peers_network))
         .route("/peers", get(api_peers))
         .route("/jobs", get(api_jobs))
         .route("/skills/local", get(api_skills_local))
@@ -329,6 +366,8 @@ pub fn create_web_state(
         node_tool_tx: None,
         skills_dir: crate::bootstrap::base_dir().join("skills"),
         config_path: crate::bootstrap::base_dir().join("config.toml"),
+        peer_dial_tx: None,
+        p2p_network_hints: Arc::new(P2pNetworkHints::default()),
     })
 }
 
@@ -363,6 +402,8 @@ pub fn create_web_state_with_channels(
         node_tool_tx: None,
         skills_dir: crate::bootstrap::base_dir().join("skills"),
         config_path: crate::bootstrap::base_dir().join("config.toml"),
+        peer_dial_tx: None,
+        p2p_network_hints: Arc::new(P2pNetworkHints::default()),
     })
 }
 
@@ -396,6 +437,8 @@ pub fn create_web_state_with_inference(
         node_tool_tx: None,
         skills_dir: crate::bootstrap::base_dir().join("skills"),
         config_path: crate::bootstrap::base_dir().join("config.toml"),
+        peer_dial_tx: None,
+        p2p_network_hints: Arc::new(P2pNetworkHints::default()),
     })
 }
 
@@ -429,6 +472,8 @@ pub fn create_web_state_with_swarm(
         node_tool_tx: None,
         skills_dir: crate::bootstrap::base_dir().join("skills"),
         config_path: crate::bootstrap::base_dir().join("config.toml"),
+        peer_dial_tx: None,
+        p2p_network_hints: Arc::new(P2pNetworkHints::default()),
     })
 }
 
@@ -1281,6 +1326,100 @@ async fn api_peers(State(state): State<Arc<WebState>>) -> Json<Vec<PeerInfo>> {
         })
         .collect();
     Json(peer_infos)
+}
+
+#[derive(Serialize)]
+struct P2pNetworkApiResponse {
+    local_peer_id: String,
+    bootstrap_peers: Vec<String>,
+    mdns_enabled: bool,
+    kademlia_enabled: bool,
+    community_peers: Vec<CommunityPeerEntry>,
+    dial_supported: bool,
+}
+
+async fn api_peers_network(State(state): State<Arc<WebState>>) -> Json<P2pNetworkApiResponse> {
+    let h = state.p2p_network_hints.as_ref();
+    Json(P2pNetworkApiResponse {
+        local_peer_id: state.local_peer_id.to_string(),
+        bootstrap_peers: h.bootstrap_peers.clone(),
+        mdns_enabled: h.mdns_enabled,
+        kademlia_enabled: h.kademlia_enabled,
+        community_peers: h.community_peers.clone(),
+        dial_supported: state.peer_dial_tx.is_some(),
+    })
+}
+
+#[derive(Deserialize)]
+struct DialPeerBody {
+    multiaddr: String,
+}
+
+#[derive(Serialize)]
+struct DialPeerResponse {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+async fn api_peers_dial(
+    State(state): State<Arc<WebState>>,
+    Json(body): Json<DialPeerBody>,
+) -> impl IntoResponse {
+    let addr = body.multiaddr.trim();
+    if addr.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(DialPeerResponse {
+                ok: false,
+                error: Some("multiaddr required".to_string()),
+            }),
+        )
+            .into_response();
+    }
+    if let Err(e) = addr.parse::<Multiaddr>() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(DialPeerResponse {
+                ok: false,
+                error: Some(format!("invalid multiaddr: {e}")),
+            }),
+        )
+            .into_response();
+    }
+    let Some(tx) = &state.peer_dial_tx else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(DialPeerResponse {
+                ok: false,
+                error: Some("dial not available in this mode".to_string()),
+            }),
+        )
+            .into_response();
+    };
+    match tx.try_send(addr.to_string()) {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(DialPeerResponse { ok: true, error: None }),
+        )
+            .into_response(),
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(DialPeerResponse {
+                ok: false,
+                error: Some("dial queue full; try again shortly".to_string()),
+            }),
+        )
+            .into_response(),
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(DialPeerResponse {
+                ok: false,
+                error: Some("dial channel closed".to_string()),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 async fn api_jobs(State(state): State<Arc<WebState>>) -> Json<Vec<WebJobInfo>> {

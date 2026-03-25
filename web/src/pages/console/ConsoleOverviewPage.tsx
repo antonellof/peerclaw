@@ -1,17 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 
 import { workspaceHref } from "@/workspace/views"
 
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
 import {
+  dialPeer,
   fetchNodeDetail,
   fetchPeers,
+  fetchPeersNetwork,
   fetchStatus,
   fetchSwarmAgents,
   fetchSwarmTimeline,
   fetchSwarmTopology,
   type NodeDetailResponse,
+  type P2pNetworkResponse,
   type SwarmActionInfo,
   type SwarmAgentInfo,
   type TopologyEdge,
@@ -28,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 
@@ -71,6 +75,11 @@ export function ConsoleOverviewPage() {
   const navigate = useNavigate()
   const [st, setSt] = useState<Awaited<ReturnType<typeof fetchStatus>> | null>(null)
   const [peerList, setPeerList] = useState<{ id: string }[]>([])
+  const [p2pNet, setP2pNet] = useState<P2pNetworkResponse | null>(null)
+  const [peerFilter, setPeerFilter] = useState("")
+  const [dialAddr, setDialAddr] = useState("")
+  const [dialBusy, setDialBusy] = useState(false)
+  const [dialHint, setDialHint] = useState<string | null>(null)
   const [agents, setAgents] = useState<SwarmAgentInfo[]>([])
   const [topoNodes, setTopoNodes] = useState<TopologyNode[]>([])
   const [topoEdges, setTopoEdges] = useState<TopologyEdge[]>([])
@@ -83,17 +92,25 @@ export function ConsoleOverviewPage() {
   const [activeSection, setActiveSection] = useState<string>("health")
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
 
+  const displayPeers = useMemo(() => {
+    const q = peerFilter.trim().toLowerCase()
+    if (!q) return peerList
+    return peerList.filter((p) => p.id.toLowerCase().includes(q))
+  }, [peerList, peerFilter])
+
   const load = async () => {
     try {
-      const [s, p, a, t, tl] = await Promise.all([
+      const [s, p, net, a, t, tl] = await Promise.all([
         fetchStatus(),
         fetchPeers(),
+        fetchPeersNetwork().catch(() => null),
         fetchSwarmAgents(),
         fetchSwarmTopology(),
         fetchSwarmTimeline(),
       ])
       setSt(s)
       setPeerList(p.map((x) => ({ id: x.id })))
+      setP2pNet(net)
       setAgents(a.agents)
       setTopoNodes(t.nodes)
       setTopoEdges(t.edges)
@@ -166,11 +183,32 @@ export function ConsoleOverviewPage() {
   }
 
   const localId = st?.peer_id ?? "local"
+
   const p2pNodes = [
     { id: localId, type: "local" as const, label: "You" },
-    ...peerList.map((p) => ({ id: p.id, type: "peer" as const, label: "…" + p.id.slice(-8) })),
+    ...displayPeers.map((p) => ({ id: p.id, type: "peer" as const, label: "…" + p.id.slice(-8) })),
   ]
-  const p2pLinks = peerList.map((p) => ({ source: localId, target: p.id }))
+  const p2pLinks = displayPeers.map((p) => ({ source: localId, target: p.id }))
+
+  const queueDial = async (multiaddr: string) => {
+    const trimmed = multiaddr.trim()
+    if (!trimmed) return
+    setDialBusy(true)
+    setDialHint(null)
+    try {
+      const res = await dialPeer(trimmed)
+      if (res.ok) {
+        setDialHint("Dial queued — check connected peers in a few seconds.")
+        void load()
+      } else {
+        setDialHint(res.error ?? "Dial failed")
+      }
+    } catch (e) {
+      setDialHint(e instanceof Error ? e.message : "Dial failed")
+    } finally {
+      setDialBusy(false)
+    }
+  }
 
   const swarmFgNodes = topoNodes.map((n) => ({
     id: n.id,
@@ -314,10 +352,139 @@ export function ConsoleOverviewPage() {
             Transport-level peers (Noise, Kademlia, GossipSub). This is not the same graph as swarm agent topology below.
           </p>
         </div>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Grow your network</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Dial a multiaddr, reuse bootstraps from config, or rely on LAN discovery when mDNS is on.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              {p2pNet ? (
+                <>
+                  <Badge variant={p2pNet.mdns_enabled ? "default" : "secondary"} className="font-normal">
+                    mDNS {p2pNet.mdns_enabled ? "on" : "off"}
+                  </Badge>
+                  <Badge variant={p2pNet.kademlia_enabled ? "default" : "secondary"} className="font-normal">
+                    Kademlia {p2pNet.kademlia_enabled ? "on" : "off"}
+                  </Badge>
+                  {!p2pNet.dial_supported && (
+                    <Badge variant="outline" className="font-normal">
+                      Dial API unavailable (not full node web)
+                    </Badge>
+                  )}
+                </>
+              ) : (
+                <span className="text-xs text-muted-foreground">P2P settings load with the overview…</span>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1 space-y-1">
+                <label htmlFor="dial-multiaddr" className="text-xs font-medium text-muted-foreground">
+                  Peer multiaddr
+                </label>
+                <Input
+                  id="dial-multiaddr"
+                  placeholder="/ip4/…/tcp/…/p2p/…"
+                  value={dialAddr}
+                  onChange={(e) => setDialAddr(e.target.value)}
+                  disabled={dialBusy || p2pNet?.dial_supported === false}
+                  className="font-mono text-xs"
+                />
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                disabled={dialBusy || !dialAddr.trim() || p2pNet?.dial_supported === false}
+                onClick={() => void queueDial(dialAddr)}
+              >
+                {dialBusy ? "Connecting…" : "Connect"}
+              </Button>
+            </div>
+            {dialHint && <p className="text-xs text-muted-foreground">{dialHint}</p>}
+
+            {p2pNet && p2pNet.bootstrap_peers.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Config bootstraps
+                </div>
+                <ul className="space-y-2">
+                  {p2pNet.bootstrap_peers.map((addr) => (
+                    <li
+                      key={addr}
+                      className="flex flex-col gap-2 rounded-lg border border-border/60 bg-muted/10 p-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <span className="break-all font-mono text-[11px] text-foreground">{addr}</span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={dialBusy || !p2pNet.dial_supported}
+                        onClick={() => void queueDial(addr)}
+                      >
+                        Dial
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Public directory
+              </div>
+              {p2pNet && p2pNet.community_peers.length > 0 ? (
+                <ul className="space-y-2">
+                  {p2pNet.community_peers.map((c) => (
+                    <li
+                      key={c.multiaddr}
+                      className="flex flex-col gap-2 rounded-lg border border-border/60 bg-muted/10 p-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-foreground">{c.label}</div>
+                        <span className="break-all font-mono text-[11px] text-muted-foreground">
+                          {c.multiaddr}
+                        </span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={dialBusy || !p2pNet.dial_supported}
+                        onClick={() => void queueDial(c.multiaddr)}
+                      >
+                        Connect
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="rounded-lg border border-dashed border-border/70 bg-muted/5 p-3 text-xs text-muted-foreground">
+                  No curated public relays in this build. Share a multiaddr out-of-band, add bootstraps in{" "}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">config.toml</code>, or use{" "}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+                    peerclaw peers join &lt;multiaddr&gt;
+                  </code>{" "}
+                  from the CLI.
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-2">
             <CardTitle className="text-base">Connected peers</CardTitle>
-            <span className="text-xs text-muted-foreground">{peerList.length} remote</span>
+            <span className="text-xs text-muted-foreground">
+              {peerList.length} remote
+              {peerFilter.trim() ? ` · ${displayPeers.length} shown` : ""}
+            </span>
           </CardHeader>
           <CardContent>
             <div className="grid gap-6 lg:grid-cols-5">
@@ -329,11 +496,25 @@ export function ConsoleOverviewPage() {
                   <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Local peer</div>
                   <p className="mt-1 break-all font-mono text-[11px] leading-snug text-foreground">{localId}</p>
                 </div>
-                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg border border-border/60 bg-muted/10 p-2 max-h-[280px]">
+                <div className="space-y-1.5">
+                  <label htmlFor="peer-filter" className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Filter peer IDs
+                  </label>
+                  <Input
+                    id="peer-filter"
+                    placeholder="Search connected peer id…"
+                    value={peerFilter}
+                    onChange={(e) => setPeerFilter(e.target.value)}
+                    className="h-8 font-mono text-[11px]"
+                  />
+                </div>
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg border border-border/60 bg-muted/10 p-2 max-h-[220px]">
                   {peerList.length === 0 ? (
                     <p className="p-2 text-sm text-muted-foreground">No remote peers. Try a bootstrap multiaddr.</p>
+                  ) : displayPeers.length === 0 ? (
+                    <p className="p-2 text-sm text-muted-foreground">No peers match this filter.</p>
                   ) : (
-                    peerList.map((p) => (
+                    displayPeers.map((p) => (
                       <div key={p.id} className="rounded-md border border-border/50 bg-background/50 px-2.5 py-2">
                         <p className="break-all font-mono text-[11px] leading-snug text-muted-foreground">{p.id}</p>
                       </div>

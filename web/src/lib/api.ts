@@ -104,6 +104,36 @@ export async function fetchPeers(): Promise<PeerInfo[]> {
   return r.json()
 }
 
+export type P2pNetworkResponse = {
+  local_peer_id: string
+  bootstrap_peers: string[]
+  mdns_enabled: boolean
+  kademlia_enabled: boolean
+  community_peers: { label: string; multiaddr: string }[]
+  dial_supported: boolean
+}
+
+export async function fetchPeersNetwork(): Promise<P2pNetworkResponse> {
+  const r = await apiFetch("/api/peers/network")
+  if (!r.ok) throw new Error(`peers/network ${r.status}`)
+  return r.json()
+}
+
+export async function dialPeer(
+  multiaddr: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/peers/dial", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ multiaddr }),
+  })
+  const j = (await r.json()) as { ok?: boolean; error?: string }
+  if (!r.ok) {
+    return { ok: false, error: j.error ?? `HTTP ${r.status}` }
+  }
+  return { ok: j.ok === true, error: j.error }
+}
+
 export type OnboardingStep = { id: string; ok: boolean; detail: string }
 
 export type OnboardingResponse = { peer_id: string; steps: OnboardingStep[] }
