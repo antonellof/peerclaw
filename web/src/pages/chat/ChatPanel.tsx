@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { ChevronDown, ChevronLeft, ChevronRight, Send } from "lucide-react"
 
@@ -26,7 +26,8 @@ const CHAT_SESSION_KEY = "peerclaw_chat_session_v1"
 const TRANSCRIPT_KEY_PREFIX = "peerclaw_chat_transcript_v1_"
 const AGENT_POLL_MS = 900
 const AGENT_POLL_MAX_FAILS = 8
-const AGENT_POLL_MAX_MS = 6 * 60 * 1000
+/** Stop polling only after this long (agent tasks may run for hours). */
+const AGENT_POLL_MAX_MS = 48 * 60 * 60 * 1000
 
 type MsgRole = "user" | "assistant" | "system" | "error"
 
@@ -63,6 +64,41 @@ function getOrCreateSession(): string | null {
 
 type Props = {
   onRegisterControls?: (api: { clearChat: () => void } | null) => void
+}
+
+/** Agent task log stream: auto-scroll to latest line as the server appends steps. */
+function AgentTaskLiveLogs({ logs, running }: { logs: string[]; running: boolean }) {
+  const preRef = useRef<HTMLPreElement>(null)
+  useLayoutEffect(() => {
+    const el = preRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [logs])
+
+  return (
+    <div className="mt-2 rounded-lg border border-border/60 bg-background/50">
+      <div className="flex items-center justify-between border-b border-border/40 px-2 py-1.5">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {running ? "Live steps" : "Steps"}
+        </span>
+        {running ? (
+          <span
+            className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
+            title="Agent is still running"
+          >
+            <span className="inline-flex size-1.5 animate-pulse rounded-full bg-primary" />
+            Active
+          </span>
+        ) : null}
+      </div>
+      <pre
+        ref={preRef}
+        className="max-h-[min(40vh,280px)] overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words p-2 text-[11px] leading-relaxed text-muted-foreground"
+      >
+        {logs.length > 0 ? logs.join("\n") : running ? "Waiting for first step…" : "(no steps)"}
+      </pre>
+    </div>
+  )
 }
 
 export function ChatPanel({ onRegisterControls }: Props) {
@@ -109,6 +145,10 @@ export function ChatPanel({ onRegisterControls }: Props) {
   const [agentPanelOpen, setAgentPanelOpen] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  /** User is following the latest messages (scroll pinned to bottom). */
+  const stickToBottomRef = useRef(true)
+  const [showScrollDown, setShowScrollDown] = useState(false)
   const pollingRef = useRef<Set<string>>(new Set())
   const pollIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
   const finishedRef = useRef<Set<string>>(new Set())
@@ -227,7 +267,11 @@ export function ChatPanel({ onRegisterControls }: Props) {
         setMessages((prev) =>
           prev.map((m) =>
             m.agentTaskId === taskId
-              ? { ...m, agentStatusLine: "timed out", content: m.content + "\n[timeout after 6m]" }
+              ? {
+                  ...m,
+                  agentStatusLine: "timed out",
+                  content: m.content + "\n[timeout after 48h client poll limit]",
+                }
               : m,
           ),
         )
@@ -351,6 +395,53 @@ export function ChatPanel({ onRegisterControls }: Props) {
       ? SLASH_COMMANDS.filter((c) => c.cmd.slice(1).startsWith(autocompleteFilter.toLowerCase()))
       : []
 
+  const composerMaxHeightPx = useCallback(() => Math.min(Math.round(window.innerHeight * 0.5), 360), [])
+
+  const syncComposerHeight = useCallback(() => {
+    const ta = textareaRef.current
+    if (!ta) return
+    ta.style.height = "0px"
+    const max = composerMaxHeightPx()
+    const sh = ta.scrollHeight
+    const h = Math.min(Math.max(sh, 52), max)
+    ta.style.height = `${h}px`
+    ta.style.overflowY = sh > max ? "auto" : "hidden"
+  }, [composerMaxHeightPx])
+
+  useLayoutEffect(() => {
+    syncComposerHeight()
+  }, [input, composerMode, autocompleteOpen, syncComposerHeight])
+
+  useEffect(() => {
+    window.addEventListener("resize", syncComposerHeight)
+    return () => window.removeEventListener("resize", syncComposerHeight)
+  }, [syncComposerHeight])
+
+  const updateScrollPinState = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+    const nearBottom = dist < 100
+    stickToBottomRef.current = nearBottom
+    setShowScrollDown(!nearBottom && el.scrollHeight > el.clientHeight + 40)
+  }, [])
+
+  const scrollMessagesToBottom = useCallback((smooth: boolean) => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" })
+    stickToBottomRef.current = true
+    setShowScrollDown(false)
+  }, [])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.addEventListener("scroll", updateScrollPinState, { passive: true })
+    updateScrollPinState()
+    return () => el.removeEventListener("scroll", updateScrollPinState)
+  }, [updateScrollPinState, showWelcome, messages.length])
+
   const onInputChange = (v: string) => {
     setInput(v)
     if (v.startsWith("/")) {
@@ -368,6 +459,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
     const content = input.trim()
     if (!content || typing || streamLocked) return
     setAutocompleteOpen(false)
+
+    stickToBottomRef.current = true
 
     if (content.startsWith("/")) {
       setInput("")
@@ -484,8 +577,13 @@ export function ChatPanel({ onRegisterControls }: Props) {
   }
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })
-  }, [messages])
+    if (!stickToBottomRef.current) return
+    const el = scrollRef.current
+    if (!el) return
+    const smooth = !streamLocked
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" })
+    requestAnimationFrame(updateScrollPinState)
+  }, [messages, streamLocked, typing, updateScrollPinState])
 
   const modelList = models.length ? models : ["llama-3.2-3b"]
 
@@ -552,7 +650,11 @@ export function ChatPanel({ onRegisterControls }: Props) {
 
       <div className="relative flex min-h-0 flex-1 flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">
+          <div className="relative min-h-0 flex-1">
+            <div
+              ref={scrollRef}
+              className="h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain"
+            >
             <div className="mx-auto flex min-h-full max-w-3xl flex-col justify-end px-3 py-4 md:px-4">
               {showWelcome && messages.length === 0 ? (
             <div className="flex min-h-0 flex-1 flex-col justify-center py-6">
@@ -629,11 +731,17 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   ) : (
                     <div className="whitespace-pre-wrap break-words">{m.content}</div>
                   )}
-                  {m.agentLogs && m.agentLogs.length > 0 && (
-                    <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-background/60 p-2 text-[11px] text-muted-foreground">
-                      {m.agentLogs.join("\n")}
-                    </pre>
-                  )}
+                  {m.agentTaskId ? (
+                    <AgentTaskLiveLogs
+                      logs={m.agentLogs ?? []}
+                      running={(() => {
+                        const s = m.agentStatusLine ?? ""
+                        if (!s || s === "error") return false
+                        if (/^(completed|failed|timed out)/i.test(s)) return false
+                        return true
+                      })()}
+                    />
+                  ) : null}
                   {m.meta && <div className="mt-2 text-[11px] text-muted-foreground">{m.meta}</div>}
                 </div>
               </div>
@@ -644,6 +752,21 @@ export function ChatPanel({ onRegisterControls }: Props) {
                 </div>
               )}
             </div>
+            </div>
+            {showScrollDown && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-2 pt-8">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="secondary"
+                  className="pointer-events-auto size-9 rounded-full border border-border/80 bg-card/95 shadow-md backdrop-blur-sm hover:bg-muted"
+                  aria-label="Scroll to latest messages"
+                  onClick={() => scrollMessagesToBottom(true)}
+                >
+                  <ChevronDown className="size-4" />
+                </Button>
+              </div>
+            )}
           </div>
 
           <div className="shrink-0 border-t border-border/80 bg-gradient-to-t from-card/90 to-card/40 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 md:px-4">
@@ -789,7 +912,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
               </div>
             )}
             <Textarea
-              rows={2}
+              ref={textareaRef}
+              rows={1}
               placeholder={
                 composerMode === "agent"
                   ? "Describe the goal (node needs --agent)…"
@@ -817,7 +941,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   }
                 }
               }}
-              className="min-h-[52px] resize-none border-0 bg-transparent pr-12 focus-visible:ring-0"
+              className="min-h-[52px] max-h-[min(50dvh,22.5rem)] resize-none border-0 bg-transparent py-3 pr-12 focus-visible:ring-0"
               disabled={typing || streamLocked}
             />
             <Button

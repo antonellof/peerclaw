@@ -171,6 +171,42 @@ pub fn broadcast_tasks_changed(tx: &broadcast::Sender<serde_json::Value>) {
     let _ = tx.send(serde_json::json!({ "type": "tasks_changed" }));
 }
 
+/// Push agentic loop progress into a web [`WebTask`] so the UI can poll live steps.
+#[derive(Clone)]
+struct AgenticTaskProgressSink {
+    store: Arc<RwLock<Vec<WebTask>>>,
+    task_id: String,
+    ws_tx: broadcast::Sender<serde_json::Value>,
+}
+
+impl AgenticTaskProgressSink {
+    async fn append_log(&self, line: String) {
+        let mut tasks = self.store.write().await;
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == self.task_id) {
+            t.logs.push(line);
+        }
+        broadcast_tasks_changed(&self.ws_tx);
+    }
+
+    async fn record_tool_step(&self, line: String, tool_step: u32, tokens_so_far: u32) {
+        let mut tasks = self.store.write().await;
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == self.task_id) {
+            t.logs.push(line);
+            t.iterations = tool_step;
+            t.tokens_used = tokens_so_far;
+        }
+        broadcast_tasks_changed(&self.ws_tx);
+    }
+
+    async fn set_tokens(&self, tokens_so_far: u32) {
+        let mut tasks = self.store.write().await;
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == self.task_id) {
+            t.tokens_used = tokens_so_far;
+        }
+        broadcast_tasks_changed(&self.ws_tx);
+    }
+}
+
 /// Request to run a task through the agent runtime.
 pub struct AgentTaskRequest {
     pub task_id: String,
@@ -884,7 +920,8 @@ Output rules:
     }))
 }
 
-const AGENTIC_MAX_ITERS: u32 = 24;
+/// Upper bound on LLM↔tool rounds (avoids unbounded memory growth on the conversation).
+const AGENTIC_MAX_ITERS: u32 = 1024;
 
 fn default_chat_agentic() -> bool {
     true
@@ -959,6 +996,7 @@ async fn run_unified_agentic_inference(
     model: String,
     max_tokens: u32,
     temperature: f32,
+    progress: Option<AgenticTaskProgressSink>,
 ) -> Result<(InferenceResponse, Vec<String>), String> {
     let Some(tx) = &state.inference_tx else {
         return Err("Inference not available".into());
@@ -974,7 +1012,16 @@ async fn run_unified_agentic_inference(
     let mut total_tokens: u32 = 0;
     let tool_session = uuid::Uuid::new_v4().to_string();
 
-    for _ in 1..=AGENTIC_MAX_ITERS {
+    for iter in 1..=AGENTIC_MAX_ITERS {
+        if let Some(ref sink) = progress {
+            sink.append_log(format!(
+                "[{}] Pass {}/{}: requesting model…",
+                chrono::Utc::now().format("%H:%M:%S"),
+                iter,
+                AGENTIC_MAX_ITERS
+            ))
+            .await;
+        }
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let request = InferenceRequest {
             prompt: conversation.clone(),
@@ -987,12 +1034,16 @@ async fn run_unified_agentic_inference(
         tx.send(request)
             .await
             .map_err(|_| "failed to queue inference".to_string())?;
-        let inf = match tokio::time::timeout(Duration::from_secs(120), response_rx).await {
-            Ok(Ok(r)) => r,
-            Ok(Err(_)) => return Err("inference cancelled".into()),
-            Err(_) => return Err("inference timeout (120s)".into()),
+        // Wait until inference finishes — no wall-clock cap (long local/remote runs, large max_tokens).
+        // Stops on engine error/cancel via channel drop or Err from oneshot.
+        let inf = match response_rx.await {
+            Ok(r) => r,
+            Err(_) => return Err("inference cancelled".into()),
         };
         total_tokens = total_tokens.saturating_add(inf.tokens_generated);
+        if let Some(ref sink) = progress {
+            sink.set_tokens(total_tokens).await;
+        }
         let text = inf.text;
         let calls = crate::agent::parse_tool_calls(&text);
         if calls.is_empty() {
@@ -1007,6 +1058,15 @@ async fn run_unified_agentic_inference(
                 },
                 tool_logs,
             ));
+        }
+        if let Some(ref sink) = progress {
+            sink.append_log(format!(
+                "[{}] Pass {}: {} tool call(s)",
+                chrono::Utc::now().format("%H:%M:%S"),
+                iter,
+                calls.len()
+            ))
+            .await;
         }
         conversation.push_str("\n\nAssistant:\n");
         conversation.push_str(&text);
@@ -1056,12 +1116,18 @@ async fn run_unified_agentic_inference(
             } else {
                 summary.clone()
             };
-            tool_logs.push(format!(
+            let line = format!(
                 "[{}] {} → {}",
                 chrono::Utc::now().format("%H:%M:%S"),
                 call.name,
                 preview
-            ));
+            );
+            tool_logs.push(line.clone());
+            if let Some(ref sink) = progress {
+                sink
+                    .record_tool_step(line, tool_logs.len() as u32, total_tokens)
+                    .await;
+            }
             conversation.push_str(&format!("- {} → {}\n", call.name, summary));
         }
     }
@@ -1347,6 +1413,7 @@ async fn api_chat(
                     model.clone(),
                     max_tokens,
                     temperature,
+                    None,
                 )
                 .await
                 {
@@ -1403,6 +1470,7 @@ async fn api_chat(
                     model.clone(),
                     max_tokens,
                     temperature,
+                    None,
                 )
                 .await
                 {
@@ -1584,6 +1652,7 @@ async fn api_chat_stream(
                         model_spawn,
                         max_tokens,
                         temperature,
+                        None,
                     )
                     .await
                     {
@@ -1676,6 +1745,7 @@ async fn api_chat_stream(
                         model_spawn,
                         max_tokens,
                         temperature,
+                        None,
                     )
                     .await
                     {
@@ -2298,6 +2368,12 @@ async fn api_create_task(
                  Finish with a concise, substantive answer for the user (not commentary about tools).\n"
             );
 
+            let progress_sink = AgenticTaskProgressSink {
+                store: store.clone(),
+                task_id: tid.clone(),
+                ws_tx: ws_tx.clone(),
+            };
+
             match run_unified_agentic_inference(
                 state_spawn.as_ref(),
                 Some(registry),
@@ -2307,6 +2383,7 @@ async fn api_create_task(
                 model,
                 2048,
                 0.35,
+                Some(progress_sink),
             )
             .await
             {
@@ -2314,9 +2391,7 @@ async fn api_create_task(
                     let n = tool_logs.len() as u32;
                     let mut tasks = store.write().await;
                     if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
-                        for line in tool_logs {
-                            t.logs.push(line);
-                        }
+                        // Pass / tool lines already streamed into `t.logs` during the run.
                         t.status = "completed".to_string();
                         t.completed_at = Some(chrono::Utc::now().to_rfc3339());
                         t.result = Some(resp.text);
@@ -2378,6 +2453,12 @@ async fn api_create_task(
                  Finish with a concise, substantive answer for the user (not commentary about tools).\n"
             );
 
+            let progress_sink = AgenticTaskProgressSink {
+                store: store.clone(),
+                task_id: tid.clone(),
+                ws_tx: ws_tx.clone(),
+            };
+
             match run_unified_agentic_inference(
                 state_spawn.as_ref(),
                 None,
@@ -2387,6 +2468,7 @@ async fn api_create_task(
                 model,
                 2048,
                 0.35,
+                Some(progress_sink),
             )
             .await
             {
@@ -2394,9 +2476,7 @@ async fn api_create_task(
                     let n = tool_logs.len() as u32;
                     let mut tasks = store.write().await;
                     if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
-                        for line in tool_logs {
-                            t.logs.push(line);
-                        }
+                        // Pass / tool lines already streamed into `t.logs` during the run.
                         t.status = "completed".to_string();
                         t.completed_at = Some(chrono::Utc::now().to_rfc3339());
                         t.result = Some(resp.text);
