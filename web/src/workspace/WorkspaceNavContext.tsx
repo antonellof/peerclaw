@@ -3,7 +3,7 @@ import { createContext, useContext, type ReactNode } from "react"
 import type { WorkspaceChatPreferences } from "@/workspace/workspacePreferences"
 import type { WorkspaceView } from "./views"
 
-export type ChatControls = { clearChat: () => void }
+export type ChatControls = { clearChat: () => void; refreshModels: () => void }
 
 export type WorkspaceNavValue = {
   view: WorkspaceView

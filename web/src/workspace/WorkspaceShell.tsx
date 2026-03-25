@@ -300,6 +300,7 @@ export function WorkspaceShell() {
         chatPreferences={chatPreferences}
         setChatPreferences={setChatPreferences}
         onNavigate={(v) => setView(v)}
+        onModelsChanged={() => chatControlsRef.current?.refreshModels()}
       />
     </WorkspaceNavProvider>
   )

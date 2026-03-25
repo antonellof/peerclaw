@@ -31,6 +31,8 @@ type Props = {
   chatPreferences: WorkspaceChatPreferences
   setChatPreferences: (u: Partial<WorkspaceChatPreferences>) => void
   onNavigate: (view: WorkspaceView) => void
+  /** Called after inference settings save or model download so the chat dropdown refreshes. */
+  onModelsChanged?: () => void
 }
 
 export function WorkspaceSettingsDialog({
@@ -39,6 +41,7 @@ export function WorkspaceSettingsDialog({
   chatPreferences,
   setChatPreferences,
   onNavigate,
+  onModelsChanged,
 }: Props) {
   const [models, setModels] = useState<string[]>([])
   const [inf, setInf] = useState<InferenceSettingsResponse | null>(null)
@@ -98,6 +101,9 @@ export function WorkspaceSettingsDialog({
       const next = await putInferenceSettings(body)
       setInf(next)
       setRemoteKeyDraft("")
+      // Refresh model list in chat dropdown (backends may have changed).
+      void loadModels()
+      onModelsChanged?.()
     } catch (e) {
       setInfErr(e instanceof Error ? e.message : "Save failed")
     } finally {
@@ -118,6 +124,7 @@ export function WorkspaceSettingsDialog({
       setDlBusy(false)
       void loadInf()
       void loadModels()
+      onModelsChanged?.()
     }
   }
 
@@ -142,6 +149,7 @@ export function WorkspaceSettingsDialog({
       setDlBusy(false)
       void loadInf()
       void loadModels()
+      onModelsChanged?.()
     }
   }
 

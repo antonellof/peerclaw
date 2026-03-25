@@ -62,7 +62,7 @@ function getOrCreateSession(): string | null {
 }
 
 type Props = {
-  onRegisterControls?: (api: { clearChat: () => void } | null) => void
+  onRegisterControls?: (api: { clearChat: () => void; refreshModels: () => void } | null) => void
 }
 
 /** Agent task log stream: auto-scroll to latest line as the server appends steps. */
@@ -202,10 +202,25 @@ export function ChatPanel({ onRegisterControls }: Props) {
     }
   }, [sessionId])
 
+  const refreshModels = useCallback(async () => {
+    try {
+      const list = await fetchOpenAiModels()
+      const ids = list.map((m) => m.id).filter(Boolean)
+      if (ids.length) {
+        setModels(ids)
+        if (!ids.includes(chatPreferences.model)) {
+          setChatPreferences({ model: ids[0]! })
+        }
+      }
+    } catch {
+      setModels(["llama-3.2-3b", "llama-3.2-1b", "phi-3-mini"])
+    }
+  }, [chatPreferences.model, setChatPreferences])
+
   useEffect(() => {
-    onRegisterControls?.({ clearChat })
+    onRegisterControls?.({ clearChat, refreshModels })
     return () => onRegisterControls?.(null)
-  }, [clearChat, onRegisterControls])
+  }, [clearChat, refreshModels, onRegisterControls])
 
   useEffect(() => {
     const st = location.state as { focusAgentTaskId?: string } | Record<string, unknown> | null
@@ -413,21 +428,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
   })
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const list = await fetchOpenAiModels()
-        const ids = list.map((m) => m.id).filter(Boolean)
-        if (ids.length) {
-          setModels(ids)
-          if (!ids.includes(chatPreferences.model)) {
-            setChatPreferences({ model: ids[0]! })
-          }
-        }
-      } catch {
-        setModels(["llama-3.2-3b", "llama-3.2-1b", "phi-3-mini"])
-      }
-    })()
-  }, [chatPreferences.model, setChatPreferences])
+    void refreshModels()
+  }, [refreshModels])
 
   const slashCtx = {
     settings,

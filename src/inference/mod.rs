@@ -125,6 +125,11 @@ impl InferenceEngine {
         self.live.clone()
     }
 
+    /// Context size from config (used to estimate prompt budget for agentic loops).
+    pub fn config_context_size(&self) -> u32 {
+        self.config.context_size
+    }
+
     pub fn models_directory(&self) -> &PathBuf {
         &self.models_dir
     }
@@ -291,13 +296,12 @@ impl InferenceEngine {
                     "Running local GGUF inference"
                 );
 
-                // Load model via GgufEngine (handles caching internally via placeholder or llama.cpp)
-                let handle = self.gguf.load(&path).map_err(|e| {
+                // Load (or reuse cached) model, then generate.
+                self.gguf.load(&path).map_err(|e| {
                     InferenceError::LoadFailed(format!("GGUF load failed: {e}"))
                 })?;
 
-                // Generate — this runs on the current thread (llama.cpp is sync)
-                let result = self.gguf.generate(&handle, request).map_err(|e| {
+                let result = self.gguf.generate(request).map_err(|e| {
                     InferenceError::GenerationFailed(format!("GGUF generate failed: {e}"))
                 })?;
 

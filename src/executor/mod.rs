@@ -311,7 +311,7 @@ impl TaskExecutor {
 
         let engine = self.gguf_engine.read().await;
 
-        let model_handle = engine
+        let _model_handle = engine
             .load(&actual_path)
             .map_err(|e| ExecutorError::InferenceError(format!("Failed to load model: {}", e)))?;
 
@@ -325,7 +325,7 @@ impl TaskExecutor {
         };
 
         let response = engine
-            .generate(&model_handle, &request)
+            .generate(&request)
             .map_err(|e| ExecutorError::InferenceError(format!("Generation failed: {}", e)))?;
 
         tracing::info!(
@@ -539,7 +539,7 @@ impl TaskExecutor {
 
         let engine = self.gguf_engine.read().await;
 
-        let model_handle = engine
+        let _model_handle = engine
             .load(&actual_path)
             .map_err(|e| ExecutorError::InferenceError(format!("Failed to load model: {}", e)))?;
 
@@ -558,7 +558,7 @@ impl TaskExecutor {
         });
 
         let response = engine
-            .generate_streaming(&model_handle, &request, callback)
+            .generate_streaming(&request, callback)
             .map_err(|e| {
                 ExecutorError::InferenceError(format!("Streaming generation failed: {}", e))
             })?;
@@ -792,7 +792,7 @@ impl TaskExecutor {
         let actual_path = self.find_gguf_model(&task.model)?;
 
         let engine = self.gguf_engine.read().await;
-        let model_handle = engine
+        let _model_handle = engine
             .load(&actual_path)
             .map_err(|e| ExecutorError::InferenceError(format!("Failed to load model: {}", e)))?;
 
@@ -811,7 +811,7 @@ impl TaskExecutor {
         });
 
         let response = engine
-            .generate_streaming(&model_handle, &request, callback)
+            .generate_streaming(&request, callback)
             .map_err(|e| {
                 ExecutorError::InferenceError(format!("Streaming generation failed: {}", e))
             })?;

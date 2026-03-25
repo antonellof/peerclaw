@@ -469,31 +469,74 @@ async fn handle_streaming(
 }
 
 /// GET /v1/models
-pub async fn list_models(State(_state): State<Arc<WebState>>) -> Json<ModelsResponse> {
+///
+/// Lists models from all enabled backends: local GGUF files, Ollama, and remote API.
+pub async fn list_models(State(state): State<Arc<WebState>>) -> Json<ModelsResponse> {
     let models_dir = bootstrap::base_dir().join("models");
     let created = unix_timestamp();
+    let mut seen = std::collections::HashSet::new();
+    let mut models: Vec<ModelInfo> = Vec::new();
 
-    let models: Vec<ModelInfo> = std::fs::read_dir(&models_dir)
-        .map(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|ext| ext == "gguf"))
-                .map(|e| {
-                    let file_name = e.file_name().to_string_lossy().to_string();
-                    let model_id = file_name
-                        .strip_suffix(".gguf")
-                        .unwrap_or(&file_name)
-                        .to_string();
-                    ModelInfo {
+    // 1. Local GGUF files
+    if let Ok(entries) = std::fs::read_dir(&models_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            if entry.path().extension().is_some_and(|ext| ext == "gguf") {
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                let model_id = file_name
+                    .strip_suffix(".gguf")
+                    .unwrap_or(&file_name)
+                    .to_string();
+                if seen.insert(model_id.clone()) {
+                    models.push(ModelInfo {
                         id: model_id,
                         object: "model",
                         created,
-                        owned_by: "peerclaw".to_string(),
+                        owned_by: "local-gguf".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    // 2. Ollama models (if enabled)
+    if let Some(inf) = &state.inference {
+        let live_arc = inf.live_settings();
+        let live = live_arc.read().await;
+        if live.use_ollama {
+            let prov = crate::inference::ollama::OllamaProvider::new(
+                crate::inference::ollama::OllamaConfig {
+                    base_url: live.ollama_url.clone(),
+                    timeout_secs: 5,
+                },
+            );
+            if let Ok(ollama_models) = prov.list_models().await {
+                for m in ollama_models {
+                    let id = m.name.clone();
+                    if seen.insert(id.clone()) {
+                        models.push(ModelInfo {
+                            id,
+                            object: "model",
+                            created,
+                            owned_by: "ollama".to_string(),
+                        });
                     }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+                }
+            }
+        }
+
+        // 3. Remote API model (if enabled and a model override is set)
+        if live.remote_api_enabled && !live.remote_api_model.trim().is_empty() {
+            let id = live.remote_api_model.trim().to_string();
+            if seen.insert(id.clone()) {
+                models.push(ModelInfo {
+                    id,
+                    object: "model",
+                    created,
+                    owned_by: "remote-api".to_string(),
+                });
+            }
+        }
+    }
 
     Json(ModelsResponse {
         object: "list",

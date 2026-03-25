@@ -718,9 +718,42 @@ fn json_tag_attrs_to_tool_args(attr_src: &str) -> Option<serde_json::Value> {
     Some(out)
 }
 
+fn re_inline_tool_call() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        // Matches: `name: tool_name\nargs: {...}` or `name: tool_name args: {...}` (single line)
+        Regex::new(r#"(?m)^(?:\s*name:\s*(\w+)\s*\n\s*args:\s*(\{[^\n]*\}))|(?:\s*name:\s*(\w+)\s+args:\s*(\{[^\n]*\}))"#)
+            .expect("regex")
+    })
+}
+
+/// Parse inline `name: X args: {...}` lines that small models emit without `<tool_call>` wrappers.
+fn parse_inline_tool_calls(text: &str) -> Vec<ParsedToolCall> {
+    let mut calls = Vec::new();
+    for cap in re_inline_tool_call().captures_iter(text) {
+        let name = cap.get(1).or_else(|| cap.get(3));
+        let args_str = cap.get(2).or_else(|| cap.get(4));
+        if let (Some(n), Some(a)) = (name, args_str) {
+            if let Ok(args) = serde_json::from_str::<serde_json::Value>(a.as_str()) {
+                calls.push(ParsedToolCall {
+                    name: n.as_str().to_string(),
+                    args,
+                });
+            }
+        }
+    }
+    calls
+}
+
 /// Models often emit pseudo-XML instead of `<tool_call>` blocks; map a few builtins to real tool calls.
 fn parse_loose_tool_markup(text: &str) -> Vec<ParsedToolCall> {
     let mut calls = Vec::new();
+
+    // Try inline `name: X args: {...}` format first (common from small local models).
+    calls.extend(parse_inline_tool_calls(text));
+    if !calls.is_empty() {
+        return calls;
+    }
 
     calls.extend(parse_loose_json_tool_tags(text));
 
@@ -808,6 +841,10 @@ pub fn extract_answer(text: &str) -> String {
         .replace_all(&result, "")
         .to_string();
     result = re_strip_loose_pseudo_tools()
+        .replace_all(&result, "")
+        .to_string();
+    // Strip inline `name: X args: {...}` lines that small models emit.
+    result = re_inline_tool_call()
         .replace_all(&result, "")
         .to_string();
 
@@ -953,5 +990,32 @@ More text."#;
         let answer = extract_answer(text);
         assert!(!answer.contains("file_list"));
         assert!(answer.contains("End."));
+    }
+
+    #[test]
+    fn test_parse_inline_tool_calls() {
+        let text = "I'll search for that.\n\nname: web_fetch\nargs: {\"url\": \"https://example.com\"}\n\nAnd also:\n\nname: json\nargs: {\"action\": \"parse\", \"input\": \"hello\"}";
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "web_fetch");
+        assert_eq!(calls[0].args["url"], "https://example.com");
+        assert_eq!(calls[1].name, "json");
+    }
+
+    #[test]
+    fn test_parse_inline_tool_call_single_line() {
+        let text = "Let me check.\nname: web_fetch args: {\"url\": \"https://test.org\"}";
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "web_fetch");
+    }
+
+    #[test]
+    fn test_extract_answer_strips_inline_tool_calls() {
+        let text = "Here is info.\n\nname: web_fetch\nargs: {\"url\": \"https://x.com\"}\n\nFinal answer.";
+        let answer = extract_answer(text);
+        assert!(answer.contains("Here is info."));
+        assert!(answer.contains("Final answer."));
+        assert!(!answer.contains("web_fetch"));
     }
 }

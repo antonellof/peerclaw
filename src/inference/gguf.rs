@@ -679,10 +679,12 @@ impl GgufBackend for LlamaCppBackend {
     }
 }
 
-/// Thread-safe wrapper for GGUF model operations.
+/// Thread-safe wrapper for GGUF model operations with model caching.
 pub struct GgufEngine {
     backend: Box<dyn GgufBackend>,
     config: GgufConfig,
+    /// Cached loaded model (path → handle). Avoids reloading from disk every request (~2s).
+    cached: std::sync::Mutex<Option<GgufModelHandle>>,
 }
 
 impl GgufEngine {
@@ -700,35 +702,60 @@ impl GgufEngine {
         #[cfg(not(feature = "local-inference"))]
         let backend: Box<dyn GgufBackend> = Box::new(PlaceholderBackend);
 
-        Self { backend, config }
+        Self {
+            backend,
+            config,
+            cached: std::sync::Mutex::new(None),
+        }
     }
 
     /// Create with a specific backend (for testing).
     pub fn with_backend(backend: Box<dyn GgufBackend>, config: GgufConfig) -> Self {
-        Self { backend, config }
+        Self {
+            backend,
+            config,
+            cached: std::sync::Mutex::new(None),
+        }
     }
 
-    /// Load a model.
-    pub fn load(&self, path: &Path) -> Result<GgufModelHandle, GgufError> {
-        self.backend.load_model(path, &self.config)
+    /// Load a model, returning a cached handle if the same path is already loaded.
+    pub fn load(&self, path: &Path) -> Result<(), GgufError> {
+        let mut guard = self.cached.lock().unwrap();
+        if let Some(ref h) = *guard {
+            if h.path == path {
+                return Ok(());
+            }
+            // Different model requested — drop the old one.
+            tracing::info!(old = %h.id, new_path = %path.display(), "Swapping cached GGUF model");
+        }
+        let handle = self.backend.load_model(path, &self.config)?;
+        tracing::info!(model_id = %handle.id, "GGUF model cached");
+        *guard = Some(handle);
+        Ok(())
     }
 
-    /// Generate text.
+    /// Generate text using the cached model.
     pub fn generate(
         &self,
-        model: &GgufModelHandle,
         request: &GenerateRequest,
     ) -> Result<GenerateResponse, GgufError> {
+        let guard = self.cached.lock().unwrap();
+        let model = guard.as_ref().ok_or_else(|| {
+            GgufError::GenerationFailed("No model loaded — call load() first".into())
+        })?;
         self.backend.generate(model, request)
     }
 
-    /// Generate text with streaming callback.
+    /// Generate text with streaming callback using the cached model.
     pub fn generate_streaming(
         &self,
-        model: &GgufModelHandle,
         request: &GenerateRequest,
         token_callback: TokenCallback,
     ) -> Result<GenerateResponse, GgufError> {
+        let guard = self.cached.lock().unwrap();
+        let model = guard.as_ref().ok_or_else(|| {
+            GgufError::GenerationFailed("No model loaded — call load() first".into())
+        })?;
         self.backend
             .generate_streaming(model, request, token_callback)
     }
@@ -769,63 +796,43 @@ impl AsyncGgufEngine {
         }
     }
 
-    pub async fn load(&self, path: &Path) -> Result<GgufModelHandle, GgufError> {
+    pub async fn load(&self, path: &Path) -> Result<(), GgufError> {
         let engine = self.inner.lock().await;
         engine.load(path)
     }
 
     pub async fn generate(
         &self,
-        model: &GgufModelHandle,
         request: &GenerateRequest,
     ) -> Result<GenerateResponse, GgufError> {
         let engine = self.inner.lock().await;
-        engine.generate(model, request)
+        engine.generate(request)
     }
 
     /// Generate with streaming via an mpsc channel.
-    /// Returns a receiver that yields tokens as they're generated,
-    /// and eventually the final GenerateResponse.
     pub async fn generate_streaming_channel(
         &self,
-        model: &GgufModelHandle,
         request: &GenerateRequest,
     ) -> (
         mpsc::Receiver<String>,
         tokio::task::JoinHandle<Result<GenerateResponse, GgufError>>,
     ) {
         let (tx, rx) = mpsc::channel::<String>(256);
-
-        // Clone values needed for the closure
         let engine = self.inner.clone();
-        let model_id = model.id.clone();
-        let model_path = model.path.clone();
-        let model_memory = model.memory_mb;
         let request = request.clone();
 
         let handle = tokio::task::spawn_blocking(move || {
-            // We need to re-acquire the lock in blocking context
             let rt = tokio::runtime::Handle::current();
             let engine = rt.block_on(engine.lock());
-
-            // Create a placeholder model handle (the actual inner is in the engine's cache)
-            // This is a limitation - we need a way to reference the model
-            // For now, reload the model if needed
-            let model_handle = GgufModelHandle::placeholder(model_id, model_path, model_memory);
 
             let callback: TokenCallback = Box::new(move |token: &str| {
                 let _ = tx.blocking_send(token.to_string());
             });
 
-            engine.generate_streaming(&model_handle, &request, callback)
+            engine.generate_streaming(&request, callback)
         });
 
         (rx, handle)
-    }
-
-    pub async fn unload(&self, model: GgufModelHandle) {
-        let engine = self.inner.lock().await;
-        engine.unload(model)
     }
 }
 

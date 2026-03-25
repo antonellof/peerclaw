@@ -995,10 +995,9 @@ Output rules:
 }
 
 /// Upper bound on LLM↔tool rounds (avoids unbounded memory growth on the conversation).
-/// Kept modest so web agent runs cannot spin for thousands of passes; raise only if needed.
-const AGENTIC_MAX_ITERS: u32 = 64;
+const AGENTIC_MAX_ITERS: u32 = 12;
 /// Cap parallel tool calls per model response so one bad turn cannot flood the executor / UI.
-const AGENTIC_MAX_TOOL_CALLS_PER_PASS: usize = 12;
+const AGENTIC_MAX_TOOL_CALLS_PER_PASS: usize = 6;
 
 fn default_chat_agentic() -> bool {
     true
@@ -1011,36 +1010,33 @@ async fn build_agentic_system_prefix(
 ) -> String {
     use crate::tools::ToolLocation;
     let mut s = String::from(
-        "To call a tool, use exactly this format (multiple blocks allowed). \
-         `args` must be valid JSON (one line or multiple lines inside the block):\n\n\
-         <tool_call>\nname: tool_name_or_server_colon_tool\nargs: {\"key\": \"value\"}\n</tool_call>\n\n\
-         Never use `args: {}`. Every tool_call must include a JSON object with **all** keys listed as required for that tool under \"Builtin required args\" (e.g. `json` needs `action` and `input`; for `json` action `query` also pass `query`; `web_fetch` needs `url`; `job_status` needs `job_id`).\n\
-         At most 12 tool_call blocks per assistant turn; prefer 1–4 precise calls.\n\
-         For `web_fetch` / `http`, use real URLs from the user's message or from prior tool output — not placeholder hosts.\n\
-         `job_submit` is for **paid P2P marketplace** jobs and needs `type` plus matching fields (e.g. web_fetch job: `\"url\"` on the same object). For normal page fetch use the **web_fetch tool**, not `job_submit`.\n\
-         **Invalid (ignored, no tools run):** fake tags such as `<json …>`, `<file_list …>`, `<wallet_balance>`, or `message=\"…\"` as if they were tools. The runtime only recognizes `<tool_call>` blocks (plus a few legacy `<web_fetch>` / `<job_status>` forms). To call `json` or `web_fetch`, always use `<tool_call>` with `name` and `args`.\n\
-         If a tool returns a parameter error, fix the arguments or stop using that tool and answer from context.\n\
-         **IMPORTANT:** If `web_fetch` fails (DNS, 404, timeout), do NOT retry the same URL or guess alternative URLs. Answer from your own knowledge instead.\n\
-         Never repeat the same failing tool call. If two consecutive passes have only errors, stop calling tools and answer directly.\n\
-         Your final reply must directly satisfy the user's goal, not describe tool failures.\n\n",
+        "Tool format (args must be valid JSON):\n\
+         <tool_call>\nname: tool_name\nargs: {\"key\": \"value\"}\n</tool_call>\n\n\
+         Rules:\n\
+         - 1-3 tool calls per turn. All required args must be present.\n\
+         - If a tool fails, do NOT retry it. Answer from your own knowledge.\n\
+         - web_fetch: only use real URLs the user gave or from prior results. Never guess URLs.\n\
+         - If tools keep failing, stop calling tools and answer directly.\n\
+         - Your final reply must answer the user's question, not describe tool failures.\n\n",
     );
     if let Some(registry) = registry {
-        s.push_str(
-            "You are a helpful assistant on a PeerClaw node with **local tools** and optional **MCP** tools. \
-             The P2P marketplace is available via `job_submit` and `job_status` (budget in PCLAW) for inference, web_fetch, wasm, compute, and storage jobs on the network.\n\n\
-             Use **exact** names from \"Local tools\". For MCP, use the full id `server:tool_name` from \"MCP tools\".\n\
-             After tool results, continue until you can answer the user without more tools.\n\n\
-             ### Local tools\n",
-        );
+        s.push_str("You are a helpful assistant with local tools. Use exact tool names.\n\nTools:\n");
         let mut infos = registry.list_tools().await;
         infos.retain(|t| matches!(t.location, ToolLocation::Local));
         infos.sort_by(|a, b| a.name.cmp(&b.name));
-        for t in infos {
-            s.push_str(&format!("- **{}**: {}\n", t.name, t.description));
+        // Keep only the most useful tools for small-context models.
+        let priority_tools = ["web_fetch", "json", "shell", "read_file", "write_file",
+            "memory_search", "memory_store", "job_submit", "job_status"];
+        let (priority, rest): (Vec<_>, Vec<_>) = infos.into_iter()
+            .partition(|t| priority_tools.contains(&t.name.as_str()));
+        for t in &priority {
+            s.push_str(&format!("- {}: {}\n", t.name, t.description));
         }
-        s.push_str("\n### Builtin required args\n");
-        for (name, hint) in registry.builtin_parameter_hints() {
-            s.push_str(&format!("- **{name}**: {hint}\n"));
+        if !rest.is_empty() {
+            s.push_str(&format!("- (and {} more: {})\n",
+                rest.len(),
+                rest.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", ")
+            ));
         }
     } else {
         s.push_str(
@@ -1095,23 +1091,42 @@ async fn run_unified_agentic_inference(
     let mut tool_logs: Vec<String> = Vec::new();
     let mut total_tokens: u32 = 0;
     let tool_session = uuid::Uuid::new_v4().to_string();
-    // Cap conversation size to ~48k chars; keep system prefix + recent turns.
-    const CONV_MAX_CHARS: usize = 48_000;
+
+    // Estimate prompt budget: model context size (chars ≈ tokens * 4) minus output tokens.
+    // For small local GGUF models (4096 ctx), this is critical.
+    // For remote APIs with large contexts, 48k chars is a safe upper bound.
+    let model_ctx_chars = state
+        .inference
+        .as_ref()
+        .map(|inf| inf.config_context_size() as usize * 4)
+        .unwrap_or(48_000);
+    let output_budget_chars = (max_tokens as usize) * 4;
+    let prompt_budget = model_ctx_chars.saturating_sub(output_budget_chars + 200);
+    // At least 2k chars for the prompt, otherwise skip agentic entirely.
+    let conv_max_chars = prompt_budget.max(2_000);
+
     /// Bail out after this many consecutive passes where every tool call fails.
-    const MAX_CONSECUTIVE_FAIL_PASSES: u32 = 3;
+    const MAX_CONSECUTIVE_FAIL_PASSES: u32 = 2;
     let mut consecutive_all_fail_passes: u32 = 0;
 
     for iter in 1..=AGENTIC_MAX_ITERS {
-        // Compact conversation if it has grown too large (keep prefix + tail).
-        if conversation.len() > CONV_MAX_CHARS {
-            let keep_tail = CONV_MAX_CHARS.saturating_sub(prefix_len + 200);
+        // Compact conversation to fit model context.
+        if conversation.len() > conv_max_chars {
+            let keep_tail = conv_max_chars.saturating_sub(prefix_len + 200);
             let cut_at = conversation.len().saturating_sub(keep_tail);
-            // Find a newline boundary near the cut point to avoid splitting mid-line.
             let boundary = conversation[cut_at..].find('\n').map(|i| cut_at + i + 1).unwrap_or(cut_at);
             conversation = format!(
                 "{}\n\n(Earlier conversation compacted.)\n\n{}",
                 &conversation[..prefix_len],
                 &conversation[boundary..]
+            );
+        }
+
+        // On the last allowed iteration, force text: tell the model to stop using tools.
+        if iter == AGENTIC_MAX_ITERS {
+            conversation.push_str(
+                "\n\n(System: This is your FINAL turn. Do NOT call any tools. \
+                 Write your complete answer directly to the user NOW.)\n",
             );
         }
         if cancel
@@ -2904,14 +2919,9 @@ async fn api_create_task(
             broadcast_tasks_changed(&ws_tx);
 
             let body = format!(
-                "### Agent goal\n{description}\n\n\
-                 {skill_block}\
-                 Use local tools and MCP only when they clearly help. For distributed work use job_submit / job_status.\n\
-                 For travel, prices, hours, or anything time-sensitive: use **web_fetch** on real sites (official rail, tourism, venues) — do not invent schedules or restaurant availability.\n\
-                 Every tool call must supply all required JSON keys from \"Builtin required args\" in the system instructions.\n\
-                 Do not fetch example.com or other placeholder URLs unless the user gave that URL.\n\
-                 If memory_search returns nothing, do not repeat the same query; continue or answer without it.\n\
-                 Finish with a concise, substantive answer for the user (not commentary about tools).\n"
+                "Goal: {description}\n\n{skill_block}\
+                 Use tools only when needed. If a tool fails, answer from your knowledge.\n\
+                 Give a complete, useful answer.\n"
             );
 
             let progress_sink = AgenticTaskProgressSink {
@@ -2927,7 +2937,7 @@ async fn api_create_task(
                 include_mcp_catalog,
                 body,
                 model,
-                2048,
+                1024,
                 0.35,
                 Some(progress_sink),
                 Some(cancel),
@@ -3034,7 +3044,7 @@ async fn api_create_task(
                 true,
                 body,
                 model,
-                2048,
+                1024,
                 0.35,
                 Some(progress_sink),
                 Some(cancel),
