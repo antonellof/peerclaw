@@ -1,8 +1,14 @@
-# PeerClaw
+<p align="center">
+  <img src="docs/logo.png" alt="PeerClaw — P2P Agent" width="320" />
+</p>
 
-**Decentralized P2P AI Agent Network**
+<h1 align="center">PeerClaw</h1>
 
-> One binary. Distributed intelligence. Token-powered autonomy.
+<p align="center"><strong>Decentralized P2P AI Agent Network</strong></p>
+
+<p align="center">
+  <em>One binary. Distributed intelligence. Token-powered autonomy.</em>
+</p>
 
 PeerClaw is a peer-to-peer network where AI agents collaborate, share compute resources, and transact using a native token economy. Think **BitTorrent meets AI inference** — every peer contributes compute and earns tokens, while agents spend tokens to execute tasks across the network.
 

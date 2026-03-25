@@ -1168,6 +1168,34 @@ async fn run_unified_agentic_inference(
             sink.set_tokens(total_tokens).await;
         }
         let text = inf.text;
+
+        // Detect inference errors (e.g. context overflow, model crash) — retry with compacted context.
+        if inf.location == "error" || text.starts_with("Error: Inference error:") || text.starts_with("Error: ") {
+            if let Some(ref sink) = progress {
+                sink.append_log(format!(
+                    "[{}] Inference error on pass {}: {} — compacting and retrying",
+                    chrono::Utc::now().format("%H:%M:%S"),
+                    iter,
+                    text.chars().take(120).collect::<String>()
+                ))
+                .await;
+            }
+            // Aggressively compact: keep only prefix + the original goal.
+            let goal_start = conversation.find("Goal:").or_else(|| conversation.find("### Agent goal"))
+                .or_else(|| conversation.find("### User thread"))
+                .unwrap_or(prefix_len);
+            let goal_end = conversation[goal_start..].find("\n\nAssistant:")
+                .map(|i| goal_start + i)
+                .unwrap_or(conversation.len().min(goal_start + 2000));
+            let goal_section = conversation[goal_start..goal_end].to_string();
+            conversation = format!(
+                "{}\n\n{}\n\n(System: Earlier tool results were dropped due to context limits. Answer from your knowledge now. Do NOT call tools.)\n",
+                &conversation[..prefix_len],
+                goal_section
+            );
+            continue;
+        }
+
         let mut calls = crate::agent::parse_tool_calls(&text);
         if calls.is_empty() {
             let cleaned = crate::agent::extract_answer(&text);
@@ -1315,7 +1343,20 @@ async fn run_unified_agentic_inference(
             if let Some(ref sink) = progress {
                 sink.record_tool_step(line, total_tokens).await;
             }
-            conversation.push_str(&format!("- {} → {}\n", call.name, summary));
+            // Truncate large tool results to save context for the answer.
+            let truncated = if summary.len() > 3000 {
+                format!("{}… (truncated)", &summary[..3000])
+            } else {
+                summary
+            };
+            conversation.push_str(&format!("- {} → {}\n", call.name, truncated));
+        }
+
+        // After tool results, nudge the model to answer.
+        if pass_failures < call_count as u32 {
+            conversation.push_str(
+                "\nNow use the tool results above to write your answer to the user. If you need more info, call another tool. Otherwise answer directly without tool calls.\n",
+            );
         }
 
         // Track consecutive all-fail passes and bail out with a nudge.
@@ -1678,18 +1719,21 @@ async fn build_prompt_with_history(
     let Some(msgs) = guard.get(sid) else {
         return user_message.to_string();
     };
-    let skip = msgs.len().saturating_sub(40);
+    // Keep recent turns but cap total chars to ~6k so we don't blow context for small models.
+    // For large-context remote models this is still enough for good continuity.
+    const MAX_HISTORY_CHARS: usize = 6_000;
     let mut prefix = String::new();
-    for m in msgs.iter().skip(skip) {
-        prefix.push_str(&m.role);
-        prefix.push_str(": ");
-        prefix.push_str(&m.content);
-        prefix.push('\n');
+    for m in msgs.iter().rev() {
+        let line = format!("{}: {}\n", m.role, m.content);
+        if prefix.len() + line.len() > MAX_HISTORY_CHARS {
+            break;
+        }
+        prefix.insert_str(0, &line);
     }
     if prefix.is_empty() {
         user_message.to_string()
     } else {
-        format!("Previous turns (compact):\n{prefix}\nUser: {user_message}")
+        format!("Previous turns:\n{prefix}\nUser: {user_message}")
     }
 }
 

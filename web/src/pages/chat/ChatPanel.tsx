@@ -646,7 +646,6 @@ export function ChatPanel({ onRegisterControls }: Props) {
     setAgentTaskType(t.taskType)
     setInput(t.text)
     setComposerMode("agent")
-    setShowWelcome(false)
   }
 
   const applyScenarioPreset = (key: string) => {
@@ -655,7 +654,6 @@ export function ChatPanel({ onRegisterControls }: Props) {
     setAgentTaskType(p.type)
     setInput(p.text)
     setComposerMode("agent")
-    setShowWelcome(false)
   }
 
   return (
@@ -676,37 +674,32 @@ export function ChatPanel({ onRegisterControls }: Props) {
             >
             <div className="mx-auto flex min-h-full max-w-3xl flex-col justify-end px-3 py-4 md:px-4">
               {showWelcome && messages.length === 0 ? (
-            <div className="flex min-h-0 flex-1 flex-col justify-center py-6">
-              <div className="text-center">
-                <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">How can I help today?</h1>
-                <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
-                  Ask anything, use{" "}
-                  <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs">/</kbd> for
-                  commands, or switch to <strong className="text-foreground">Agent goal</strong> for multi-step agent
-                  runs (history is saved in this browser for the current session). Past agent tasks appear under{" "}
-                  <strong className="text-foreground">Agent runs</strong> in the left sidebar.
+            <div className="flex min-h-0 flex-1 flex-col justify-center py-8">
+              <div className="mx-auto max-w-lg text-center">
+                <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">PeerClaw</h1>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Chat, run agent tasks, or type <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[11px]">/</kbd> for commands
                 </p>
-                <div className="mx-auto mt-8 grid max-w-lg gap-2 sm:grid-cols-2">
-                  {[
-                    { t: "New conversation", p: "Hello — what can you do on this node?", cmd: null },
-                    { t: "Commands", p: null, cmd: "/help" },
-                    { t: "Skills", p: null, cmd: "/skills" },
-                    { t: "Node overview", p: null, cmd: "/open overview" },
-                  ].map((x) => (
-                    <button
-                      key={x.t}
-                      type="button"
-                      className="rounded-xl border border-border/80 bg-card/50 p-4 text-left text-sm shadow-sm transition-colors hover:border-primary/30 hover:bg-muted/30"
-                      onClick={() => {
-                        if (x.cmd) setInput(x.cmd)
-                        else setInput(x.p ?? "")
-                      }}
-                    >
-                      <div className="font-medium">{x.t}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">{x.p ?? x.cmd}</div>
-                    </button>
-                  ))}
-                </div>
+              </div>
+              <div className="mx-auto mt-8 grid w-full max-w-lg gap-2 sm:grid-cols-2">
+                {([
+                  { label: "Research a topic", icon: "🔍", action: () => applyAgentTemplate("research") },
+                  { label: "Summarize a URL", icon: "📄", action: () => applyAgentTemplate("summarize") },
+                  { label: "Plan a trip", icon: "✈️", action: () => applyScenarioPreset("trip") },
+                  { label: "Draft an email", icon: "✉️", action: () => applyScenarioPreset("email") },
+                  { label: "Review code", icon: "💻", action: () => applyAgentTemplate("code") },
+                  { label: "Analyze data", icon: "📊", action: () => applyScenarioPreset("data") },
+                ] as const).map((x) => (
+                  <button
+                    key={x.label}
+                    type="button"
+                    className="flex items-center gap-3 rounded-xl border border-border/80 bg-card/50 px-4 py-3 text-left text-sm shadow-sm transition-colors hover:border-primary/30 hover:bg-muted/30"
+                    onClick={x.action}
+                  >
+                    <span className="text-lg">{x.icon}</span>
+                    <span className="font-medium text-foreground">{x.label}</span>
+                  </button>
+                ))}
               </div>
               </div>
               ) : (
@@ -893,47 +886,6 @@ export function ChatPanel({ onRegisterControls }: Props) {
               </>
             )}
           </div>
-
-          {composerMode === "agent" && (
-            <div className="space-y-2">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Quick templates</p>
-              <div className="flex flex-wrap gap-1.5">
-                {(
-                  [
-                    ["research", "Research"],
-                    ["summarize", "Summarize URL"],
-                    ["code", "Code review"],
-                    ["monitor", "Check URL"],
-                    ["analyze", "Analyze"],
-                    ["automate", "Automate"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <Button
-                    key={key}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 border-border/70 px-2 text-[10px]"
-                    onClick={() => applyAgentTemplate(key)}
-                  >
-                    {label}
-                  </Button>
-                ))}
-                {Object.keys(SCENARIO_PRESETS).map((k) => (
-                  <Button
-                    key={k}
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-7 px-2 text-[10px]"
-                    onClick={() => applyScenarioPreset(k)}
-                  >
-                    {k}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
 
           <div className="relative rounded-2xl border border-border/80 bg-background shadow-sm">
             {autocompleteOpen && filteredAc.length > 0 && (
