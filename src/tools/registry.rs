@@ -13,8 +13,18 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 
 use super::builtin;
-use super::tool::{Tool, ToolContext, ToolDomain, ToolError};
+use super::tool::{parameter_schema_prompt_hint, Tool, ToolContext, ToolDomain, ToolError};
 use super::{ToolCapabilities, ToolLocation, ToolResult};
+
+fn required_json_value_missing(v: Option<&serde_json::Value>) -> bool {
+    match v {
+        None => true,
+        Some(serde_json::Value::Null) => true,
+        Some(serde_json::Value::String(s)) if s.trim().is_empty() => true,
+        Some(serde_json::Value::Array(a)) if a.is_empty() => true,
+        _ => false,
+    }
+}
 
 /// Tool availability on the network.
 #[derive(Debug, Clone)]
@@ -120,6 +130,55 @@ impl ToolRegistry {
         self.builtin_tools.get(name).cloned()
     }
 
+    /// Validate `params` against the tool's JSON-schema `required` list before execution.
+    /// Catches empty `{}` and missing keys so the model gets one clear hint instead of generic errors.
+    pub fn precheck_local_params(&self, name: &str, params: &serde_json::Value) -> Result<(), String> {
+        let Some(tool) = self.get(name) else {
+            return Ok(());
+        };
+        let schema = tool.parameters_schema();
+        let Some(req) = schema.get("required").and_then(|r| r.as_array()) else {
+            return Ok(());
+        };
+        let obj = match params.as_object() {
+            Some(o) => o,
+            None => {
+                return Err(format!(
+                    "`{}` expects a JSON object for `args`, got {}. Required: {}",
+                    name,
+                    if params.is_null() {
+                        "null".to_string()
+                    } else {
+                        params.to_string()
+                    },
+                    parameter_schema_prompt_hint(&schema)
+                ));
+            }
+        };
+        for key in req {
+            let Some(ks) = key.as_str() else {
+                continue;
+            };
+            if required_json_value_missing(obj.get(ks)) {
+                return Err(format!(
+                    "missing or empty required parameter `{}` for `{}`. Required: {}",
+                    ks,
+                    name,
+                    parameter_schema_prompt_hint(&schema)
+                ));
+            }
+        }
+        if name == "json" && obj.get("action").and_then(|v| v.as_str()) == Some("query") {
+            if required_json_value_missing(obj.get("query")) {
+                return Err(format!(
+                    "missing or empty required parameter `query` for `json` when action is \"query\". Required: {}",
+                    parameter_schema_prompt_hint(&schema)
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Per-builtin hints for agent prompts: tool name → required-parameter summary.
     pub fn builtin_parameter_hints(&self) -> Vec<(String, String)> {
         let mut v: Vec<_> = self
@@ -191,6 +250,10 @@ impl ToolRegistry {
         ctx: &ToolContext,
     ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
+
+        if let Err(e) = self.precheck_local_params(name, &params) {
+            return Err(ToolError::InvalidParameters(e));
+        }
 
         let tool = self
             .get(name)
@@ -310,6 +373,34 @@ mod tests {
         let tools = registry.list_tools().await;
         assert!(!tools.is_empty());
         assert!(tools.iter().any(|t| t.name == "echo"));
+    }
+
+    #[tokio::test]
+    async fn test_precheck_rejects_empty_json_args() {
+        let registry = ToolRegistry::new("test-peer".to_string());
+        let err = registry
+            .precheck_local_params("json", &serde_json::json!({}))
+            .unwrap_err();
+        assert!(err.contains("action"), "{}", err);
+        let err2 = registry
+            .precheck_local_params("web_fetch", &serde_json::json!({}))
+            .unwrap_err();
+        assert!(err2.contains("url"), "{}", err2);
+    }
+
+    #[tokio::test]
+    async fn test_precheck_json_query_requires_query() {
+        let registry = ToolRegistry::new("test-peer".to_string());
+        let err = registry
+            .precheck_local_params(
+                "json",
+                &serde_json::json!({
+                    "action": "query",
+                    "input": "{}"
+                }),
+            )
+            .unwrap_err();
+        assert!(err.contains("query"), "{}", err);
     }
 
     #[tokio::test]

@@ -357,7 +357,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
           m.agentTaskId === taskId
             ? {
                 ...m,
-                agentStatusLine: `${t.status} · ${t.iterations ?? 0} it · ${t.tokens_used ?? 0} tok`,
+                agentStatusLine: `${t.status} · pass ${t.iterations ?? 0} · ${t.tokens_used ?? 0} tok`,
                 agentLogs: Array.isArray(t.logs) ? [...t.logs] : m.agentLogs,
               }
             : m,
@@ -368,9 +368,17 @@ export function ChatPanel({ onRegisterControls }: Props) {
         if (finishedRef.current.has(taskId)) return
         finishedRef.current.add(taskId)
         stopPoll(taskId)
+        const raw =
+          typeof t.result === "string" ? t.result : t.result != null ? String(t.result) : ""
+        const trimmed = raw.trim()
         const summary =
-          t.result ??
-          (t.status === "failed" ? "Agent run failed." : t.status === "cancelled" ? "Stopped." : "Done.")
+          trimmed.length > 0
+            ? trimmed
+            : t.status === "failed"
+              ? "Agent run failed."
+              : t.status === "cancelled"
+                ? "Stopped."
+                : "No summary text was returned. Open **Steps** above for tool output (the model may have stopped after tools, or only emitted tool markup). Try again or use Chat with Tools for a follow-up."
         setMessages((prev) => [
           ...prev,
           {

@@ -11,7 +11,7 @@
 
 pub mod openai;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -226,11 +226,19 @@ impl AgenticTaskProgressSink {
         broadcast_tasks_changed(&self.ws_tx);
     }
 
-    async fn record_tool_step(&self, line: String, tool_step: u32, tokens_so_far: u32) {
+    /// ReAct pass number (1-based), not tool-call count — matches "Pass N/…" in logs.
+    async fn set_react_pass(&self, pass: u32) {
+        let mut tasks = self.store.write().await;
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == self.task_id) {
+            t.iterations = pass;
+        }
+        broadcast_tasks_changed(&self.ws_tx);
+    }
+
+    async fn record_tool_step(&self, line: String, tokens_so_far: u32) {
         let mut tasks = self.store.write().await;
         if let Some(t) = tasks.iter_mut().find(|t| t.id == self.task_id) {
             t.logs.push(line);
-            t.iterations = tool_step;
             t.tokens_used = tokens_so_far;
         }
         broadcast_tasks_changed(&self.ws_tx);
@@ -978,6 +986,8 @@ Output rules:
 /// Upper bound on LLM↔tool rounds (avoids unbounded memory growth on the conversation).
 /// Kept modest so web agent runs cannot spin for thousands of passes; raise only if needed.
 const AGENTIC_MAX_ITERS: u32 = 64;
+/// Cap parallel tool calls per model response so one bad turn cannot flood the executor / UI.
+const AGENTIC_MAX_TOOL_CALLS_PER_PASS: usize = 12;
 
 fn default_chat_agentic() -> bool {
     true
@@ -993,8 +1003,10 @@ async fn build_agentic_system_prefix(
         "To call a tool, use exactly this format (multiple blocks allowed). \
          `args` must be valid JSON (one line or multiple lines inside the block):\n\n\
          <tool_call>\nname: tool_name_or_server_colon_tool\nargs: {\"key\": \"value\"}\n</tool_call>\n\n\
-         Do not call tools with empty `args: {}` when that tool lists required keys under \"Builtin required args\".\n\
+         Never use `args: {}`. Every tool_call must include a JSON object with **all** keys listed as required for that tool under \"Builtin required args\" (e.g. `json` needs `action` and `input`; for `json` action `query` also pass `query`; `web_fetch` needs `url`; `job_status` needs `job_id`).\n\
+         At most 12 tool_call blocks per assistant turn; prefer 1–4 precise calls.\n\
          For `web_fetch` / `http`, use real URLs from the user's message or from prior tool output — not placeholder hosts.\n\
+         `job_submit` is for **paid P2P marketplace** jobs and needs `type` plus matching fields (e.g. web_fetch job: `\"url\"` on the same object). For normal page fetch use the **web_fetch tool**, not `job_submit`.\n\
          If a tool returns a parameter error, fix the arguments or stop using that tool and answer from context.\n\
          Your final reply must directly satisfy the user's goal, not describe tool failures.\n\n",
     );
@@ -1077,6 +1089,7 @@ async fn run_unified_agentic_inference(
             return Err("Stopped by user".into());
         }
         if let Some(ref sink) = progress {
+            sink.set_react_pass(iter).await;
             sink.append_log(format!(
                 "[{}] Pass {}/{}: requesting model…",
                 chrono::Utc::now().format("%H:%M:%S"),
@@ -1108,12 +1121,18 @@ async fn run_unified_agentic_inference(
             sink.set_tokens(total_tokens).await;
         }
         let text = inf.text;
-        let calls = crate::agent::parse_tool_calls(&text);
+        let mut calls = crate::agent::parse_tool_calls(&text);
         if calls.is_empty() {
             let cleaned = crate::agent::extract_answer(&text);
+            let text_out = if cleaned.trim().is_empty() {
+                "(No text in the model's final reply after stripping tool markup. See task steps / logs for tool results, or retry.)"
+                    .to_string()
+            } else {
+                cleaned
+            };
             return Ok((
                 InferenceResponse {
-                    text: cleaned,
+                    text: text_out,
                     tokens_generated: total_tokens,
                     tokens_per_second: inf.tokens_per_second,
                     location: inf.location,
@@ -1122,18 +1141,64 @@ async fn run_unified_agentic_inference(
                 tool_logs,
             ));
         }
+        // Small models often repeat the same tool_call many times; merge before execute/log.
+        let model_tool_call_count = calls.len();
+        let mut seen_sig: HashSet<(String, String)> = HashSet::new();
+        calls.retain(|call| {
+            let sig = (call.name.clone(), call.args.to_string());
+            seen_sig.insert(sig)
+        });
+        let duplicate_calls_merged = model_tool_call_count.saturating_sub(calls.len());
+
         if let Some(ref sink) = progress {
-            sink.append_log(format!(
+            let mut msg = format!(
                 "[{}] Pass {}: {} tool call(s)",
                 chrono::Utc::now().format("%H:%M:%S"),
                 iter,
-                calls.len()
-            ))
-            .await;
+                model_tool_call_count
+            );
+            if duplicate_calls_merged > 0 {
+                msg.push_str(&format!(
+                    " → {} unique (merged {} duplicate(s))",
+                    calls.len(),
+                    duplicate_calls_merged
+                ));
+            }
+            sink.append_log(msg).await;
         }
+        let dropped_calls = if calls.len() > AGENTIC_MAX_TOOL_CALLS_PER_PASS {
+            let n = calls.len() - AGENTIC_MAX_TOOL_CALLS_PER_PASS;
+            calls.truncate(AGENTIC_MAX_TOOL_CALLS_PER_PASS);
+            if let Some(ref sink) = progress {
+                sink.append_log(format!(
+                    "[{}] Pass {}: executing first {} of {} tool call(s) (max {} per turn)",
+                    chrono::Utc::now().format("%H:%M:%S"),
+                    iter,
+                    AGENTIC_MAX_TOOL_CALLS_PER_PASS,
+                    AGENTIC_MAX_TOOL_CALLS_PER_PASS + n,
+                    AGENTIC_MAX_TOOL_CALLS_PER_PASS
+                ))
+                .await;
+            }
+            Some(n)
+        } else {
+            None
+        };
+
         conversation.push_str("\n\nAssistant:\n");
         conversation.push_str(&text);
-        conversation.push_str("\n\nUser:\nHere are the tool results:\n");
+        conversation.push_str("\n\nUser:\n");
+        if duplicate_calls_merged > 0 {
+            conversation.push_str(&format!(
+                "(System: {duplicate_calls_merged} repeated tool call(s) with identical name+args were merged; each unique call runs once. Prefer a single well-formed call per intent.)\n"
+            ));
+        }
+        if let Some(d) = dropped_calls {
+            conversation.push_str(&format!(
+                "(System: {d} tool call(s) in this reply were skipped — max {AGENTIC_MAX_TOOL_CALLS_PER_PASS} per turn. Use fewer, complete calls.)\n"
+            ));
+        }
+        conversation.push_str("Here are the tool results:\n");
         for call in calls {
             let summary = if call.name.contains(':') {
                 match &mcp {
@@ -1189,9 +1254,7 @@ async fn run_unified_agentic_inference(
             );
             tool_logs.push(line.clone());
             if let Some(ref sink) = progress {
-                sink
-                    .record_tool_step(line, tool_logs.len() as u32, total_tokens)
-                    .await;
+                sink.record_tool_step(line, total_tokens).await;
             }
             conversation.push_str(&format!("- {} → {}\n", call.name, summary));
         }
@@ -2597,8 +2660,7 @@ async fn api_create_task(
             state_spawn.agent_task_cancels.write().await.remove(&tid);
 
             match infer_outcome {
-                Ok((resp, tool_logs)) => {
-                    let n = tool_logs.len() as u32;
+                Ok((resp, _tool_logs)) => {
                     let mut tasks = store.write().await;
                     if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
                         // Pass / tool lines already streamed into `t.logs` during the run.
@@ -2606,7 +2668,10 @@ async fn api_create_task(
                         t.completed_at = Some(chrono::Utc::now().to_rfc3339());
                         t.result = Some(resp.text);
                         t.tokens_used = resp.tokens_generated;
-                        t.iterations = n.max(1);
+                        // `t.iterations` is ReAct pass count from `set_react_pass`, not tool-step count.
+                        if t.iterations == 0 {
+                            t.iterations = 1;
+                        }
                     }
                     broadcast_tasks_changed(&ws_tx);
                 }
@@ -2700,8 +2765,7 @@ async fn api_create_task(
             state_spawn.agent_task_cancels.write().await.remove(&tid);
 
             match infer_outcome {
-                Ok((resp, tool_logs)) => {
-                    let n = tool_logs.len() as u32;
+                Ok((resp, _tool_logs)) => {
                     let mut tasks = store.write().await;
                     if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
                         // Pass / tool lines already streamed into `t.logs` during the run.
@@ -2709,7 +2773,9 @@ async fn api_create_task(
                         t.completed_at = Some(chrono::Utc::now().to_rfc3339());
                         t.result = Some(resp.text);
                         t.tokens_used = resp.tokens_generated;
-                        t.iterations = n.max(1);
+                        if t.iterations == 0 {
+                            t.iterations = 1;
+                        }
                     }
                     broadcast_tasks_changed(&ws_tx);
                 }

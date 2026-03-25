@@ -40,9 +40,9 @@ impl Tool for JobSubmitTool {
     }
 
     fn description(&self) -> &str {
-        "Submit a job to the P2P network for distributed execution. \
-         Jobs are matched with peers who can fulfill them, with payment via PCLAW tokens. \
-         Use for inference, computation, or other resource-intensive tasks."
+        "Submit a **P2P marketplace** job (costs PCLAW). Same JSON object must include `type` **and** the field that type needs: \
+         inference → `prompt` or `payload`; web_fetch → `url` or `payload`; wasm → `tool_name` or `payload`; compute/storage → `payload`. \
+         Do not use this for ordinary local research — use `web_fetch` (tool) with a `url` instead."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -51,7 +51,7 @@ impl Tool for JobSubmitTool {
             "properties": {
                 "type": {
                     "type": "string",
-                    "description": "P2P marketplace job: inference, web_fetch, wasm (matches node job handler)",
+                    "description": "Marketplace job kind. Required companion fields on the **same** object: inference→prompt|payload, web_fetch→url|payload, wasm→tool_name|payload, compute|storage→payload",
                     "enum": ["inference", "web_fetch", "wasm", "compute", "storage"]
                 },
                 "prompt": {
@@ -102,22 +102,37 @@ impl Tool for JobSubmitTool {
             "inference" => optional_str(&params, "prompt")
                 .or_else(|| optional_str(&params, "payload"))
                 .ok_or_else(|| {
-                    ToolError::InvalidParameters("inference requires `prompt` or `payload`".into())
+                    ToolError::InvalidParameters(
+                        "job_submit: type \"inference\" needs top-level \"prompt\" or \"payload\""
+                            .into(),
+                    )
                 })?
                 .to_string(),
             "web_fetch" => optional_str(&params, "url")
                 .or_else(|| optional_str(&params, "payload"))
                 .ok_or_else(|| {
-                    ToolError::InvalidParameters("web_fetch requires `url` or `payload`".into())
+                    ToolError::InvalidParameters(
+                        "job_submit: type \"web_fetch\" needs top-level \"url\" or \"payload\" (this is the P2P job tool; for local fetch use the web_fetch tool with {\"url\": \"...\"})"
+                            .into(),
+                    )
                 })?
                 .to_string(),
             "wasm" => optional_str(&params, "tool_name")
                 .or_else(|| optional_str(&params, "payload"))
                 .ok_or_else(|| {
-                    ToolError::InvalidParameters("wasm requires `tool_name` or `payload`".into())
+                    ToolError::InvalidParameters(
+                        "job_submit: type \"wasm\" needs top-level \"tool_name\" or \"payload\""
+                            .into(),
+                    )
                 })?
                 .to_string(),
-            "compute" | "storage" => require_str(&params, "payload")?.to_string(),
+            "compute" | "storage" => require_str(&params, "payload")
+                .map_err(|_| {
+                    ToolError::InvalidParameters(format!(
+                        "job_submit: type \"{job_type}\" needs top-level \"payload\""
+                    ))
+                })?
+                .to_string(),
             _ => {
                 return Err(ToolError::InvalidParameters(format!(
                     "Unknown job type: {} (use inference, web_fetch, wasm, compute, storage)",

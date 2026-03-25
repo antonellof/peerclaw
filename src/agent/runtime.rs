@@ -3,9 +3,11 @@
 //! Implements a ReAct-style loop: LLM generates thoughts and tool calls,
 //! tools are executed, results fed back, until a final answer is produced.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
@@ -278,7 +280,7 @@ impl AgentRuntime {
                 .push(ChatMessage::assistant(&response_text));
 
             // Check for tool calls in the response
-            let parsed_calls = parse_tool_calls(&response_text);
+            let mut parsed_calls = parse_tool_calls(&response_text);
 
             if parsed_calls.is_empty() {
                 // No tool calls → this is the final answer
@@ -292,6 +294,25 @@ impl AgentRuntime {
                     success: true,
                     error: None,
                 };
+            }
+
+            let model_tool_call_count = parsed_calls.len();
+            let mut seen_sig: HashSet<(String, String)> = HashSet::new();
+            parsed_calls.retain(|call| {
+                let sig = (call.name.clone(), call.args.to_string());
+                seen_sig.insert(sig)
+            });
+            let duplicate_calls_merged = model_tool_call_count.saturating_sub(parsed_calls.len());
+            if duplicate_calls_merged > 0 {
+                self.log(&format!(
+                    "Merged {} duplicate tool call(s) (identical name+args); {} unique this turn.",
+                    duplicate_calls_merged,
+                    parsed_calls.len()
+                ))
+                .await;
+                self.conversation.push(ChatMessage::user(format!(
+                    "(System: merged {duplicate_calls_merged} duplicate tool call(s); each unique call runs once.)"
+                )));
             }
 
             // Execute tool calls
@@ -525,7 +546,17 @@ fn parse_tool_call_block(block: &str) -> Option<ParsedToolCall> {
 /// Looks for: <tool_call>\nname: X\nargs: {...}\n</tool_call>
 ///
 /// `args` may span multiple lines (JSON object or array) until it parses.
+///
+/// If none are found, falls back to common **wrong** formats models emit (`<web_fetch>`, `<job_status>`).
 pub fn parse_tool_calls(text: &str) -> Vec<ParsedToolCall> {
+    let standard = parse_standard_tool_calls(text);
+    if !standard.is_empty() {
+        return standard;
+    }
+    parse_loose_tool_markup(text)
+}
+
+fn parse_standard_tool_calls(text: &str) -> Vec<ParsedToolCall> {
     let mut calls = Vec::new();
     let mut remaining = text;
 
@@ -546,6 +577,75 @@ pub fn parse_tool_calls(text: &str) -> Vec<ParsedToolCall> {
     calls
 }
 
+fn re_web_fetch_block() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?is)<web_fetch>\s*(.*?)</web_fetch>").expect("regex"))
+}
+
+fn re_url_in_loose_inner() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(r#"(?i)url\s*:\s*"([^"]+)"|url\s*:\s*'([^']+)'|(https?://[^\s"'<>]+)"#)
+            .expect("regex")
+    })
+}
+
+fn re_job_status_open() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(r#"(?is)<job_status\s+[^>]*?job_id\s*=\s*"([^"]+)"[^>]*>"#).expect("regex")
+    })
+}
+
+/// Models often emit pseudo-XML instead of `<tool_call>` blocks; map a few builtins to real tool calls.
+fn parse_loose_tool_markup(text: &str) -> Vec<ParsedToolCall> {
+    let mut calls = Vec::new();
+
+    for cap in re_web_fetch_block().captures_iter(text) {
+        let inner = cap.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+        if let Some(url) = extract_url_from_loose_fetch_inner(inner) {
+            calls.push(ParsedToolCall {
+                name: "web_fetch".to_string(),
+                args: serde_json::json!({ "url": url }),
+            });
+        }
+    }
+
+    for cap in re_job_status_open().captures_iter(text) {
+        if let Some(jid) = cap.get(1) {
+            calls.push(ParsedToolCall {
+                name: "job_status".to_string(),
+                args: serde_json::json!({ "job_id": jid.as_str() }),
+            });
+        }
+    }
+
+    calls
+}
+
+fn extract_url_from_loose_fetch_inner(inner: &str) -> Option<String> {
+    let caps = re_url_in_loose_inner().captures(inner)?;
+    if let Some(m) = caps.get(1) {
+        return Some(m.as_str().to_string());
+    }
+    if let Some(m) = caps.get(2) {
+        return Some(m.as_str().to_string());
+    }
+    caps.get(3).map(|m| m.as_str().to_string())
+}
+
+fn re_strip_loose_fetch() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?is)<web_fetch>\s*.*?</web_fetch>").expect("regex"))
+}
+
+fn re_strip_loose_job_status() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(r#"(?is)<job_status\s[^>]*(?:/>|>[\s\S]*?</job_status>)"#).expect("regex")
+    })
+}
+
 /// Extract the final answer from LLM text (remove any tool_call blocks).
 pub fn extract_answer(text: &str) -> String {
     let mut result = text.to_string();
@@ -558,6 +658,13 @@ pub fn extract_answer(text: &str) -> String {
             break;
         }
     }
+
+    result = re_strip_loose_fetch()
+        .replace_all(&result, "")
+        .to_string();
+    result = re_strip_loose_job_status()
+        .replace_all(&result, "")
+        .to_string();
 
     result.trim().to_string()
 }
@@ -626,5 +733,40 @@ The final answer is 42."#;
         assert!(answer.contains("Here is my answer"));
         assert!(answer.contains("The final answer is 42"));
         assert!(!answer.contains("tool_call"));
+    }
+
+    #[test]
+    fn test_parse_loose_web_fetch_and_job_status() {
+        let text = r#"<web_fetch> url: "https://example.com/path" </web_fetch>
+
+<job_status job_id="job_12345"></job_status>"#;
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "web_fetch");
+        assert_eq!(calls[0].args["url"], "https://example.com/path");
+        assert_eq!(calls[1].name, "job_status");
+        assert_eq!(calls[1].args["job_id"], "job_12345");
+    }
+
+    #[test]
+    fn test_standard_tool_calls_take_precedence_over_loose() {
+        let text = r#"<tool_call>
+name: web_fetch
+args: {"url": "https://a.example"}
+</tool_call>
+<web_fetch> url: "https://b.example" </web_fetch>"#;
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].args["url"], "https://a.example");
+    }
+
+    #[test]
+    fn test_extract_answer_strips_loose_tags() {
+        let text = r#"Summary here.
+
+<web_fetch> url: "https://x.test" </web_fetch>"#;
+        let answer = extract_answer(text);
+        assert!(answer.contains("Summary"));
+        assert!(!answer.contains("web_fetch"));
     }
 }
