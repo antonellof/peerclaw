@@ -86,6 +86,8 @@ pub struct InferenceEngine {
     registry: Arc<RwLock<ModelRegistry>>,
     /// Runtime toggles from web UI / config
     live: Arc<tokio::sync::RwLock<InferenceLiveSettings>>,
+    /// GGUF backend for local model inference
+    gguf: gguf::GgufEngine,
 }
 
 impl InferenceEngine {
@@ -100,12 +102,20 @@ impl InferenceEngine {
         let cache = ModelCache::new(config.max_loaded_models, config.max_memory_mb);
         let registry = Arc::new(RwLock::new(ModelRegistry::new()));
 
+        let gguf = gguf::GgufEngine::new(gguf::GgufConfig {
+            n_gpu_layers: config.gpu_layers,
+            n_ctx: config.context_size,
+            n_batch: config.batch_size,
+            ..Default::default()
+        });
+
         let engine = Self {
             cache,
             models_dir: config.models_dir.clone(),
             config,
             registry,
             live,
+            gguf,
         };
 
         Ok(engine)
@@ -267,36 +277,32 @@ impl InferenceEngine {
                 .is_some();
 
         if has_local {
-            // Load model if not in cache
-            if !self.cache.is_loaded(&request.model).await {
-                self.load_model(&request.model).await?;
+            // Get model path from registry
+            let model_path = {
+                let reg = self.registry.read().await;
+                reg.get(&request.model)
+                    .map(|info| info.path.clone())
+            };
+
+            if let Some(path) = model_path {
+                tracing::info!(
+                    model = %request.model,
+                    path = %path.display(),
+                    "Running local GGUF inference"
+                );
+
+                // Load model via GgufEngine (handles caching internally via placeholder or llama.cpp)
+                let handle = self.gguf.load(&path).map_err(|e| {
+                    InferenceError::LoadFailed(format!("GGUF load failed: {e}"))
+                })?;
+
+                // Generate — this runs on the current thread (llama.cpp is sync)
+                let result = self.gguf.generate(&handle, request).map_err(|e| {
+                    InferenceError::GenerationFailed(format!("GGUF generate failed: {e}"))
+                })?;
+
+                return Ok(result);
             }
-
-            // Get model handle
-            let model = self
-                .cache
-                .get(&request.model)
-                .await
-                .ok_or_else(|| InferenceError::ModelNotFound(request.model.clone()))?;
-
-            let _guard = ModelUseGuard::new(&self.cache, &request.model);
-            let model_guard = model.read().await;
-
-            // TODO: Wire llama.cpp generate call here for local GGUF models
-            let elapsed = start.elapsed();
-            return Ok(GenerateResponse {
-                text: format!(
-                    "[Local GGUF inference not yet wired for '{}'. \
-                    Enable Ollama with USE_OLLAMA=1 or place .gguf files in {:?}]",
-                    request.model, self.models_dir
-                ),
-                tokens_generated: 0,
-                tokens_per_second: 0.0,
-                time_to_first_token_ms: elapsed.as_millis() as u64,
-                total_time_ms: elapsed.as_millis() as u64,
-                finish_reason: FinishReason::Stop,
-                model_id: model_guard.info.id.clone(),
-            });
         }
 
         // No local model (or local disabled) — try Ollama if enabled
@@ -347,12 +353,17 @@ impl InferenceEngine {
 
         let hint = if no_gguf {
             format!(
-                "Model not found: {}. No GGUF models in {:?}. \
-                To use Ollama: USE_OLLAMA=1 peerclaw serve --web 127.0.0.1:8080",
+                "No inference backend available for '{}'. \
+                Enable Ollama (Settings → Inference → Ollama) or a remote API, \
+                or download a GGUF model. Models dir: {:?}",
                 request.model, self.models_dir
             )
         } else {
-            format!("Model not found: {}", request.model)
+            format!(
+                "Model '{}' not found. Available GGUF files exist but may need Ollama \
+                (llama.cpp not wired yet). Enable Ollama in Settings → Inference.",
+                request.model
+            )
         };
 
         Err(InferenceError::ModelNotFound(hint))
@@ -385,7 +396,13 @@ impl ModelRegistry {
     }
 
     pub fn get(&self, model_id: &str) -> Option<&ModelInfo> {
-        self.models.get(model_id)
+        // Exact match first
+        if let Some(info) = self.models.get(model_id) {
+            return Some(info);
+        }
+        // Prefix match: `llama-3.2-3b` matches `llama-3.2-3b-q4_k_m`
+        // Pick the first (arbitrary but stable since HashMap).
+        self.models.values().find(|info| info.id.starts_with(model_id))
     }
 
     pub fn list(&self) -> Vec<ModelInfo> {

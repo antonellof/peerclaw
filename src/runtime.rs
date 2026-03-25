@@ -132,6 +132,13 @@ impl Runtime {
             inference_live,
         )?);
 
+        // Scan existing models so they're available immediately
+        match inference.scan_models().await {
+            Ok(n) if n > 0 => tracing::info!(count = n, "Registered GGUF models from disk"),
+            Err(e) => tracing::warn!("Failed to scan models directory: {e}"),
+            _ => {}
+        }
+
         // Create model distributor
         let model_distributor =
             Arc::new(ModelDistributor::new(config.inference.models_dir.clone()));

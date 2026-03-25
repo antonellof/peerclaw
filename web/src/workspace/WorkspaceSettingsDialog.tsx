@@ -177,11 +177,11 @@ export function WorkspaceSettingsDialog({
                 Workspace
               </TabsTrigger>
               <TabsTrigger value="chat" className="text-xs">
-                Chat &amp; models
+                Chat
               </TabsTrigger>
               <TabsTrigger value="inference" className="text-xs">
                 <HardDrive className="mr-1 inline size-3" />
-                Models &amp; API
+                Inference
               </TabsTrigger>
               <TabsTrigger value="reference" className="text-xs">
                 <Terminal className="mr-1 inline size-3" />
@@ -242,7 +242,7 @@ export function WorkspaceSettingsDialog({
                   override for the session.
                 </p>
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Model</Label>
+                  <Label className="text-xs">Default model</Label>
                   <select
                     className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                     value={chatPreferences.model}
@@ -254,6 +254,9 @@ export function WorkspaceSettingsDialog({
                       </option>
                     ))}
                   </select>
+                  <p className="text-[10px] text-muted-foreground">
+                    Models come from your enabled backends below (Inference tab). Add more via GGUF download or Ollama.
+                  </p>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
@@ -281,38 +284,42 @@ export function WorkspaceSettingsDialog({
                     />
                   </div>
                 </div>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="size-4 rounded border-input"
-                    checked={chatPreferences.distributed}
-                    onChange={(e) => setChatPreferences({ distributed: e.target.checked })}
-                  />
-                  <span>Prefer distributed inference when available</span>
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="size-4 rounded border-input"
-                    checked={chatPreferences.useAgentic}
-                    onChange={(e) => setChatPreferences({ useAgentic: e.target.checked })}
-                  />
-                  <span>
-                    Agentic chat (node tools: <code className="text-foreground">job_submit</code>, shell, files, …).
-                    Turn off for plain single-shot replies.
-                  </span>
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="size-4 rounded border-input"
-                    checked={chatPreferences.useMcp}
-                    onChange={(e) => setChatPreferences({ useMcp: e.target.checked })}
-                  />
-                  <span>
-                    Use MCP tools in chat &amp; agent goals (configure under Workspace → MCP servers).
-                  </span>
-                </label>
+                <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Features
+                  </div>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-4 rounded border-input"
+                      checked={chatPreferences.useAgentic}
+                      onChange={(e) => setChatPreferences({ useAgentic: e.target.checked })}
+                    />
+                    <span>
+                      Agentic chat (tools: <code className="text-foreground">web_fetch</code>, <code className="text-foreground">job_submit</code>, shell, …)
+                    </span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-4 rounded border-input"
+                      checked={chatPreferences.useMcp}
+                      onChange={(e) => setChatPreferences({ useMcp: e.target.checked })}
+                    />
+                    <span>
+                      Use MCP tools (configure under Workspace → MCP servers)
+                    </span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-4 rounded border-input"
+                      checked={chatPreferences.distributed}
+                      onChange={(e) => setChatPreferences({ distributed: e.target.checked })}
+                    />
+                    <span>Prefer distributed (P2P) inference</span>
+                  </label>
+                </div>
               </div>
             </ScrollArea>
           </TabsContent>
@@ -324,12 +331,11 @@ export function WorkspaceSettingsDialog({
             <ScrollArea className="h-[min(52vh,420px)] min-h-[12rem]">
               <div className="space-y-4 px-5 py-4 pr-3">
                 <p className="text-xs text-muted-foreground">
-                  Local GGUF files (Llama, Phi, Qwen, Gemma), <strong>Ollama</strong>, or an{" "}
-                  <strong>OpenAI-compatible</strong> HTTPS API. Priority when chatting:{" "}
-                  <span className="text-foreground">remote API</span> (if enabled) →{" "}
-                  <span className="text-foreground">local GGUF registry</span> (if enabled) →{" "}
-                  <span className="text-foreground">Ollama</span> (if enabled). Saving writes{" "}
-                  <code className="text-primary">config.toml</code>.
+                  Inference backends and model management. Priority:{" "}
+                  <span className="font-medium text-foreground">Remote API</span> →{" "}
+                  <span className="font-medium text-foreground">Local GGUF</span> →{" "}
+                  <span className="font-medium text-foreground">Ollama</span>.
+                  Changes are saved to <code className="text-primary">config.toml</code>.
                 </p>
                 {infErr ? (
                   <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
@@ -338,9 +344,37 @@ export function WorkspaceSettingsDialog({
                 ) : null}
                 {inf ? (
                   <>
+                    {/* ── Ollama ── */}
                     <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
                       <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                        Routing
+                        Ollama
+                      </div>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="size-4 rounded border-input"
+                          checked={inf.use_ollama}
+                          onChange={(e) => setInf({ ...inf, use_ollama: e.target.checked })}
+                        />
+                        <span>Enable Ollama</span>
+                      </label>
+                      {inf.use_ollama && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Base URL</Label>
+                          <input
+                            type="url"
+                            className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
+                            value={inf.ollama_url}
+                            onChange={(e) => setInf({ ...inf, ollama_url: e.target.value })}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Local GGUF ── */}
+                    <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Local GGUF models
                       </div>
                       <label className="flex cursor-pointer items-center gap-2 text-sm">
                         <input
@@ -349,30 +383,17 @@ export function WorkspaceSettingsDialog({
                           checked={inf.use_local_gguf}
                           onChange={(e) => setInf({ ...inf, use_local_gguf: e.target.checked })}
                         />
-                        <span>Use local GGUF models when registered (files in models directory)</span>
+                        <span>Use local GGUF files (Llama, Phi, Qwen, Gemma)</span>
                       </label>
-                      <label className="flex cursor-pointer items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          className="size-4 rounded border-input"
-                          checked={inf.use_ollama}
-                          onChange={(e) => setInf({ ...inf, use_ollama: e.target.checked })}
-                        />
-                        <span>Use Ollama</span>
-                      </label>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Ollama base URL</Label>
-                        <input
-                          type="url"
-                          className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
-                          value={inf.ollama_url}
-                          onChange={(e) => setInf({ ...inf, ollama_url: e.target.value })}
-                        />
-                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        Directory: <code className="break-all text-primary">{inf.models_directory}</code>
+                      </p>
                     </div>
+
+                    {/* ── Remote API ── */}
                     <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
                       <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                        Remote OpenAI-compatible API
+                        Remote API (OpenAI-compatible)
                       </div>
                       <label className="flex cursor-pointer items-center gap-2 text-sm">
                         <input
@@ -381,103 +402,128 @@ export function WorkspaceSettingsDialog({
                           checked={inf.remote_api_enabled}
                           onChange={(e) => setInf({ ...inf, remote_api_enabled: e.target.checked })}
                         />
-                        <span>Send chat to remote API (requires base URL + API key)</span>
+                        <span>Enable remote API</span>
                       </label>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Base URL</Label>
-                        <input
-                          type="url"
-                          placeholder="https://api.openai.com/v1"
-                          className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
-                          value={inf.remote_api_base_url}
-                          onChange={(e) => setInf({ ...inf, remote_api_base_url: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Remote model id (optional)</Label>
-                        <input
-                          type="text"
-                          placeholder="Empty = use the model selected in chat"
-                          className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
-                          value={inf.remote_api_model}
-                          onChange={(e) => setInf({ ...inf, remote_api_model: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">API key {inf.api_key_configured ? "(configured — enter to replace)" : ""}</Label>
-                        <input
-                          type="password"
-                          autoComplete="off"
-                          placeholder={inf.api_key_configured ? "••••••••" : "sk-…"}
-                          className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
-                          value={remoteKeyDraft}
-                          onChange={(e) => setRemoteKeyDraft(e.target.value)}
-                        />
-                      </div>
+                      {inf.remote_api_enabled && (
+                        <>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Base URL</Label>
+                            <input
+                              type="url"
+                              placeholder="https://api.openai.com/v1"
+                              className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
+                              value={inf.remote_api_base_url}
+                              onChange={(e) => setInf({ ...inf, remote_api_base_url: e.target.value })}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">Model override (optional)</Label>
+                            <input
+                              type="text"
+                              placeholder="Empty = use the model selected in chat"
+                              className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
+                              value={inf.remote_api_model}
+                              onChange={(e) => setInf({ ...inf, remote_api_model: e.target.value })}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">
+                              API key{inf.api_key_configured ? " (configured — enter to replace)" : ""}
+                            </Label>
+                            <input
+                              type="password"
+                              autoComplete="off"
+                              placeholder={inf.api_key_configured ? "••••••••" : "sk-…"}
+                              className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
+                              value={remoteKeyDraft}
+                              onChange={(e) => setRemoteKeyDraft(e.target.value)}
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      Models directory: <code className="break-all text-primary">{inf.models_directory}</code>
-                    </p>
+
                     <Button type="button" size="sm" disabled={infSaving} onClick={() => void saveInference()}>
-                      {infSaving ? "Saving…" : "Save inference settings"}
+                      {infSaving ? "Saving…" : "Save settings"}
                     </Button>
-                    <div className="space-y-2 border-t border-border pt-4">
-                      <div className="text-xs font-semibold text-foreground">Download GGUF (Hugging Face)</div>
+
+                    {/* ── Download GGUF ── */}
+                    <div className="space-y-3 border-t border-border pt-4">
+                      <div className="text-xs font-semibold text-foreground">Download GGUF models</div>
                       <p className="text-[11px] text-muted-foreground">
-                        Presets match <code className="text-primary">peerclaw models download</code>. Or paste any{" "}
-                        <code className="text-primary">…/resolve/main/….gguf</code> URL.
+                        Pick a preset or paste any Hugging Face <code className="text-primary">.gguf</code> URL.
+                        Files are saved to the models directory above.
                       </p>
-                      <div className="flex flex-wrap items-end gap-2">
-                        <div className="min-w-[10rem] flex-1 space-y-1">
-                          <Label className="text-xs">Preset</Label>
-                          <select
-                            className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-xs"
-                            value={dlPreset}
-                            onChange={(e) => setDlPreset(e.target.value)}
-                          >
-                            {inf.gguf_presets.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.id}
-                              </option>
-                            ))}
-                          </select>
+                      <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          Preset
                         </div>
-                        <div className="w-28 space-y-1">
-                          <Label className="text-xs">Quant</Label>
+                        <div className="flex flex-wrap items-end gap-2">
+                          <div className="min-w-[10rem] flex-1 space-y-1">
+                            <select
+                              className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-xs"
+                              value={dlPreset}
+                              onChange={(e) => setDlPreset(e.target.value)}
+                            >
+                              {inf.gguf_presets.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.id}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="w-24 space-y-1">
+                            <Label className="text-[10px]">Quant</Label>
+                            <input
+                              className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
+                              value={dlQuant}
+                              onChange={(e) => setDlQuant(e.target.value)}
+                            />
+                          </div>
+                          <Button type="button" size="sm" disabled={dlBusy} onClick={() => void runPresetDownload()}>
+                            {dlBusy ? "Downloading…" : "Download"}
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          Custom URL
+                        </div>
+                        <div className="space-y-1.5">
                           <input
-                            className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
-                            value={dlQuant}
-                            onChange={(e) => setDlQuant(e.target.value)}
+                            type="url"
+                            placeholder="https://huggingface.co/…/resolve/main/….gguf"
+                            className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-[11px]"
+                            value={dlUrl}
+                            onChange={(e) => setDlUrl(e.target.value)}
                           />
                         </div>
-                        <Button type="button" size="sm" variant="secondary" disabled={dlBusy} onClick={() => void runPresetDownload()}>
-                          Download preset
-                        </Button>
+                        <div className="flex items-end gap-2">
+                          <div className="flex-1 space-y-1">
+                            <Label className="text-[10px]">Save as (optional)</Label>
+                            <input
+                              type="text"
+                              placeholder="my-model.gguf"
+                              className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
+                              value={dlFilename}
+                              onChange={(e) => setDlFilename(e.target.value)}
+                            />
+                          </div>
+                          <Button type="button" size="sm" variant="outline" disabled={dlBusy} onClick={() => void runUrlDownload()}>
+                            {dlBusy ? "Downloading…" : "Download"}
+                          </Button>
+                        </div>
                       </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Custom URL</Label>
-                        <input
-                          type="url"
-                          placeholder="https://huggingface.co/…/resolve/main/….gguf"
-                          className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-[11px]"
-                          value={dlUrl}
-                          onChange={(e) => setDlUrl(e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Save as filename (optional)</Label>
-                        <input
-                          type="text"
-                          placeholder="my-model.gguf"
-                          className="flex h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
-                          value={dlFilename}
-                          onChange={(e) => setDlFilename(e.target.value)}
-                        />
-                      </div>
-                      <Button type="button" size="sm" variant="outline" disabled={dlBusy} onClick={() => void runUrlDownload()}>
-                        Download from URL
-                      </Button>
-                      {dlMsg ? <p className="text-xs text-muted-foreground">{dlMsg}</p> : null}
+                      {dlMsg ? (
+                        <p className={cn(
+                          "rounded-md border px-2 py-1.5 text-xs",
+                          dlMsg.startsWith("Saved")
+                            ? "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400"
+                            : "border-destructive/30 bg-destructive/10 text-destructive",
+                        )}>
+                          {dlMsg}
+                        </p>
+                      ) : null}
                     </div>
                   </>
                 ) : !infErr ? (
