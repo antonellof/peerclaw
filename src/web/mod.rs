@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
+use tower_http::normalize_path::NormalizePathLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::executor::ResourceMonitor;
@@ -192,9 +193,18 @@ pub fn spa_dist_dir() -> Option<PathBuf> {
     dist.join("index.html").is_file().then_some(dist)
 }
 
+/// Task routes under `/api/…` via `nest`. Path params **must** use `:id` (Axum 0.7 / matchit); `{id}` never matches.
+fn api_tasks_router() -> Router<Arc<WebState>> {
+    Router::new()
+        .route("/tasks/:id", get(api_task_detail))
+        .route("/tasks", post(api_create_task))
+        .route("/tasks", get(api_list_tasks))
+}
+
 /// REST handlers under `/api/...` (nested so static `ServeDir` fallback never handles POST/OPTIONS for these paths).
 fn api_router() -> Router<Arc<WebState>> {
     Router::new()
+        .merge(api_tasks_router())
         .route("/status", get(api_status))
         .route("/onboarding", get(api_onboarding))
         .route("/peers", get(api_peers))
@@ -206,7 +216,7 @@ fn api_router() -> Router<Arc<WebState>> {
         .route("/skills/studio/ai", post(api_skills_studio_ai))
         .route("/skills/studio", get(api_skills_studio_list))
         .route(
-            "/skills/studio/{slug}",
+            "/skills/studio/:slug",
             get(api_skills_studio_get).put(api_skills_studio_put),
         )
         .route("/mcp/status", get(api_mcp_status))
@@ -214,13 +224,10 @@ fn api_router() -> Router<Arc<WebState>> {
         .route("/jobs/submit", post(api_submit_job))
         .route("/chat", post(api_chat))
         .route("/chat/stream", post(api_chat_stream))
-        .route("/tasks", post(api_create_task))
-        .route("/tasks", get(api_list_tasks))
-        .route("/tasks/{id}", get(api_task_detail))
         .route("/providers", get(api_list_providers))
         .route("/providers/config", get(api_get_provider_config))
         .route("/providers/config", post(api_set_provider_config))
-        .route("/nodes/{id}", get(api_node_detail))
+        .route("/nodes/:id", get(api_node_detail))
         .route("/swarm/agents", get(api_swarm_agents))
         .route("/swarm/topology", get(api_swarm_topology))
         .route("/swarm/timeline", get(api_swarm_timeline))
@@ -384,7 +391,14 @@ pub fn create_web_state_with_swarm(
 /// Start the web server.
 pub async fn start_server(addr: SocketAddr, state: Arc<WebState>) -> anyhow::Result<()> {
     let spa = spa_dist_dir().is_some();
-    let app = create_router(state).layer(CorsLayer::permissive());
+    // Layer order: **NormalizePath outermost** so the URI is fixed before CORS and the router.
+    // If CORS is outermost, some requests no longer match `/api/tasks/:id` and fall through to SPA HTML.
+    let app = create_router(state)
+        .layer(
+            CorsLayer::very_permissive()
+                .allow_private_network(true),
+        )
+        .layer(NormalizePathLayer::trim_trailing_slash());
 
     if spa {
         tracing::info!(
@@ -2687,4 +2701,110 @@ async fn api_node_detail(
         action_count,
         success_rate,
     })
+}
+
+#[cfg(test)]
+mod routing_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use libp2p::identity::Keypair;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn axum_matches_api_tasks_param_route() {
+        let app = Router::new()
+            .route("/", get(|| async { "root" }))
+            .route("/tasks/:id", get(|| async { axum::Json("ok") }));
+        let root = app
+            .clone()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(root.status(), StatusCode::OK);
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks/550e8400-e29b-41d4-a716-446655440000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    fn test_state() -> Arc<WebState> {
+        let peer_id = Keypair::generate_ed25519().public().to_peer_id();
+        create_web_state(peer_id, Arc::new(ResourceMonitor::with_defaults()))
+    }
+
+    #[tokio::test]
+    async fn nested_api_tasks_detail_returns_json() {
+        let app = Router::new()
+            .nest("/api", api_tasks_router())
+            .with_state(test_state());
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/tasks/550e8400-e29b-41d4-a716-446655440000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["error"], "Task not found");
+    }
+
+    #[tokio::test]
+    async fn create_router_task_detail_hits_json_handler_with_spa_dist() {
+        let app = create_router(test_state());
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/tasks/550e8400-e29b-41d4-a716-446655440000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    /// Full router + SPA + middleware stack matching [`start_server`]. Do not `clone()` the
+    /// layered `Router` before `oneshot` — that can yield 404 for param routes.
+    #[tokio::test]
+    async fn get_api_task_detail_is_json_when_spa_enabled() {
+        let app = create_router(test_state())
+            .layer(
+                CorsLayer::very_permissive()
+                    .allow_private_network(true),
+            )
+            .layer(NormalizePathLayer::trim_trailing_slash());
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/tasks/550e8400-e29b-41d4-a716-446655440000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = res.into_body();
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        let text = std::str::from_utf8(&bytes).expect("utf8");
+        assert!(
+            text.trim_start().starts_with('{'),
+            "expected JSON from api_task_detail, got: {}",
+            &text.chars().take(240).collect::<String>()
+        );
+        let v: serde_json::Value = serde_json::from_str(text).expect("json");
+        assert_eq!(v["error"], "Task not found");
+    }
 }

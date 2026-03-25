@@ -31,7 +31,7 @@ libp2p = { version = "0.54", features = [
 # HTTP/Web
 axum = { version = "0.7", features = ["ws"] }
 tower = "0.4"
-tower-http = { version = "0.5", features = ["trace", "cors", "fs"] }
+tower-http = { version = "0.5", features = ["trace", "cors", "fs", "normalize-path"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 
 # Serialization

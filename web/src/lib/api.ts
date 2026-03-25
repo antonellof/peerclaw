@@ -1,11 +1,51 @@
 /** Typed wrappers for PeerClaw HTTP APIs (same paths as embedded HTML). */
 
-/** When the UI is served separately (e.g. Vite on :5173), set `VITE_PEERCLAW_API=http://127.0.0.1:8080` so `/api` and `/v1` hit the node. */
+function isLocalDevLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase()
+  return (
+    h === "localhost" ||
+    h === "127.0.0.1" ||
+    h === "::1" ||
+    h === "[::1]" ||
+    h.endsWith(".localhost")
+  )
+}
+
+/** IPv6 literals need brackets in URLs (`http://[::1]:8080`). */
+function hostForApiUrl(hostname: string): string {
+  if (hostname.includes(":") && !hostname.startsWith("[")) {
+    return `[${hostname}]`
+  }
+  return hostname
+}
+
+/**
+ * Base URL for PeerClaw HTTP (no trailing slash).
+ *
+ * - `VITE_PEERCLAW_API` — explicit override (any host, production builds, LAN, etc.).
+ * - **Vite dev on loopback:** if unset, defaults to `VITE_PEERCLAW_DEV_API`, or
+ *   `http://<same-hostname-as-page>:<VITE_PEERCLAW_DEV_PORT||8080>` so the API host matches the UI
+ *   (`localhost` vs `127.0.0.1`) and hits the node directly (avoids proxy HTML 404s).
+ * - **Production / `peerclaw serve --web`:** empty → same-origin relative paths.
+ */
 function peerclawApiBase(): string {
   const raw = import.meta.env.VITE_PEERCLAW_API as string | undefined
-  const t = raw?.trim()
-  if (!t) return ""
-  return t.replace(/\/$/, "")
+  const explicit = raw?.trim()
+  if (explicit) return explicit.replace(/\/$/, "")
+
+  if (import.meta.env.DEV && typeof window !== "undefined") {
+    const h = window.location.hostname
+    if (isLocalDevLoopbackHost(h)) {
+      const dev = (import.meta.env.VITE_PEERCLAW_DEV_API as string | undefined)?.trim()
+      if (dev) return dev.replace(/\/$/, "")
+      const port = (import.meta.env.VITE_PEERCLAW_DEV_PORT as string | undefined)?.trim() || "8080"
+      const host = hostForApiUrl(h)
+      // PeerClaw’s default listen is HTTP; avoid copying `https:` from an HTTPS Vite dev URL.
+      return `http://${host}:${port}`.replace(/\/$/, "")
+    }
+  }
+
+  return ""
 }
 
 export function apiUrl(path: string): string {
@@ -185,11 +225,12 @@ function looksLikeHtml(s: string): boolean {
 }
 
 export async function fetchTaskDetail(id: string): Promise<TaskDetailResult> {
-  const tid = id.trim()
+  const tid = id.trim().replace(/\/+$/, "")
   if (!tid) {
     return { ok: false, message: "Missing task id." }
   }
 
+  // Single path segment; avoid trailing slash so Axum matchit routes `/api/tasks/{id}` reliably.
   const r = await apiFetch(`/api/tasks/${encodeURIComponent(tid)}`)
   const text = await r.text()
   const trimmed = text.trim()
