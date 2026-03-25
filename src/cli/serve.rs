@@ -314,6 +314,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             config_path: crate::bootstrap::base_dir().join("config.toml"),
             peer_dial_tx: Some(peer_dial_tx),
             p2p_network_hints,
+            inference: Some(runtime.inference.clone()),
         }));
         (Some(peer_dial_rx), state)
     } else {

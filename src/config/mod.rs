@@ -230,10 +230,29 @@ pub struct InferenceConfig {
     /// Ollama API base URL
     #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
+    /// Prefer local `.gguf` in the inference registry when routing (disable to force cloud/Ollama).
+    #[serde(default = "default_true")]
+    pub use_local_gguf: bool,
+    /// Use an OpenAI-compatible Chat Completions API when enabled (checked before Ollama).
+    #[serde(default)]
+    pub remote_api_enabled: bool,
+    /// Base URL, e.g. `https://api.openai.com/v1` or `https://api.groq.com/openai/v1`
+    #[serde(default)]
+    pub remote_api_base_url: String,
+    /// Optional fixed model id for the remote API; if empty, the chat request model name is used.
+    #[serde(default)]
+    pub remote_api_model: String,
+    /// Bearer token for the remote API (store `config.toml` with restrictive permissions).
+    #[serde(default)]
+    pub remote_api_key: String,
 }
 
 fn default_ollama_url() -> String {
     "http://localhost:11434".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for InferenceConfig {
@@ -250,6 +269,11 @@ impl Default for InferenceConfig {
                 || std::env::var("OLLAMA_BASE_URL").is_ok(),
             ollama_url: std::env::var("OLLAMA_BASE_URL")
                 .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+            use_local_gguf: true,
+            remote_api_enabled: false,
+            remote_api_base_url: String::new(),
+            remote_api_model: String::new(),
+            remote_api_key: String::new(),
         }
     }
 }

@@ -16,6 +16,7 @@ pub mod inference;
 pub mod job;
 pub mod mcp;
 pub mod messaging;
+pub mod models_hf;
 pub mod node;
 pub mod p2p;
 pub mod proxy;

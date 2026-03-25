@@ -611,12 +611,15 @@ fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
     None
 }
 
+fn re_loose_json_tool_open() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r#"(?is)<json\s+([^>]+)>"#).expect("regex"))
+}
+
 /// `<json action="parse" input={...}>` / `input="..."` — models often emit this instead of `<tool_call>`.
 fn parse_loose_json_tool_tags(text: &str) -> Vec<ParsedToolCall> {
     let mut calls = Vec::new();
-    let Ok(open) = Regex::new(r#"(?is)<json\s+([^>]+)>"#) else {
-        return calls;
-    };
+    let open = re_loose_json_tool_open();
     for cap in open.captures_iter(text) {
         let Some(attrs) = cap.get(1).map(|m| m.as_str()) else {
             continue;
@@ -776,7 +779,7 @@ fn re_strip_loose_pseudo_tools() -> &'static Regex {
     R.get_or_init(|| {
         // rust-regex has no backrefs; list open + close for each pseudo-tag.
         Regex::new(
-            r"(?is)(?:<file_list\b[^>]*(?:/>|>[\s\S]*?</file_list\s*>)|<wallet_balance\b[^>]*(?:/>|>[\s\S]*?</wallet_balance\s*>)>)",
+            r"(?is)(?:<file_list\b[^>]*(?:/>|>[\s\S]*?</file_list\s*>)|<wallet_balance\b[^>]*(?:/>|>[\s\S]*?</wallet_balance\s*>))",
         )
         .expect("regex")
     })
@@ -932,5 +935,23 @@ More text."#;
         let answer = extract_answer(text);
         assert!(answer.contains("Answer"));
         assert!(!answer.contains("<json"));
+    }
+
+    #[test]
+    fn test_extract_answer_strips_wallet_balance_pseudo_tag() {
+        let text =
+            "Your balance:\n<wallet_balance>100 PCLAW</wallet_balance>\nDone.";
+        let answer = extract_answer(text);
+        assert!(answer.contains("Your balance:"));
+        assert!(answer.contains("Done."));
+        assert!(!answer.contains("wallet_balance"));
+    }
+
+    #[test]
+    fn test_extract_answer_strips_file_list_self_closing() {
+        let text = "Files:\n<file_list path=\"/tmp\" />\nEnd.";
+        let answer = extract_answer(text);
+        assert!(!answer.contains("file_list"));
+        assert!(answer.contains("End."));
     }
 }

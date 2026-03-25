@@ -731,11 +731,11 @@ export function ChatPanel({ onRegisterControls }: Props) {
                 </div>
                 <div
                   className={cn(
-                    "min-w-0 max-w-[min(100%,28rem)] rounded-2xl px-4 py-3 text-sm leading-relaxed",
-                    m.role === "user" && "bg-primary text-primary-foreground",
-                    m.role === "assistant" && "border border-border/80 bg-card text-card-foreground shadow-sm",
+                    "min-w-0 rounded-2xl px-4 py-3 text-sm leading-relaxed",
+                    m.role === "user" && "max-w-[min(100%,28rem)] bg-primary text-primary-foreground",
+                    m.role === "assistant" && "max-w-[min(100%,42rem)] border border-border/80 bg-card text-card-foreground shadow-sm",
                     (m.role === "system" || m.role === "error") &&
-                      "border border-border bg-muted/40 font-mono text-xs text-muted-foreground",
+                      "max-w-[min(100%,42rem)] border border-border bg-muted/40 font-mono text-xs text-muted-foreground",
                   )}
                 >
                   {m.agentTaskId && (

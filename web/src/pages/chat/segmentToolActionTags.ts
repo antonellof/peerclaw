@@ -9,7 +9,7 @@ export type ToolActionSegment =
 
 /** Alternation order: more specific / longer patterns first. */
 const ACTION_BLOCK_RE =
-  /<tool_call>[\s\S]*?<\/tool_call>|<web_fetch>[\s\S]*?<\/web_fetch>|<web_search>[\s\S]*?<\/web_search>|<job_status\s[^>]*(?:\/>|>[\s\S]*?<\/job_status>)>/gi
+  /<tool_call>[\s\S]*?<\/tool_call>|<web_fetch>[\s\S]*?<\/web_fetch>|<web_search>[\s\S]*?<\/web_search>|<job_status\s[^>]*(?:\/>|>[\s\S]*?<\/job_status>)|<json\s[^>]+>/gi
 
 export function tagFromActionRaw(raw: string): string {
   const m = raw.match(/^<\s*([a-zA-Z0-9_:-]+)/)

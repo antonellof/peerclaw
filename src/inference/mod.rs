@@ -45,8 +45,10 @@ pub mod batch;
 pub mod cache;
 pub mod distribution;
 pub mod gguf;
+pub mod live_settings;
 pub mod model;
 pub mod ollama;
+pub mod remote_openai;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -66,13 +68,13 @@ pub use distribution::{
 pub use gguf::{
     AsyncGgufEngine, GgufBackend, GgufConfig, GgufEngine, GgufError, GgufModelHandle, GgufModelInfo,
 };
+pub use live_settings::InferenceLiveSettings;
 pub use model::{ModelArchitecture, ModelId, ModelInfo, ModelRequirements, Quantization};
 
 /// Inference engine for running LLM models.
 ///
-/// Supports two backends:
-/// 1. Local GGUF models loaded via llama.cpp
-/// 2. Ollama provider (HTTP API at localhost:11434) as fallback
+/// Supports multiple backends (see [`InferenceLiveSettings`]): remote OpenAI-compatible API,
+/// local GGUF registry path, and Ollama.
 pub struct InferenceEngine {
     /// Model cache for loaded models
     cache: ModelCache,
@@ -82,32 +84,39 @@ pub struct InferenceEngine {
     config: InferenceConfig,
     /// Model registry (available but not necessarily loaded)
     registry: Arc<RwLock<ModelRegistry>>,
-    /// Ollama provider for models not available locally
-    ollama: ollama::OllamaProvider,
+    /// Runtime toggles from web UI / config
+    live: Arc<tokio::sync::RwLock<InferenceLiveSettings>>,
 }
 
 impl InferenceEngine {
     /// Create a new inference engine.
-    pub fn new(config: InferenceConfig) -> std::io::Result<Self> {
+    pub fn new(
+        config: InferenceConfig,
+        live: Arc<tokio::sync::RwLock<InferenceLiveSettings>>,
+    ) -> std::io::Result<Self> {
         // Ensure models directory exists
         std::fs::create_dir_all(&config.models_dir)?;
 
         let cache = ModelCache::new(config.max_loaded_models, config.max_memory_mb);
         let registry = Arc::new(RwLock::new(ModelRegistry::new()));
-        let ollama = ollama::OllamaProvider::new(ollama::OllamaConfig {
-            base_url: config.ollama_url.clone(),
-            timeout_secs: 120,
-        });
 
         let engine = Self {
             cache,
             models_dir: config.models_dir.clone(),
             config,
             registry,
-            ollama,
+            live,
         };
 
         Ok(engine)
+    }
+
+    pub fn live_settings(&self) -> Arc<tokio::sync::RwLock<InferenceLiveSettings>> {
+        self.live.clone()
+    }
+
+    pub fn models_directory(&self) -> &PathBuf {
+        &self.models_dir
     }
 
     /// Scan models directory and update registry.
@@ -210,9 +219,52 @@ impl InferenceEngine {
         request: &GenerateRequest,
     ) -> Result<GenerateResponse, InferenceError> {
         let start = Instant::now();
+        let live = self.live.read().await;
 
-        // Try local GGUF model first
-        let has_local = self.registry.read().await.get(&request.model).is_some();
+        if live.remote_api_enabled
+            && !live.remote_api_base_url.trim().is_empty()
+            && !live.remote_api_key.trim().is_empty()
+        {
+            let remote_model = if live.remote_api_model.trim().is_empty() {
+                request.model.as_str()
+            } else {
+                live.remote_api_model.trim()
+            };
+            let r = remote_openai::chat_completion(
+                live.remote_api_base_url.trim(),
+                live.remote_api_key.trim(),
+                remote_model,
+                &request.prompt,
+                request.max_tokens,
+                request.temperature,
+            )
+            .await
+            .map_err(InferenceError::GenerationFailed)?;
+
+            let elapsed = start.elapsed();
+            return Ok(GenerateResponse {
+                text: r.text,
+                tokens_generated: r.tokens_generated,
+                tokens_per_second: if elapsed.as_secs_f64() > 0.0 {
+                    r.tokens_generated as f64 / elapsed.as_secs_f64()
+                } else {
+                    0.0
+                },
+                time_to_first_token_ms: 0,
+                total_time_ms: elapsed.as_millis() as u64,
+                finish_reason: FinishReason::Stop,
+                model_id: remote_model.to_string(),
+            });
+        }
+
+        // Try local GGUF model first when enabled
+        let has_local = live.use_local_gguf
+            && self
+                .registry
+                .read()
+                .await
+                .get(&request.model)
+                .is_some();
 
         if has_local {
             // Load model if not in cache
@@ -247,25 +299,29 @@ impl InferenceEngine {
             });
         }
 
-        // No local model found - try Ollama if enabled
-        if self.config.use_ollama {
+        // No local model (or local disabled) — try Ollama if enabled
+        if live.use_ollama {
             tracing::info!(
                 model = %request.model,
                 prompt_len = request.prompt.len(),
                 "Routing to Ollama"
             );
 
-            let result = self
-                .ollama
+            let prov = ollama::OllamaProvider::new(ollama::OllamaConfig {
+                base_url: live.ollama_url.clone(),
+                timeout_secs: 120,
+            });
+
+            let result = prov
                 .generate(
                     &request.model,
                     &request.prompt,
                     request.max_tokens,
                     request.temperature,
-                    None, // system prompt is baked into the prompt by caller
+                    None,
                 )
                 .await
-                .map_err(|e| InferenceError::GenerationFailed(e))?;
+                .map_err(InferenceError::GenerationFailed)?;
 
             return Ok(GenerateResponse {
                 text: result.text,
@@ -514,6 +570,7 @@ pub enum InferenceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -524,7 +581,8 @@ mod tests {
             ..Default::default()
         };
 
-        let engine = InferenceEngine::new(config).unwrap();
+        let live = Arc::new(tokio::sync::RwLock::new(InferenceLiveSettings::default()));
+        let engine = InferenceEngine::new(config, live).unwrap();
         assert!(engine.available_models().await.is_empty());
     }
 
@@ -536,7 +594,8 @@ mod tests {
             ..Default::default()
         };
 
-        let engine = InferenceEngine::new(config).unwrap();
+        let live = Arc::new(tokio::sync::RwLock::new(InferenceLiveSettings::default()));
+        let engine = InferenceEngine::new(config, live).unwrap();
         let count = engine.scan_models().await.unwrap();
         assert_eq!(count, 0);
     }
@@ -549,7 +608,8 @@ mod tests {
             ..Default::default()
         };
 
-        let engine = InferenceEngine::new(config).unwrap();
+        let live = Arc::new(tokio::sync::RwLock::new(InferenceLiveSettings::default()));
+        let engine = InferenceEngine::new(config, live).unwrap();
         let result = engine.load_model("nonexistent").await;
         assert!(matches!(result, Err(InferenceError::ModelNotFound(_))));
     }

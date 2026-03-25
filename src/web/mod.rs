@@ -197,6 +197,8 @@ pub struct WebState {
     pub peer_dial_tx: Option<mpsc::Sender<String>>,
     /// Bootstrap list and discovery flags (from node config when running under `serve`).
     pub p2p_network_hints: Arc<P2pNetworkHints>,
+    /// Wired on `peerclaw serve` for model downloads and `/api/inference/settings`.
+    pub inference: Option<Arc<crate::inference::InferenceEngine>>,
 }
 
 fn new_ws_control_plane() -> broadcast::Sender<serde_json::Value> {
@@ -318,6 +320,11 @@ fn api_router() -> Router<Arc<WebState>> {
         .route("/swarm/agents", get(api_swarm_agents))
         .route("/swarm/topology", get(api_swarm_topology))
         .route("/swarm/timeline", get(api_swarm_timeline))
+        .route(
+            "/inference/settings",
+            get(api_inference_settings_get).put(api_inference_settings_put),
+        )
+        .route("/models/download", post(api_models_download))
 }
 
 /// Create the web router.
@@ -378,6 +385,7 @@ pub fn create_web_state(
         config_path: crate::bootstrap::base_dir().join("config.toml"),
         peer_dial_tx: None,
         p2p_network_hints: Arc::new(P2pNetworkHints::default()),
+        inference: None,
     })
 }
 
@@ -414,6 +422,7 @@ pub fn create_web_state_with_channels(
         config_path: crate::bootstrap::base_dir().join("config.toml"),
         peer_dial_tx: None,
         p2p_network_hints: Arc::new(P2pNetworkHints::default()),
+        inference: None,
     })
 }
 
@@ -449,6 +458,7 @@ pub fn create_web_state_with_inference(
         config_path: crate::bootstrap::base_dir().join("config.toml"),
         peer_dial_tx: None,
         p2p_network_hints: Arc::new(P2pNetworkHints::default()),
+        inference: None,
     })
 }
 
@@ -484,6 +494,7 @@ pub fn create_web_state_with_swarm(
         config_path: crate::bootstrap::base_dir().join("config.toml"),
         peer_dial_tx: None,
         p2p_network_hints: Arc::new(P2pNetworkHints::default()),
+        inference: None,
     })
 }
 
@@ -1078,11 +1089,26 @@ async fn run_unified_agentic_inference(
     )
     .await;
     let mut conversation = format!("{prefix}\n\n{conversation_body}");
+    let prefix_len = prefix.len();
     let mut tool_logs: Vec<String> = Vec::new();
     let mut total_tokens: u32 = 0;
     let tool_session = uuid::Uuid::new_v4().to_string();
+    // Cap conversation size to ~48k chars; keep system prefix + recent turns.
+    const CONV_MAX_CHARS: usize = 48_000;
 
     for iter in 1..=AGENTIC_MAX_ITERS {
+        // Compact conversation if it has grown too large (keep prefix + tail).
+        if conversation.len() > CONV_MAX_CHARS {
+            let keep_tail = CONV_MAX_CHARS.saturating_sub(prefix_len + 200);
+            let cut_at = conversation.len().saturating_sub(keep_tail);
+            // Find a newline boundary near the cut point to avoid splitting mid-line.
+            let boundary = conversation[cut_at..].find('\n').map(|i| cut_at + i + 1).unwrap_or(cut_at);
+            conversation = format!(
+                "{}\n\n(Earlier conversation compacted.)\n\n{}",
+                &conversation[..prefix_len],
+                &conversation[boundary..]
+            );
+        }
         if cancel
             .as_ref()
             .is_some_and(|c| c.load(Ordering::Acquire))
@@ -1585,6 +1611,58 @@ struct ChatResponse {
     provider_peer_id: Option<String>,
 }
 
+/// Build the model prompt with recent session history prepended.
+async fn build_prompt_with_history(
+    sessions: &RwLock<HashMap<String, Vec<ChatMessage>>>,
+    session_id: Option<&str>,
+    user_message: &str,
+) -> String {
+    let Some(sid) = session_id else {
+        return user_message.to_string();
+    };
+    let guard = sessions.read().await;
+    let Some(msgs) = guard.get(sid) else {
+        return user_message.to_string();
+    };
+    let skip = msgs.len().saturating_sub(40);
+    let mut prefix = String::new();
+    for m in msgs.iter().skip(skip) {
+        prefix.push_str(&m.role);
+        prefix.push_str(": ");
+        prefix.push_str(&m.content);
+        prefix.push('\n');
+    }
+    if prefix.is_empty() {
+        user_message.to_string()
+    } else {
+        format!("Previous turns (compact):\n{prefix}\nUser: {user_message}")
+    }
+}
+
+/// Append a user+assistant turn to the session and cap at MAX_MSGS.
+async fn save_session_turn(
+    sessions: &RwLock<HashMap<String, Vec<ChatMessage>>>,
+    session_id: &str,
+    user_message: &str,
+    assistant_text: &str,
+) {
+    const MAX_MSGS: usize = 80;
+    let mut guard = sessions.write().await;
+    let entry = guard.entry(session_id.to_string()).or_default();
+    entry.push(ChatMessage {
+        role: "user".into(),
+        content: user_message.to_string(),
+    });
+    entry.push(ChatMessage {
+        role: "assistant".into(),
+        content: assistant_text.to_string(),
+    });
+    if entry.len() > MAX_MSGS {
+        let drain = entry.len() - MAX_MSGS;
+        entry.drain(0..drain);
+    }
+}
+
 async fn api_chat(
     State(state): State<Arc<WebState>>,
     Json(req): Json<ChatRequest>,
@@ -1594,26 +1672,12 @@ async fn api_chat(
     let temperature = req.temperature.unwrap_or(0.7);
     let user_message = req.message.clone();
 
-    let prompt_for_model = if let Some(ref sid) = req.session_id {
-        let sessions = state.chat_sessions.read().await;
-        let mut prefix = String::new();
-        if let Some(msgs) = sessions.get(sid) {
-            let skip = msgs.len().saturating_sub(40);
-            for m in msgs.iter().skip(skip) {
-                prefix.push_str(&m.role);
-                prefix.push_str(": ");
-                prefix.push_str(&m.content);
-                prefix.push('\n');
-            }
-        }
-        if prefix.is_empty() {
-            user_message.clone()
-        } else {
-            format!("Previous turns (compact):\n{prefix}\nUser: {user_message}")
-        }
-    } else {
-        user_message.clone()
-    };
+    let prompt_for_model = build_prompt_with_history(
+        &state.chat_sessions,
+        req.session_id.as_deref(),
+        &user_message,
+    )
+    .await;
 
     let mcp_arc = state.mcp_manager.read().await.clone();
     let mcp_for_agentic = if req.use_mcp {
@@ -1643,21 +1707,13 @@ async fn api_chat(
                 {
                     Ok((response, _)) => {
                         if let Some(ref sid) = req.session_id {
-                            let mut sessions = state.chat_sessions.write().await;
-                            let entry = sessions.entry(sid.clone()).or_default();
-                            entry.push(ChatMessage {
-                                role: "user".into(),
-                                content: user_message,
-                            });
-                            entry.push(ChatMessage {
-                                role: "assistant".into(),
-                                content: response.text.clone(),
-                            });
-                            const MAX_MSGS: usize = 80;
-                            if entry.len() > MAX_MSGS {
-                                let drain = entry.len() - MAX_MSGS;
-                                entry.drain(0..drain);
-                            }
+                            save_session_turn(
+                                &state.chat_sessions,
+                                sid,
+                                &user_message,
+                                &response.text,
+                            )
+                            .await;
                         }
                         return Json(ChatResponse {
                             response: response.text,
@@ -1701,21 +1757,13 @@ async fn api_chat(
                 {
                     Ok((response, _)) => {
                         if let Some(ref sid) = req.session_id {
-                            let mut sessions = state.chat_sessions.write().await;
-                            let entry = sessions.entry(sid.clone()).or_default();
-                            entry.push(ChatMessage {
-                                role: "user".into(),
-                                content: user_message,
-                            });
-                            entry.push(ChatMessage {
-                                role: "assistant".into(),
-                                content: response.text.clone(),
-                            });
-                            const MAX_MSGS: usize = 80;
-                            if entry.len() > MAX_MSGS {
-                                let drain = entry.len() - MAX_MSGS;
-                                entry.drain(0..drain);
-                            }
+                            save_session_turn(
+                                &state.chat_sessions,
+                                sid,
+                                &user_message,
+                                &response.text,
+                            )
+                            .await;
                         }
                         return Json(ChatResponse {
                             response: response.text,
@@ -1756,21 +1804,13 @@ async fn api_chat(
             match tokio::time::timeout(std::time::Duration::from_secs(60), response_rx).await {
                 Ok(Ok(response)) => {
                     if let Some(ref sid) = req.session_id {
-                        let mut sessions = state.chat_sessions.write().await;
-                        let entry = sessions.entry(sid.clone()).or_default();
-                        entry.push(ChatMessage {
-                            role: "user".into(),
-                            content: user_message,
-                        });
-                        entry.push(ChatMessage {
-                            role: "assistant".into(),
-                            content: response.text.clone(),
-                        });
-                        const MAX_MSGS: usize = 80;
-                        if entry.len() > MAX_MSGS {
-                            let drain = entry.len() - MAX_MSGS;
-                            entry.drain(0..drain);
-                        }
+                        save_session_turn(
+                            &state.chat_sessions,
+                            sid,
+                            &user_message,
+                            &response.text,
+                        )
+                        .await;
                     }
                     return Json(ChatResponse {
                         response: response.text,
@@ -1827,26 +1867,12 @@ async fn api_chat_stream(
     let temperature = req.temperature.unwrap_or(0.7);
     let user_message = req.message.clone();
 
-    let prompt_for_model = if let Some(ref sid) = req.session_id {
-        let sessions = state.chat_sessions.read().await;
-        let mut prefix = String::new();
-        if let Some(msgs) = sessions.get(sid) {
-            let skip = msgs.len().saturating_sub(40);
-            for m in msgs.iter().skip(skip) {
-                prefix.push_str(&m.role);
-                prefix.push_str(": ");
-                prefix.push_str(&m.content);
-                prefix.push('\n');
-            }
-        }
-        if prefix.is_empty() {
-            user_message.clone()
-        } else {
-            format!("Previous turns (compact):\n{prefix}\nUser: {user_message}")
-        }
-    } else {
-        user_message.clone()
-    };
+    let prompt_for_model = build_prompt_with_history(
+        &state.chat_sessions,
+        req.session_id.as_deref(),
+        &user_message,
+    )
+    .await;
 
     let mcp_arc = state.mcp_manager.read().await.clone();
     let mcp_for_agentic = if req.use_mcp {
@@ -1893,21 +1919,13 @@ async fn api_chat_stream(
                                 return;
                             }
                             if let Some(ref sid) = session_id {
-                                let mut map = sessions.write().await;
-                                let entry = map.entry(sid.clone()).or_default();
-                                entry.push(ChatMessage {
-                                    role: "user".into(),
-                                    content: user_message_for_session,
-                                });
-                                entry.push(ChatMessage {
-                                    role: "assistant".into(),
-                                    content: response.text.clone(),
-                                });
-                                const MAX_MSGS: usize = 80;
-                                if entry.len() > MAX_MSGS {
-                                    let drain = entry.len() - MAX_MSGS;
-                                    entry.drain(0..drain);
-                                }
+                                save_session_turn(
+                                    &sessions,
+                                    sid,
+                                    &user_message_for_session,
+                                    &response.text,
+                                )
+                                .await;
                             }
                             let done = serde_json::json!({
                                 "type": "done",
@@ -1987,21 +2005,13 @@ async fn api_chat_stream(
                                 return;
                             }
                             if let Some(ref sid) = session_id {
-                                let mut map = sessions.write().await;
-                                let entry = map.entry(sid.clone()).or_default();
-                                entry.push(ChatMessage {
-                                    role: "user".into(),
-                                    content: user_message_for_session,
-                                });
-                                entry.push(ChatMessage {
-                                    role: "assistant".into(),
-                                    content: response.text.clone(),
-                                });
-                                const MAX_MSGS: usize = 80;
-                                if entry.len() > MAX_MSGS {
-                                    let drain = entry.len() - MAX_MSGS;
-                                    entry.drain(0..drain);
-                                }
+                                save_session_turn(
+                                    &sessions,
+                                    sid,
+                                    &user_message_for_session,
+                                    &response.text,
+                                )
+                                .await;
                             }
                             let done = serde_json::json!({
                                 "type": "done",
@@ -2124,21 +2134,13 @@ async fn api_chat_stream(
         };
 
         if let Some(ref sid) = session_id {
-            let mut map = sessions.write().await;
-            let entry = map.entry(sid.clone()).or_default();
-            entry.push(ChatMessage {
-                role: "user".into(),
-                content: user_message_for_session,
-            });
-            entry.push(ChatMessage {
-                role: "assistant".into(),
-                content: response.text.clone(),
-            });
-            const MAX_MSGS: usize = 80;
-            if entry.len() > MAX_MSGS {
-                let drain = entry.len() - MAX_MSGS;
-                entry.drain(0..drain);
-            }
+            save_session_turn(
+                &sessions,
+                sid,
+                &user_message_for_session,
+                &response.text,
+            )
+            .await;
         }
 
         let done = serde_json::json!({
@@ -2395,6 +2397,209 @@ async fn api_swarm_timeline(State(state): State<Arc<WebState>>) -> Json<SwarmTim
         total,
         has_more: false,
     })
+}
+
+// === Inference & model download API ===
+
+#[derive(Serialize)]
+struct InferenceSettingsResponse {
+    use_local_gguf: bool,
+    use_ollama: bool,
+    ollama_url: String,
+    remote_api_enabled: bool,
+    remote_api_base_url: String,
+    remote_api_model: String,
+    api_key_configured: bool,
+    models_directory: String,
+    gguf_presets: Vec<GgufPresetRow>,
+    hint: &'static str,
+}
+
+#[derive(Serialize)]
+struct GgufPresetRow {
+    id: &'static str,
+    repo: &'static str,
+}
+
+#[derive(Deserialize)]
+struct InferenceSettingsPut {
+    use_local_gguf: bool,
+    use_ollama: bool,
+    ollama_url: String,
+    remote_api_enabled: bool,
+    remote_api_base_url: String,
+    remote_api_model: String,
+    /// When omitted, existing API key is left unchanged.
+    #[serde(default)]
+    remote_api_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ModelDownloadBody {
+    #[serde(default)]
+    preset: Option<String>,
+    #[serde(default)]
+    quant: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    filename: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ModelDownloadResponse {
+    success: bool,
+    path: Option<String>,
+    bytes: Option<u64>,
+    error: Option<String>,
+}
+
+fn inference_settings_from_live(
+    live: &crate::inference::InferenceLiveSettings,
+    models_directory: String,
+) -> InferenceSettingsResponse {
+    let gguf_presets = crate::models_hf::KNOWN_GGUF_PRESETS
+        .iter()
+        .map(|(id, repo, _)| GgufPresetRow { id, repo })
+        .collect();
+    InferenceSettingsResponse {
+        use_local_gguf: live.use_local_gguf,
+        use_ollama: live.use_ollama,
+        ollama_url: live.ollama_url.clone(),
+        remote_api_enabled: live.remote_api_enabled,
+        remote_api_base_url: live.remote_api_base_url.clone(),
+        remote_api_model: live.remote_api_model.clone(),
+        api_key_configured: !live.remote_api_key.trim().is_empty(),
+        models_directory,
+        gguf_presets,
+        hint: "Remote API: OpenAI-compatible Chat Completions (Bearer key). Saving updates ~/.peerclaw/config.toml.",
+    }
+}
+
+async fn api_inference_settings_get(
+    State(state): State<Arc<WebState>>,
+) -> Result<Json<InferenceSettingsResponse>, (StatusCode, String)> {
+    let Some(inf) = &state.inference else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Inference engine not attached (run peerclaw serve with --web).".into(),
+        ));
+    };
+    let live = inf.live_settings().read().await;
+    let models_directory = inf.models_directory().display().to_string();
+    Ok(Json(inference_settings_from_live(&live, models_directory)))
+}
+
+async fn api_inference_settings_put(
+    State(state): State<Arc<WebState>>,
+    Json(body): Json<InferenceSettingsPut>,
+) -> Result<Json<InferenceSettingsResponse>, (StatusCode, String)> {
+    let Some(inf) = &state.inference else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Inference engine not attached.".into(),
+        ));
+    };
+    {
+        let mut live = inf.live_settings().write().await;
+        live.use_local_gguf = body.use_local_gguf;
+        live.use_ollama = body.use_ollama;
+        live.ollama_url = body.ollama_url;
+        live.remote_api_enabled = body.remote_api_enabled;
+        live.remote_api_base_url = body.remote_api_base_url;
+        live.remote_api_model = body.remote_api_model;
+        if let Some(k) = body.remote_api_key {
+            live.remote_api_key = k;
+        }
+        let mut cfg = crate::config::Config::load().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("config load: {e}"),
+            )
+        })?;
+        live.apply_to_config(&mut cfg.inference);
+        cfg.save().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("config save: {e}"),
+            )
+        })?;
+    }
+    let live = inf.live_settings().read().await;
+    let models_directory = inf.models_directory().display().to_string();
+    Ok(Json(inference_settings_from_live(&live, models_directory)))
+}
+
+async fn api_models_download(
+    State(state): State<Arc<WebState>>,
+    Json(body): Json<ModelDownloadBody>,
+) -> Json<ModelDownloadResponse> {
+    let Some(inf) = &state.inference else {
+        return Json(ModelDownloadResponse {
+            success: false,
+            path: None,
+            bytes: None,
+            error: Some("Inference engine not attached.".into()),
+        });
+    };
+
+    let models_dir = inf.models_directory().clone();
+    let (url, dest) = if let Some(u) = body.url.filter(|s| !s.trim().is_empty()) {
+        let u = u.trim().to_string();
+        let path = crate::models_hf::dest_for_custom_url(&models_dir, &u, body.filename.as_deref());
+        (u, path)
+    } else if let Some(preset) = body.preset.filter(|s| !s.trim().is_empty()) {
+        let quant = body
+            .quant
+            .as_deref()
+            .filter(|q| !q.is_empty())
+            .unwrap_or("q4_k_m");
+        match crate::models_hf::preset_to_hf_url(&preset, quant) {
+            Some((url, name)) => (url, models_dir.join(name)),
+            None => {
+                return Json(ModelDownloadResponse {
+                    success: false,
+                    path: None,
+                    bytes: None,
+                    error: Some(format!("Unknown preset '{preset}'. See gguf_presets in GET /api/inference/settings.")),
+                });
+            }
+        }
+    } else {
+        return Json(ModelDownloadResponse {
+            success: false,
+            path: None,
+            bytes: None,
+            error: Some("Provide \"url\" (Hugging Face resolve link to a .gguf) or \"preset\" + optional \"quant\".".into()),
+        });
+    };
+
+    if dest.exists() {
+        return Json(ModelDownloadResponse {
+            success: false,
+            path: Some(dest.display().to_string()),
+            bytes: None,
+            error: Some("File already exists; remove it first or pick another name.".into()),
+        });
+    }
+
+    match crate::models_hf::download_url_to_path(&url, &dest).await {
+        Ok(n) => {
+            let _ = inf.scan_models().await;
+            Json(ModelDownloadResponse {
+                success: true,
+                path: Some(dest.display().to_string()),
+                bytes: Some(n),
+                error: None,
+            })
+        }
+        Err(e) => Json(ModelDownloadResponse {
+            success: false,
+            path: Some(dest.display().to_string()),
+            bytes: None,
+            error: Some(e),
+        }),
+    }
 }
 
 // === Task Management API ===

@@ -15,7 +15,7 @@ use crate::executor::{MonitorConfig, ResourceMonitor, RouterConfig, TaskExecutor
 use crate::identity::NodeIdentity;
 use crate::inference::{
     BatchAggregator, BatchConfig, BatchError, BatchResponse, BatchStats, InferenceConfig,
-    InferenceEngine, ModelDistributor,
+    InferenceEngine, InferenceLiveSettings, ModelDistributor,
 };
 use crate::job::{network as job_network, JobManager, PricingStrategy};
 use crate::p2p::{Network, ProviderTracker};
@@ -124,7 +124,13 @@ impl Runtime {
             use_ollama: config.inference.use_ollama,
             ollama_url: config.inference.ollama_url.clone(),
         };
-        let inference = Arc::new(InferenceEngine::new(inference_config)?);
+        let inference_live = Arc::new(tokio::sync::RwLock::new(InferenceLiveSettings::from_config(
+            &config.inference,
+        )));
+        let inference = Arc::new(InferenceEngine::new(
+            inference_config,
+            inference_live,
+        )?);
 
         // Create model distributor
         let model_distributor =
