@@ -165,6 +165,26 @@ export async function fetchTasks(): Promise<WebTask[]> {
   return r.json()
 }
 
+/** Request cooperative stop for an in-flight web agentic task (honoured between ReAct steps). */
+export async function stopWebTask(id: string): Promise<{ ok: boolean; message?: string }> {
+  const tid = id.trim()
+  if (!tid) return { ok: false, message: "Missing task id." }
+  const r = await apiFetch(`/api/tasks/${encodeURIComponent(tid)}/stop`, { method: "POST" })
+  let data: unknown = {}
+  try {
+    data = await r.json()
+  } catch {
+    /* non-JSON */
+  }
+  const o = data as Record<string, unknown>
+  const message = typeof o.message === "string" ? o.message : undefined
+  const okFlag = o.ok === true
+  if (!r.ok) {
+    return { ok: false, message: message ?? `HTTP ${r.status}` }
+  }
+  return { ok: okFlag, message }
+}
+
 /** Normalized result from `GET /api/tasks/:id` (handles HTML/error bodies and shape quirks). */
 export type TaskDetailResult =
   | { ok: true; task: WebTask }

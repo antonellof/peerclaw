@@ -8,7 +8,7 @@ import { ConsoleMcpPage } from "@/pages/console/ConsoleMcpPage"
 
 const TITLES: Partial<Record<WorkspaceView, string>> = {
   home: "Home",
-  overview: "Overview",
+  overview: "P2P Network",
   jobs: "Jobs",
   providers: "Providers",
   skills: "Skills",

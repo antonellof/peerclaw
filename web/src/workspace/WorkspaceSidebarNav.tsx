@@ -6,15 +6,15 @@ import type { WorkspaceView } from "./views"
 
 /** Primary sidebar destinations; Jobs, Providers, Skills are under Settings. */
 export const WORKSPACE_NAV_ITEMS: { view: WorkspaceView; label: string; icon: typeof MessageSquare }[] = [
-  { view: "chat", label: "Chat", icon: MessageSquare },
   { view: "home", label: "Home", icon: Home },
-  { view: "overview", label: "Overview", icon: LayoutGrid },
+  { view: "chat", label: "Chat", icon: MessageSquare },
+  { view: "overview", label: "P2P Network", icon: LayoutGrid },
 ]
 
 export const WORKSPACE_VIEW_TITLES: Record<WorkspaceView, string> = {
   chat: "Chat",
   home: "Home",
-  overview: "Overview",
+  overview: "P2P Network",
   jobs: "Jobs",
   providers: "Providers",
   skills: "Skills",

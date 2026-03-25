@@ -289,6 +289,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             job_submit_tx: Some(job_submit_tx),
             swarm_manager: Some(swarm_manager.clone()),
             task_store: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            agent_task_cancels: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             provider_tracker: Some(runtime.provider_tracker.clone()),
             agent_task_tx: agent_task_tx_opt,
             ws_control_tx,

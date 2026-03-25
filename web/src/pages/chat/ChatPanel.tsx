@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { ChevronDown, ChevronLeft, ChevronRight, Send } from "lucide-react"
+import { ChevronDown, Send } from "lucide-react"
 
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
-import { createTask, fetchOpenAiModels, fetchTaskDetail, postChatStream } from "@/lib/api"
+import { createTask, fetchOpenAiModels, fetchTaskDetail, postChatStream, stopWebTask } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import { AgentTaskHistory } from "@/pages/chat/AgentTaskHistory"
 import { ChatMessageMarkdown } from "@/pages/chat/ChatMessageMarkdown"
 import { AGENT_TASK_TEMPLATES, SCENARIO_PRESETS } from "@/pages/chat/agentTemplates"
 import { SLASH_COMMANDS, runSlashCommand, type ChatSettings } from "./slashCommands"
@@ -67,7 +66,15 @@ type Props = {
 }
 
 /** Agent task log stream: auto-scroll to latest line as the server appends steps. */
-function AgentTaskLiveLogs({ logs, running }: { logs: string[]; running: boolean }) {
+function AgentTaskLiveLogs({
+  logs,
+  running,
+  taskId,
+}: {
+  logs: string[]
+  running: boolean
+  taskId?: string
+}) {
   const preRef = useRef<HTMLPreElement>(null)
   useLayoutEffect(() => {
     const el = preRef.current
@@ -75,21 +82,39 @@ function AgentTaskLiveLogs({ logs, running }: { logs: string[]; running: boolean
     el.scrollTop = el.scrollHeight
   }, [logs])
 
+  const requestStop = () => {
+    if (taskId) void stopWebTask(taskId)
+  }
+
   return (
     <div className="mt-2 rounded-lg border border-border/60 bg-background/50">
-      <div className="flex items-center justify-between border-b border-border/40 px-2 py-1.5">
+      <div className="flex items-center justify-between gap-2 border-b border-border/40 px-2 py-1.5">
         <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           {running ? "Live steps" : "Steps"}
         </span>
-        {running ? (
-          <span
-            className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
-            title="Agent is still running"
-          >
-            <span className="inline-flex size-1.5 animate-pulse rounded-full bg-primary" />
-            Active
-          </span>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {running && taskId ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 border-destructive/40 px-2 text-[10px] text-destructive hover:bg-destructive/10"
+              title="Request stop (finishes after current model/tool step)"
+              onClick={requestStop}
+            >
+              Stop
+            </Button>
+          ) : null}
+          {running ? (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
+              title="Agent is still running"
+            >
+              <span className="inline-flex size-1.5 animate-pulse rounded-full bg-primary" />
+              Active
+            </span>
+          ) : null}
+        </div>
       </div>
       <pre
         ref={preRef}
@@ -142,7 +167,6 @@ export function ChatPanel({ onRegisterControls }: Props) {
   const [agentTaskType, setAgentTaskType] = useState("general")
   const [agentBudget, setAgentBudget] = useState(5)
   const [transcriptReady, setTranscriptReady] = useState(false)
-  const [agentPanelOpen, setAgentPanelOpen] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -182,6 +206,23 @@ export function ChatPanel({ onRegisterControls }: Props) {
     onRegisterControls?.({ clearChat })
     return () => onRegisterControls?.(null)
   }, [clearChat, onRegisterControls])
+
+  useEffect(() => {
+    const st = location.state as { focusAgentTaskId?: string } | Record<string, unknown> | null
+    const id = st && typeof st === "object" && "focusAgentTaskId" in st ? st.focusAgentTaskId : undefined
+    if (typeof id !== "string" || !id) return
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-agent-task-id="${CSS.escape(id)}"]`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      })
+    })
+    const { focusAgentTaskId: _, ...rest } = st as Record<string, unknown>
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { replace: true, state: Object.keys(rest).length ? rest : {} },
+    )
+  }, [location.state, location.pathname, location.search, location.hash, navigate])
 
   useEffect(() => {
     const st = location.state as {
@@ -323,11 +364,13 @@ export function ChatPanel({ onRegisterControls }: Props) {
         ),
       )
 
-      if (t.status === "completed" || t.status === "failed") {
+      if (t.status === "completed" || t.status === "failed" || t.status === "cancelled") {
         if (finishedRef.current.has(taskId)) return
         finishedRef.current.add(taskId)
         stopPoll(taskId)
-        const summary = t.result ?? (t.status === "failed" ? "Agent run failed." : "Done.")
+        const summary =
+          t.result ??
+          (t.status === "failed" ? "Agent run failed." : t.status === "cancelled" ? "Stopped." : "Done.")
         setMessages((prev) => [
           ...prev,
           {
@@ -632,23 +675,13 @@ export function ChatPanel({ onRegisterControls }: Props) {
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button
-            variant={agentPanelOpen ? "secondary" : "outline"}
-            size="sm"
-            className="h-8 gap-1 px-2 text-xs"
-            onClick={() => setAgentPanelOpen((o) => !o)}
-            title="Agent runs"
-          >
-            <ChevronLeft className={cn("size-3.5", agentPanelOpen && "rotate-180")} />
-            Runs
-          </Button>
           <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={openHelp}>
             Help
           </Button>
         </div>
       </header>
 
-      <div className="relative flex min-h-0 flex-1 flex-row">
+      <div className="relative flex min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
             <div
@@ -664,8 +697,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   Ask anything, use{" "}
                   <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs">/</kbd> for
                   commands, or switch to <strong className="text-foreground">Agent goal</strong> for multi-step agent
-                  runs (history is saved in this browser for the current session). Use{" "}
-                  <strong className="text-foreground">Runs</strong> in the header for past agent tasks.
+                  runs (history is saved in this browser for the current session). Past agent tasks appear under{" "}
+                  <strong className="text-foreground">Agent runs</strong> in the left sidebar.
                 </p>
                 <div className="mx-auto mt-8 grid max-w-lg gap-2 sm:grid-cols-2">
                   {[
@@ -695,6 +728,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
             {messages.map((m) => (
               <div
                 key={m.id}
+                data-agent-task-id={m.agentTaskId}
                 className={cn(
                   "flex gap-3",
                   m.role === "user" && "flex-row-reverse",
@@ -734,10 +768,11 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   {m.agentTaskId ? (
                     <AgentTaskLiveLogs
                       logs={m.agentLogs ?? []}
+                      taskId={m.agentTaskId}
                       running={(() => {
                         const s = m.agentStatusLine ?? ""
                         if (!s || s === "error") return false
-                        if (/^(completed|failed|timed out)/i.test(s)) return false
+                        if (/^(completed|failed|cancelled|timed out)/i.test(s)) return false
                         return true
                       })()}
                     />
@@ -960,46 +995,6 @@ export function ChatPanel({ onRegisterControls }: Props) {
             </div>
           </div>
         </div>
-
-        {agentPanelOpen && (
-          <button
-            type="button"
-            className="absolute inset-0 z-30 bg-background/50 md:hidden"
-            aria-label="Close agent runs"
-            onClick={() => setAgentPanelOpen(false)}
-          />
-        )}
-
-        <aside
-          className={cn(
-            "flex min-h-0 shrink-0 flex-col border-l border-border/70 bg-card/95 transition-[width,transform] duration-200 ease-out md:bg-card/20 md:shadow-none",
-            "max-md:absolute max-md:right-0 max-md:top-0 max-md:z-40 max-md:h-full max-md:w-[min(100%,300px)] max-md:shadow-xl",
-            agentPanelOpen ? "max-md:translate-x-0" : "max-md:pointer-events-none max-md:translate-x-full",
-            "md:relative md:z-auto md:translate-x-0 md:pointer-events-auto",
-            agentPanelOpen ? "md:flex md:w-[min(280px,40vw)] xl:w-[300px]" : "md:hidden",
-          )}
-        >
-          {agentPanelOpen ? (
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-2">
-                <span className="truncate text-xs font-semibold text-foreground">Agent runs</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 shrink-0"
-                  title="Close panel"
-                  onClick={() => setAgentPanelOpen(false)}
-                >
-                  <ChevronRight className="size-4" />
-                </Button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-hidden p-2 md:p-2">
-                <AgentTaskHistory variant="panel" className="flex h-full min-h-0 flex-col" />
-              </div>
-            </div>
-          ) : null}
-        </aside>
       </div>
     </div>
   )

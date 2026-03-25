@@ -195,7 +195,7 @@ export function ConsoleOverviewPage() {
         <div className="relative flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Overview</h1>
+              <h1 className="text-xl font-semibold tracking-tight md:text-2xl">P2P Network</h1>
               <Badge variant={online ? "default" : "secondary"} className="font-normal">
                 {online ? "Node online" : "Offline"}
               </Badge>
@@ -220,7 +220,7 @@ export function ConsoleOverviewPage() {
 
         <nav
           className="relative mt-6 flex flex-wrap gap-1.5 border-t border-border/60 pt-5"
-          aria-label="Overview sections"
+          aria-label="P2P Network sections"
         >
           {SECTIONS.map((s) => (
             <button

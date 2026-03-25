@@ -57,8 +57,8 @@ export function WorkspaceHelpDialog({ open, onOpenChange, onOpenSettings }: Prop
                 </li>
                 <li>
                   <strong className="text-foreground">Agent goal</strong> — submits a task; logs and results stay in the
-                  thread; past runs under <strong className="text-foreground">Runs</strong> in the chat header (next to
-                  Help).
+                  thread; past runs are listed under <strong className="text-foreground">Agent runs</strong> in the left
+                  sidebar (like recent chats).
                 </li>
               </ul>
             </section>
@@ -67,7 +67,7 @@ export function WorkspaceHelpDialog({ open, onOpenChange, onOpenSettings }: Prop
               <p className="text-xs leading-relaxed">
                 Type <kbd className="rounded border border-border px-1 font-mono">/</kbd> in the message box for commands
                 (full list under Settings → Commands). Use the sidebar for <strong className="text-foreground">Home</strong>{" "}
-                and <strong className="text-foreground">Overview</strong>.
+                and <strong className="text-foreground">P2P Network</strong>.
               </p>
             </section>
             {onOpenSettings && (

@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -137,6 +138,8 @@ pub struct WebState {
     pub swarm_manager: Option<Arc<SwarmManager>>,
     /// Task store for web-created tasks
     pub task_store: Arc<RwLock<Vec<WebTask>>>,
+    /// Stop flags for in-flight web agentic tasks (`POST /api/tasks/:id/stop`).
+    pub agent_task_cancels: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
     /// Provider tracker for network LLM providers
     pub provider_tracker: Option<Arc<ProviderTracker>>,
     /// Channel to send tasks to the agent runtime
@@ -232,6 +235,7 @@ pub fn spa_dist_dir() -> Option<PathBuf> {
 /// Task routes under `/api/…` via `nest`. Path params **must** use `:id` (Axum 0.7 / matchit); `{id}` never matches.
 fn api_tasks_router() -> Router<Arc<WebState>> {
     Router::new()
+        .route("/tasks/:id/stop", post(api_task_stop))
         .route("/tasks/:id", get(api_task_detail))
         .route("/tasks", post(api_create_task))
         .route("/tasks", get(api_list_tasks))
@@ -313,6 +317,7 @@ pub fn create_web_state(
         job_submit_tx: None,
         swarm_manager: None,
         task_store: Arc::new(RwLock::new(Vec::new())),
+        agent_task_cancels: Arc::new(RwLock::new(HashMap::new())),
         provider_tracker: None,
         agent_task_tx: None,
         ws_control_tx: new_ws_control_plane(),
@@ -346,6 +351,7 @@ pub fn create_web_state_with_channels(
         job_submit_tx: Some(job_submit_tx),
         swarm_manager: None,
         task_store: Arc::new(RwLock::new(Vec::new())),
+        agent_task_cancels: Arc::new(RwLock::new(HashMap::new())),
         provider_tracker: None,
         agent_task_tx: None,
         ws_control_tx: new_ws_control_plane(),
@@ -378,6 +384,7 @@ pub fn create_web_state_with_inference(
         job_submit_tx: None,
         swarm_manager: None,
         task_store: Arc::new(RwLock::new(Vec::new())),
+        agent_task_cancels: Arc::new(RwLock::new(HashMap::new())),
         provider_tracker: None,
         agent_task_tx: None,
         ws_control_tx: new_ws_control_plane(),
@@ -410,6 +417,7 @@ pub fn create_web_state_with_swarm(
         job_submit_tx: None,
         swarm_manager: Some(swarm_manager),
         task_store: Arc::new(RwLock::new(Vec::new())),
+        agent_task_cancels: Arc::new(RwLock::new(HashMap::new())),
         provider_tracker: None,
         agent_task_tx: None,
         ws_control_tx: new_ws_control_plane(),
@@ -997,6 +1005,7 @@ async fn run_unified_agentic_inference(
     max_tokens: u32,
     temperature: f32,
     progress: Option<AgenticTaskProgressSink>,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> Result<(InferenceResponse, Vec<String>), String> {
     let Some(tx) = &state.inference_tx else {
         return Err("Inference not available".into());
@@ -1013,6 +1022,12 @@ async fn run_unified_agentic_inference(
     let tool_session = uuid::Uuid::new_v4().to_string();
 
     for iter in 1..=AGENTIC_MAX_ITERS {
+        if cancel
+            .as_ref()
+            .is_some_and(|c| c.load(Ordering::Acquire))
+        {
+            return Err("Stopped by user".into());
+        }
         if let Some(ref sink) = progress {
             sink.append_log(format!(
                 "[{}] Pass {}/{}: requesting model…",
@@ -1414,6 +1429,7 @@ async fn api_chat(
                     max_tokens,
                     temperature,
                     None,
+                    None,
                 )
                 .await
                 {
@@ -1470,6 +1486,7 @@ async fn api_chat(
                     model.clone(),
                     max_tokens,
                     temperature,
+                    None,
                     None,
                 )
                 .await
@@ -1653,6 +1670,7 @@ async fn api_chat_stream(
                         max_tokens,
                         temperature,
                         None,
+                        None,
                     )
                     .await
                     {
@@ -1745,6 +1763,7 @@ async fn api_chat_stream(
                         model_spawn,
                         max_tokens,
                         temperature,
+                        None,
                         None,
                     )
                     .await
@@ -2324,6 +2343,11 @@ async fn api_create_task(
             }
         });
     } else if agentic_ready {
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut m = state.agent_task_cancels.write().await;
+            m.insert(task_id.clone(), cancel.clone());
+        }
         let registry = state.tools.clone().expect("agentic_ready implies tools");
         let mcp_for = if req.use_mcp {
             state
@@ -2374,7 +2398,7 @@ async fn api_create_task(
                 ws_tx: ws_tx.clone(),
             };
 
-            match run_unified_agentic_inference(
+            let infer_outcome = run_unified_agentic_inference(
                 state_spawn.as_ref(),
                 Some(registry),
                 mcp_for,
@@ -2384,9 +2408,13 @@ async fn api_create_task(
                 2048,
                 0.35,
                 Some(progress_sink),
+                Some(cancel),
             )
-            .await
-            {
+            .await;
+
+            state_spawn.agent_task_cancels.write().await.remove(&tid);
+
+            match infer_outcome {
                 Ok((resp, tool_logs)) => {
                     let n = tool_logs.len() as u32;
                     let mut tasks = store.write().await;
@@ -2401,11 +2429,20 @@ async fn api_create_task(
                     broadcast_tasks_changed(&ws_tx);
                 }
                 Err(e) => {
+                    let user_stop = e == "Stopped by user";
                     let mut tasks = store.write().await;
                     if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
-                        t.status = "failed".to_string();
+                        t.status = if user_stop {
+                            "cancelled".to_string()
+                        } else {
+                            "failed".to_string()
+                        };
                         t.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                        t.result = Some(format!("Agentic: {e}"));
+                        t.result = Some(if user_stop {
+                            "Stopped by user.".to_string()
+                        } else {
+                            format!("Agentic: {e}")
+                        });
                         t.logs.push(format!(
                             "[{}] {}",
                             chrono::Utc::now().format("%H:%M:%S"),
@@ -2417,6 +2454,11 @@ async fn api_create_task(
             }
         });
     } else if mcp_ready {
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut m = state.agent_task_cancels.write().await;
+            m.insert(task_id.clone(), cancel.clone());
+        }
         let mcp = state
             .mcp_manager
             .read()
@@ -2459,7 +2501,7 @@ async fn api_create_task(
                 ws_tx: ws_tx.clone(),
             };
 
-            match run_unified_agentic_inference(
+            let infer_outcome = run_unified_agentic_inference(
                 state_spawn.as_ref(),
                 None,
                 Some(mcp),
@@ -2469,9 +2511,13 @@ async fn api_create_task(
                 2048,
                 0.35,
                 Some(progress_sink),
+                Some(cancel),
             )
-            .await
-            {
+            .await;
+
+            state_spawn.agent_task_cancels.write().await.remove(&tid);
+
+            match infer_outcome {
                 Ok((resp, tool_logs)) => {
                     let n = tool_logs.len() as u32;
                     let mut tasks = store.write().await;
@@ -2486,11 +2532,20 @@ async fn api_create_task(
                     broadcast_tasks_changed(&ws_tx);
                 }
                 Err(e) => {
+                    let user_stop = e == "Stopped by user";
                     let mut tasks = store.write().await;
                     if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
-                        t.status = "failed".to_string();
+                        t.status = if user_stop {
+                            "cancelled".to_string()
+                        } else {
+                            "failed".to_string()
+                        };
                         t.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                        t.result = Some(format!("Agentic: {e}"));
+                        t.result = Some(if user_stop {
+                            "Stopped by user.".to_string()
+                        } else {
+                            format!("Agentic: {e}")
+                        });
                         t.logs.push(format!(
                             "[{}] {}",
                             chrono::Utc::now().format("%H:%M:%S"),
@@ -2538,6 +2593,38 @@ async fn api_create_task(
         task_id: Some(task_id),
         error: None,
     })
+}
+
+/// Signal an in-flight web agentic task to stop (honoured between ReAct iterations).
+async fn api_task_stop(
+    State(state): State<Arc<WebState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Json<serde_json::Value> {
+    let flag = {
+        let guard = state.agent_task_cancels.read().await;
+        guard.get(&id).cloned()
+    };
+    if let Some(f) = flag {
+        f.store(true, Ordering::Release);
+        let mut tasks = state.task_store.write().await;
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
+            if t.status == "running" || t.status == "pending" {
+                t.logs.push(format!(
+                    "[{}] Stop requested — exits after the current model or tool step",
+                    chrono::Utc::now().format("%H:%M:%S")
+                ));
+            }
+        }
+        broadcast_tasks_changed(&state.ws_control_tx);
+        return Json(serde_json::json!({
+            "ok": true,
+            "message": "stop signaled",
+        }));
+    }
+    Json(serde_json::json!({
+        "ok": false,
+        "message": "task is not running or cannot be stopped (only in-flight agentic/MCP web tasks)",
+    }))
 }
 
 async fn api_list_tasks(State(state): State<Arc<WebState>>) -> Json<Vec<WebTask>> {

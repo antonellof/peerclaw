@@ -14,7 +14,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { cmd: "/help", desc: "Show available commands", category: "General" },
   { cmd: "/guide", desc: "Open help (agents & commands)", category: "General" },
   { cmd: "/open", desc: "Open workspace panel", args: "overview|jobs|…", category: "Workspace" },
-  { cmd: "/overview", desc: "Open Overview (mesh & swarm)", category: "Workspace" },
+  { cmd: "/overview", desc: "Open P2P Network (mesh & swarm)", category: "Workspace" },
   { cmd: "/home", desc: "Open Home (starters)", category: "Workspace" },
   { cmd: "/providers", desc: "Open Providers", category: "Workspace" },
   { cmd: "/status", desc: "Show runtime status", category: "General" },
@@ -89,7 +89,7 @@ export async function runSlashCommand(input: string, ctx: SlashContext): Promise
 
     case "overview":
       ctx.setWorkspaceView?.("overview")
-      return ctx.setWorkspaceView ? "Opened Overview." : "Use the sidebar → Overview."
+      return ctx.setWorkspaceView ? "Opened P2P Network." : "Use the sidebar → P2P Network."
 
     case "providers":
       ctx.setWorkspaceView?.("providers")

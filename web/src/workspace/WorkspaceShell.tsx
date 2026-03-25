@@ -18,6 +18,7 @@ import { WorkspaceNavProvider, type ChatControls } from "./WorkspaceNavContext"
 import { ConsolePanel } from "./ConsolePanel"
 import { WorkspaceHelpDialog } from "./WorkspaceHelpDialog"
 import { WorkspaceSettingsDialog } from "./WorkspaceSettingsDialog"
+import { WorkspaceSidebarAgentRuns } from "./WorkspaceSidebarAgentRuns"
 import { WorkspaceSidebarNav, workspaceNavTitle } from "./WorkspaceSidebarNav"
 import {
   loadWorkspaceChatPreferences,
@@ -170,6 +171,8 @@ export function WorkspaceShell() {
               sidebarCollapsed={sidebarCollapsed}
             />
 
+            <WorkspaceSidebarAgentRuns sidebarCollapsed={sidebarCollapsed} />
+
             {!sidebarCollapsed && (
               <div className="mx-2 mb-2 rounded-xl border border-border/50 bg-background/30 p-3">
                 <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -271,6 +274,7 @@ export function WorkspaceShell() {
             onSelect={(v) => setView(v)}
             onPick={() => setMobileNavOpen(false)}
           />
+          <WorkspaceSidebarAgentRuns onPickTask={() => setMobileNavOpen(false)} />
           <div className="border-t border-border p-2">
             <Button
               variant="outline"

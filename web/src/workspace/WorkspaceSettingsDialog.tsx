@@ -127,7 +127,7 @@ export function WorkspaceSettingsDialog({
                     onClick={() => go("overview")}
                   >
                     <LayoutGrid className="size-4 shrink-0 opacity-80" />
-                    <span className="text-sm font-medium">Overview</span>
+                    <span className="text-sm font-medium">P2P Network</span>
                   </Button>
                 </div>
               </div>
