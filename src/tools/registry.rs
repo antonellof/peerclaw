@@ -120,6 +120,22 @@ impl ToolRegistry {
         self.builtin_tools.get(name).cloned()
     }
 
+    /// Per-builtin hints for agent prompts: tool name → required-parameter summary.
+    pub fn builtin_parameter_hints(&self) -> Vec<(String, String)> {
+        let mut v: Vec<_> = self
+            .builtin_tools
+            .iter()
+            .map(|(name, tool)| {
+                (
+                    name.clone(),
+                    super::tool::parameter_schema_prompt_hint(&tool.parameters_schema()),
+                )
+            })
+            .collect();
+        v.sort_by(|a, b| a.0.cmp(&b.0));
+        v
+    }
+
     /// List all available tools (local + network).
     pub async fn list_tools(&self) -> Vec<ToolInfo> {
         let mut tools = Vec::new();

@@ -897,8 +897,13 @@ async fn build_agentic_system_prefix(
 ) -> String {
     use crate::tools::ToolLocation;
     let mut s = String::from(
-        "To call a tool, use exactly this format (multiple blocks allowed):\n\n\
-         <tool_call>\nname: tool_name_or_server_colon_tool\nargs: {\"key\": \"value\"}\n</tool_call>\n\n",
+        "To call a tool, use exactly this format (multiple blocks allowed). \
+         `args` must be valid JSON (one line or multiple lines inside the block):\n\n\
+         <tool_call>\nname: tool_name_or_server_colon_tool\nargs: {\"key\": \"value\"}\n</tool_call>\n\n\
+         Do not call tools with empty `args: {}` when that tool lists required keys under \"Builtin required args\".\n\
+         For `web_fetch` / `http`, use real URLs from the user's message or from prior tool output — not placeholder hosts.\n\
+         If a tool returns a parameter error, fix the arguments or stop using that tool and answer from context.\n\
+         Your final reply must directly satisfy the user's goal, not describe tool failures.\n\n",
     );
     if let Some(registry) = registry {
         s.push_str(
@@ -913,6 +918,10 @@ async fn build_agentic_system_prefix(
         infos.sort_by(|a, b| a.name.cmp(&b.name));
         for t in infos {
             s.push_str(&format!("- **{}**: {}\n", t.name, t.description));
+        }
+        s.push_str("\n### Builtin required args\n");
+        for (name, hint) in registry.builtin_parameter_hints() {
+            s.push_str(&format!("- **{name}**: {hint}\n"));
         }
     } else {
         s.push_str(
@@ -2282,8 +2291,11 @@ async fn api_create_task(
 
             let body = format!(
                 "### Agent goal\n{description}\n\n\
-                 Use local tools and MCP when enabled. For distributed work use job_submit / job_status. \
-                 Finish with a concise summary for the user.\n"
+                 Use local tools and MCP only when they clearly help. For distributed work use job_submit / job_status.\n\
+                 Every tool call must supply all required JSON keys from \"Builtin required args\" in the system instructions.\n\
+                 Do not fetch example.com or other placeholder URLs unless the user gave that URL.\n\
+                 If memory_search returns nothing, do not repeat the same query; continue or answer without it.\n\
+                 Finish with a concise, substantive answer for the user (not commentary about tools).\n"
             );
 
             match run_unified_agentic_inference(
@@ -2362,7 +2374,8 @@ async fn api_create_task(
 
             let body = format!(
                 "### Agent goal\n{description}\n\n\
-                 Use MCP tools when they help. Finish with a concise summary for the user.\n"
+                 Use MCP tools when they help; pass the arguments each tool expects (see MCP server docs if unsure).\n\
+                 Finish with a concise, substantive answer for the user (not commentary about tools).\n"
             );
 
             match run_unified_agentic_inference(

@@ -435,8 +435,62 @@ pub struct ParsedToolCall {
     pub args: serde_json::Value,
 }
 
+fn flush_tool_call_arg_buffer(acc: &mut Vec<String>, args: &mut serde_json::Value) {
+    if acc.is_empty() {
+        return;
+    }
+    let buf = acc.join("\n");
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&buf) {
+        *args = parsed;
+        acc.clear();
+    }
+}
+
+fn parse_tool_call_block(block: &str) -> Option<ParsedToolCall> {
+    let mut name: Option<String> = None;
+    let mut args = serde_json::json!({});
+    let mut acc: Vec<String> = Vec::new();
+    let mut in_args = false;
+
+    for line in block.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(n) = line.strip_prefix("name:") {
+            if in_args {
+                flush_tool_call_arg_buffer(&mut acc, &mut args);
+            }
+            in_args = false;
+            acc.clear();
+            name = Some(n.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("args:") {
+            if in_args {
+                flush_tool_call_arg_buffer(&mut acc, &mut args);
+            }
+            in_args = true;
+            acc.clear();
+            let first = rest.trim();
+            if !first.is_empty() {
+                acc.push(first.to_string());
+            }
+            flush_tool_call_arg_buffer(&mut acc, &mut args);
+        } else if in_args {
+            acc.push(line.to_string());
+            flush_tool_call_arg_buffer(&mut acc, &mut args);
+        }
+    }
+    if in_args {
+        flush_tool_call_arg_buffer(&mut acc, &mut args);
+    }
+
+    name.map(|n| ParsedToolCall { name: n, args })
+}
+
 /// Parse tool calls from LLM output text.
 /// Looks for: <tool_call>\nname: X\nargs: {...}\n</tool_call>
+///
+/// `args` may span multiple lines (JSON object or array) until it parses.
 pub fn parse_tool_calls(text: &str) -> Vec<ParsedToolCall> {
     let mut calls = Vec::new();
     let mut remaining = text;
@@ -450,23 +504,8 @@ pub fn parse_tool_calls(text: &str) -> Vec<ParsedToolCall> {
         let block = after_tag[..end].trim();
         remaining = &after_tag[end + 12..];
 
-        // Parse name and args from the block
-        let mut name = None;
-        let mut args = serde_json::Value::Object(serde_json::Map::new());
-
-        for line in block.lines() {
-            let line = line.trim();
-            if let Some(n) = line.strip_prefix("name:") {
-                name = Some(n.trim().to_string());
-            } else if let Some(a) = line.strip_prefix("args:") {
-                if let Ok(parsed) = serde_json::from_str(a.trim()) {
-                    args = parsed;
-                }
-            }
-        }
-
-        if let Some(name) = name {
-            calls.push(ParsedToolCall { name, args });
+        if let Some(call) = parse_tool_call_block(block) {
+            calls.push(call);
         }
     }
 
@@ -520,6 +559,22 @@ args: {"url": "https://doc.rust-lang.org"}
         let text = "Here is the answer to your question. No tools needed.";
         let calls = parse_tool_calls(text);
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn test_parse_tool_calls_multiline_args() {
+        let text = r#"<tool_call>
+name: json
+args: {
+  "action": "parse",
+  "input": "{\"a\":1}"
+}
+</tool_call>"#;
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "json");
+        assert_eq!(calls[0].args["action"], "parse");
+        assert_eq!(calls[0].args["input"], "{\"a\":1}");
     }
 
     #[test]

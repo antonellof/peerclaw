@@ -247,6 +247,46 @@ pub fn optional_bool(params: &serde_json::Value, key: &str, default: bool) -> bo
     params.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
+/// One-line hint for agent prompts: required parameter keys and constraints from a JSON-Schema-like object.
+pub fn parameter_schema_prompt_hint(schema: &serde_json::Value) -> String {
+    let Some(obj) = schema.as_object() else {
+        return String::new();
+    };
+    let required: Vec<&str> = obj
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+        .unwrap_or_default();
+    let props = obj.get("properties").and_then(|p| p.as_object());
+
+    if required.is_empty() {
+        return "no required keys (`{}` is OK)".to_string();
+    }
+
+    let mut parts = Vec::new();
+    for key in required {
+        let detail = props
+            .and_then(|m| m.get(key))
+            .and_then(|v| v.as_object())
+            .map(|prop| {
+                if let Some(en) = prop.get("enum").and_then(|e| e.as_array()) {
+                    let vals: Vec<_> = en.iter().filter_map(|x| x.as_str()).collect();
+                    if !vals.is_empty() && vals.len() <= 8 {
+                        return format!("one of {}", vals.join("|"));
+                    }
+                }
+                prop.get("description")
+                    .and_then(|d| d.as_str())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("string")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "required".to_string());
+        parts.push(format!("`{}` ({})", key, detail));
+    }
+    parts.join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +313,22 @@ mod tests {
         let output = ToolOutput::failure("Something went wrong", Duration::from_millis(10));
         assert!(!output.success);
         assert!(output.message.unwrap().contains("wrong"));
+    }
+
+    #[test]
+    fn test_parameter_schema_prompt_hint() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": { "type": "string", "enum": ["a", "b"] },
+                "input": { "type": "string", "description": "JSON text" }
+            },
+            "required": ["action", "input"]
+        });
+        let h = parameter_schema_prompt_hint(&schema);
+        assert!(h.contains("`action`"));
+        assert!(h.contains("a|b"));
+        assert!(h.contains("`input`"));
     }
 
     #[test]
