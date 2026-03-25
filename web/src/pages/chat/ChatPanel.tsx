@@ -867,6 +867,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
               <>
                 <select
                   className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                  title="If a skill with this name exists under your node skills directory, its instructions are prepended to the agent goal (see examples/skills/)."
                   value={agentTaskType}
                   onChange={(e) => setAgentTaskType(e.target.value)}
                 >

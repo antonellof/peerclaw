@@ -597,9 +597,129 @@ fn re_job_status_open() -> &'static Regex {
     })
 }
 
+fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.is_empty() {
+        return Some(0);
+    }
+    for i in 0..=h.len().saturating_sub(n.len()) {
+        if h[i..i + n.len()].eq_ignore_ascii_case(n) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// `<json action="parse" input={...}>` / `input="..."` — models often emit this instead of `<tool_call>`.
+fn parse_loose_json_tool_tags(text: &str) -> Vec<ParsedToolCall> {
+    let mut calls = Vec::new();
+    let Ok(open) = Regex::new(r#"(?is)<json\s+([^>]+)>"#) else {
+        return calls;
+    };
+    for cap in open.captures_iter(text) {
+        let Some(attrs) = cap.get(1).map(|m| m.as_str()) else {
+            continue;
+        };
+        let Some(args) = json_tag_attrs_to_tool_args(attrs) else {
+            continue;
+        };
+        calls.push(ParsedToolCall {
+            name: "json".to_string(),
+            args,
+        });
+    }
+    calls
+}
+
+fn json_tag_attrs_to_tool_args(attr_src: &str) -> Option<serde_json::Value> {
+    let action_re = Regex::new(r#"(?i)action\s*=\s*"([^"]*)""#).ok()?;
+    let action = action_re
+        .captures(attr_src)?
+        .get(1)?
+        .as_str()
+        .to_string();
+    if !matches!(action.as_str(), "parse" | "format" | "query" | "validate") {
+        return None;
+    }
+    let pos = find_case_insensitive(attr_src, "input=")? + "input=".len();
+    let b = attr_src.as_bytes();
+    let mut i = pos;
+    while i < b.len() && b[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= b.len() {
+        return None;
+    }
+    let input_val = if b[i] == b'"' {
+        i += 1;
+        let start = i;
+        while i < b.len() {
+            if b[i] == b'\\' {
+                i = i.saturating_add(2);
+                continue;
+            }
+            if b[i] == b'"' {
+                break;
+            }
+            i += 1;
+        }
+        if i >= b.len() {
+            return None;
+        }
+        let s = std::str::from_utf8(&b[start..i]).ok()?.to_string();
+        serde_json::Value::String(s)
+    } else if b[i] == b'{' {
+        let start = i;
+        let mut depth = 0u32;
+        while i < b.len() {
+            match b[i] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth = depth.saturating_sub(1);
+                    i += 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        if depth != 0 {
+            return None;
+        }
+        let slice = std::str::from_utf8(&b[start..i]).ok()?;
+        serde_json::from_str(slice).ok()?
+    } else {
+        return None;
+    };
+
+    let mut out = serde_json::json!({
+        "action": action,
+        "input": input_val,
+    });
+    if action == "query" {
+        if let Ok(qre) = Regex::new(r#"(?i)query\s*=\s*"([^"]*)""#) {
+            if let Some(c) = qre.captures(attr_src) {
+                if let Some(q) = c.get(1) {
+                    let q = q.as_str();
+                    if !q.is_empty() {
+                        out["query"] = serde_json::Value::String(q.to_string());
+                    }
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
 /// Models often emit pseudo-XML instead of `<tool_call>` blocks; map a few builtins to real tool calls.
 fn parse_loose_tool_markup(text: &str) -> Vec<ParsedToolCall> {
     let mut calls = Vec::new();
+
+    calls.extend(parse_loose_json_tool_tags(text));
 
     for cap in re_web_fetch_block().captures_iter(text) {
         let inner = cap.get(1).map(|m| m.as_str()).unwrap_or("").trim();
@@ -646,6 +766,22 @@ fn re_strip_loose_job_status() -> &'static Regex {
     })
 }
 
+fn re_strip_loose_json_open() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r#"(?is)<json\s[^>]+>"#).expect("regex"))
+}
+
+fn re_strip_loose_pseudo_tools() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        // rust-regex has no backrefs; list open + close for each pseudo-tag.
+        Regex::new(
+            r"(?is)(?:<file_list\b[^>]*(?:/>|>[\s\S]*?</file_list\s*>)|<wallet_balance\b[^>]*(?:/>|>[\s\S]*?</wallet_balance\s*>)>)",
+        )
+        .expect("regex")
+    })
+}
+
 /// Extract the final answer from LLM text (remove any tool_call blocks).
 pub fn extract_answer(text: &str) -> String {
     let mut result = text.to_string();
@@ -663,6 +799,12 @@ pub fn extract_answer(text: &str) -> String {
         .replace_all(&result, "")
         .to_string();
     result = re_strip_loose_job_status()
+        .replace_all(&result, "")
+        .to_string();
+    result = re_strip_loose_json_open()
+        .replace_all(&result, "")
+        .to_string();
+    result = re_strip_loose_pseudo_tools()
         .replace_all(&result, "")
         .to_string();
 
@@ -768,5 +910,27 @@ args: {"url": "https://a.example"}
         let answer = extract_answer(text);
         assert!(answer.contains("Summary"));
         assert!(!answer.contains("web_fetch"));
+    }
+
+    #[test]
+    fn test_parse_loose_json_tool_tag() {
+        let text = r#"Planning.
+
+<json action="parse" input={"travel": "weekend", "budget": 500}>
+
+More text."#;
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "json");
+        assert_eq!(calls[0].args["action"], "parse");
+        assert!(calls[0].args.get("input").is_some());
+    }
+
+    #[test]
+    fn test_extract_answer_strips_loose_json_open_tag() {
+        let text = "Answer.\n\n<json action=\"parse\" input={}>\n";
+        let answer = extract_answer(text);
+        assert!(answer.contains("Answer"));
+        assert!(!answer.contains("<json"));
     }
 }

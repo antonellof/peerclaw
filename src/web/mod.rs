@@ -1007,6 +1007,7 @@ async fn build_agentic_system_prefix(
          At most 12 tool_call blocks per assistant turn; prefer 1–4 precise calls.\n\
          For `web_fetch` / `http`, use real URLs from the user's message or from prior tool output — not placeholder hosts.\n\
          `job_submit` is for **paid P2P marketplace** jobs and needs `type` plus matching fields (e.g. web_fetch job: `\"url\"` on the same object). For normal page fetch use the **web_fetch tool**, not `job_submit`.\n\
+         **Invalid (ignored, no tools run):** fake tags such as `<json …>`, `<file_list …>`, `<wallet_balance>`, or `message=\"…\"` as if they were tools. The runtime only recognizes `<tool_call>` blocks (plus a few legacy `<web_fetch>` / `<job_status>` forms). To call `json` or `web_fetch`, always use `<tool_call>` with `name` and `args`.\n\
          If a tool returns a parameter error, fix the arguments or stop using that tool and answer from context.\n\
          Your final reply must directly satisfy the user's goal, not describe tool failures.\n\n",
     );
@@ -2443,6 +2444,32 @@ async fn api_create_task(
     state.task_store.write().await.push(task);
     broadcast_tasks_changed(&state.ws_control_tx);
 
+    let task_skill_section: Option<String> = if let Some(reg) = &state.skills {
+        reg.get(&req.task_type)
+            .await
+            .filter(|s| s.is_available())
+            .map(|s| {
+                let body = s.prompt();
+                let clipped = if body.chars().count() > 12_000 {
+                    format!(
+                        "{}…\n(truncated for context limit)",
+                        body.chars().take(12_000).collect::<String>()
+                    )
+                } else {
+                    body.to_string()
+                };
+                format!(
+                    "### Skill `{}` (task type `{}`)\n{}\n\n",
+                    s.name(),
+                    req.task_type,
+                    clipped
+                )
+            })
+    } else {
+        None
+    };
+    let skill_block = task_skill_section.unwrap_or_default();
+
     let agentic_ready = state.inference_tx.is_some() && state.tools.is_some();
 
     let mcp_ready = req.use_mcp
@@ -2608,6 +2635,7 @@ async fn api_create_task(
         let store = state.task_store.clone();
         let tid = task_id.clone();
         let description = req.description.clone();
+        let skill_block = skill_block.clone();
         let model = req
             .model
             .clone()
@@ -2630,7 +2658,9 @@ async fn api_create_task(
 
             let body = format!(
                 "### Agent goal\n{description}\n\n\
+                 {skill_block}\
                  Use local tools and MCP only when they clearly help. For distributed work use job_submit / job_status.\n\
+                 For travel, prices, hours, or anything time-sensitive: use **web_fetch** on real sites (official rail, tourism, venues) — do not invent schedules or restaurant availability.\n\
                  Every tool call must supply all required JSON keys from \"Builtin required args\" in the system instructions.\n\
                  Do not fetch example.com or other placeholder URLs unless the user gave that URL.\n\
                  If memory_search returns nothing, do not repeat the same query; continue or answer without it.\n\
@@ -2716,6 +2746,7 @@ async fn api_create_task(
         let store = state.task_store.clone();
         let tid = task_id.clone();
         let description = req.description.clone();
+        let skill_block = skill_block.clone();
         let model = req
             .model
             .clone()
@@ -2738,6 +2769,7 @@ async fn api_create_task(
 
             let body = format!(
                 "### Agent goal\n{description}\n\n\
+                 {skill_block}\
                  Use MCP tools when they help; pass the arguments each tool expects (see MCP server docs if unsure).\n\
                  Finish with a concise, substantive answer for the user (not commentary about tools).\n"
             );
