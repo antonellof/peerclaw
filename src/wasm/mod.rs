@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 
 pub use fuel::{FuelConfig, FuelMeter};
 pub use host::{HostCapabilities, HostState};
-pub use sandbox::{CompiledModule, WasmSandbox, SandboxConfig};
+pub use sandbox::{CompiledModule, SandboxConfig, WasmSandbox};
 
 /// Unique identifier for a WASM tool (BLAKE3 hash of the binary).
 pub type ToolHash = String;
@@ -101,7 +101,11 @@ impl ToolRegistry {
     }
 
     /// Register a tool from bytes.
-    pub async fn register(&mut self, name: String, wasm_bytes: &[u8]) -> Result<ToolHash, WasmError> {
+    pub async fn register(
+        &mut self,
+        name: String,
+        wasm_bytes: &[u8],
+    ) -> Result<ToolHash, WasmError> {
         // Compute hash
         let hash = blake3::hash(wasm_bytes).to_hex().to_string();
 
@@ -131,7 +135,8 @@ impl ToolRegistry {
 
     /// Get tool path.
     pub fn tool_path(&self, hash: &str) -> PathBuf {
-        self.tools_dir.join(format!("{}.wasm", &hash[..16.min(hash.len())]))
+        self.tools_dir
+            .join(format!("{}.wasm", &hash[..16.min(hash.len())]))
     }
 
     /// List all registered tools.
@@ -220,13 +225,15 @@ impl WasmExecutor {
         if let Some(info) = self.registry.get(tool_hash) {
             if !capabilities.satisfies(&info.required_capabilities) {
                 return Err(WasmError::CapabilityDenied(
-                    "Tool requires capabilities not granted".to_string()
+                    "Tool requires capabilities not granted".to_string(),
                 ));
             }
         }
 
         // Execute
-        let result = self.sandbox.execute(&module, function, params, capabilities)?;
+        let result = self
+            .sandbox
+            .execute(&module, function, params, capabilities)?;
 
         Ok(WasmExecutionResult {
             value: result.value,
@@ -237,7 +244,11 @@ impl WasmExecutor {
     }
 
     /// Register a new tool.
-    pub async fn register_tool(&mut self, name: String, wasm_bytes: &[u8]) -> Result<ToolHash, WasmError> {
+    pub async fn register_tool(
+        &mut self,
+        name: String,
+        wasm_bytes: &[u8],
+    ) -> Result<ToolHash, WasmError> {
         self.registry.register(name, wasm_bytes).await
     }
 

@@ -63,7 +63,11 @@ pub async fn run() -> anyhow::Result<()> {
         let num = format!("{:>2}.", i + 1);
         println!(
             "{} {:<20} [{:<4}] {} ({}ms)",
-            num, result.name, result.icon(), result.detail, result.duration_ms
+            num,
+            result.name,
+            result.icon(),
+            result.detail,
+            result.duration_ms
         );
 
         match result.status {
@@ -111,11 +115,20 @@ async fn check_directories() -> CheckResult {
     }
 
     let (status, detail) = if missing.is_empty() {
-        (CheckStatus::Ok, format!("All directories exist at {}", base.display()))
+        (
+            CheckStatus::Ok,
+            format!("All directories exist at {}", base.display()),
+        )
     } else if !base.exists() {
-        (CheckStatus::Fail, format!("Base directory missing: {}", base.display()))
+        (
+            CheckStatus::Fail,
+            format!("Base directory missing: {}", base.display()),
+        )
     } else {
-        (CheckStatus::Warn, format!("Missing: {}", missing.join(", ")))
+        (
+            CheckStatus::Warn,
+            format!("Missing: {}", missing.join(", ")),
+        )
     };
 
     CheckResult {
@@ -143,9 +156,11 @@ async fn check_identity() -> CheckResult {
         Ok(identity) => CheckResult {
             name: "Identity",
             status: CheckStatus::Ok,
-            detail: format!("Ed25519 key loaded. Peer ID: {}...{}",
+            detail: format!(
+                "Ed25519 key loaded. Peer ID: {}...{}",
                 &identity.peer_id().to_string()[..8],
-                &identity.peer_id().to_string()[identity.peer_id().to_string().len()-6..]),
+                &identity.peer_id().to_string()[identity.peer_id().to_string().len() - 6..]
+            ),
             duration_ms: start.elapsed().as_millis(),
         },
         Err(e) => CheckResult {
@@ -178,7 +193,10 @@ async fn check_database() -> CheckResult {
             CheckResult {
                 name: "Database",
                 status: CheckStatus::Ok,
-                detail: format!("redb OK. {} peers, {} agents, {} tools", peers, agents, tools),
+                detail: format!(
+                    "redb OK. {} peers, {} agents, {} tools",
+                    peers, agents, tools
+                ),
                 duration_ms: start.elapsed().as_millis(),
             }
         }
@@ -220,9 +238,19 @@ async fn check_inference() -> CheckResult {
         .unwrap_or(0);
 
     let (status, detail) = if model_count > 0 {
-        (CheckStatus::Ok, format!("{} GGUF model(s) found in {}", model_count, models_dir.display()))
+        (
+            CheckStatus::Ok,
+            format!(
+                "{} GGUF model(s) found in {}",
+                model_count,
+                models_dir.display()
+            ),
+        )
     } else {
-        (CheckStatus::Warn, "No GGUF models found. Download with: peerclaw models download <model>".to_string())
+        (
+            CheckStatus::Warn,
+            "No GGUF models found. Download with: peerclaw models download <model>".to_string(),
+        )
     };
 
     CheckResult {
@@ -313,11 +341,20 @@ async fn check_safety() -> CheckResult {
     let leak_detected = detector.scan(test_leak);
 
     let (status, detail) = if safe_detected.is_empty() && !leak_detected.is_empty() {
-        (CheckStatus::Ok, "Leak detection and sanitization working.".to_string())
+        (
+            CheckStatus::Ok,
+            "Leak detection and sanitization working.".to_string(),
+        )
     } else if !safe_detected.is_empty() {
-        (CheckStatus::Warn, "False positive in leak detection.".to_string())
+        (
+            CheckStatus::Warn,
+            "False positive in leak detection.".to_string(),
+        )
     } else {
-        (CheckStatus::Warn, "Leak detection may not catch all patterns.".to_string())
+        (
+            CheckStatus::Warn,
+            "Leak detection may not catch all patterns.".to_string(),
+        )
     };
 
     CheckResult {
@@ -358,26 +395,24 @@ async fn check_p2p_config() -> CheckResult {
     let config_path = bootstrap::config_path();
     if config_path.exists() {
         match std::fs::read_to_string(&config_path) {
-            Ok(content) => {
-                match toml::from_str::<toml::Value>(&content) {
-                    Ok(config) => {
-                        let has_p2p = config.get("p2p").is_some();
-                        let has_web = config.get("web").is_some();
-                        CheckResult {
-                            name: "P2P Config",
-                            status: CheckStatus::Ok,
-                            detail: format!("Config loaded. P2P: {}, Web: {}", has_p2p, has_web),
-                            duration_ms: start.elapsed().as_millis(),
-                        }
-                    }
-                    Err(e) => CheckResult {
+            Ok(content) => match toml::from_str::<toml::Value>(&content) {
+                Ok(config) => {
+                    let has_p2p = config.get("p2p").is_some();
+                    let has_web = config.get("web").is_some();
+                    CheckResult {
                         name: "P2P Config",
-                        status: CheckStatus::Fail,
-                        detail: format!("Invalid config TOML: {}", e),
+                        status: CheckStatus::Ok,
+                        detail: format!("Config loaded. P2P: {}, Web: {}", has_p2p, has_web),
                         duration_ms: start.elapsed().as_millis(),
-                    },
+                    }
                 }
-            }
+                Err(e) => CheckResult {
+                    name: "P2P Config",
+                    status: CheckStatus::Fail,
+                    detail: format!("Invalid config TOML: {}", e),
+                    duration_ms: start.elapsed().as_millis(),
+                },
+            },
             Err(e) => CheckResult {
                 name: "P2P Config",
                 status: CheckStatus::Fail,

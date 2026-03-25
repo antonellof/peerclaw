@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PeerClaw — Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-primary: #0d1117;
@@ -18,6 +21,7 @@
             --success: #3fb950;
             --warning: #d29922;
             --danger: #f85149;
+            --purple: #a371f7;
             --border: #30363d;
             --code-bg: #161b22;
             --user-bg: #1f6feb;
@@ -31,7 +35,7 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
             height: 100vh;
@@ -123,6 +127,41 @@
         }
 
         .sidebar-spacer { flex: 1; min-height: 0.5rem; }
+
+        .readiness-card {
+            margin: 0 0.75rem 0.75rem;
+            padding: 0.65rem 0.75rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .readiness-head {
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            margin-bottom: 0.45rem;
+        }
+        .readiness-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+        }
+        .readiness-chip {
+            font-size: 0.65rem;
+            padding: 0.2rem 0.45rem;
+            border-radius: 999px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .readiness-chip.ok { border-color: rgba(63, 185, 80, 0.45); color: var(--success); }
+        .readiness-chip.warn { border-color: rgba(210, 153, 34, 0.5); color: var(--warning); }
 
         .sidebar-footer {
             padding: 0.75rem;
@@ -393,6 +432,14 @@
         .message-text pre code {
             background: transparent;
             padding: 0;
+        }
+
+        .command-output,
+        .agent-logs,
+        .message-text pre,
+        .message-text code,
+        kbd {
+            font-family: 'IBM Plex Mono', 'SF Mono', SFMono-Regular, ui-monospace, monospace;
         }
 
         .message.error .message-text {
@@ -743,10 +790,16 @@
                 </svg>
                 PeerClaw
             </div>
-            <button type="button" class="new-chat-btn" id="new-chat-btn" title="Clear conversation">
+            <button type="button" class="new-chat-btn" id="new-chat-btn" title="Clear conversation and start a new session">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
                 New chat
             </button>
+            <div class="readiness-card" id="readiness-card" aria-live="polite">
+                <div class="readiness-head">Node setup</div>
+                <div class="readiness-chips" id="readiness-chips">
+                    <span class="readiness-chip warn">Loading…</span>
+                </div>
+            </div>
             <div class="sidebar-section-label">Node</div>
             <a class="sidebar-link" href="/console">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -769,6 +822,7 @@
                 <div class="sidebar-status" id="sidebar-status">
                     <span class="status-dot"></span><span id="peer-status">Connecting…</span>
                     <div id="balance-line" style="margin-top:0.25rem"></div>
+                    <div id="session-line" style="margin-top:0.35rem;font-size:0.65rem;color:var(--text-muted);font-family:'IBM Plex Mono',monospace;word-break:break-all" title="Chat memory uses this id with the server">Session: …</div>
                 </div>
                 <button type="button" class="icon-btn" id="settings-btn" title="Slash commands: type / for menu" style="align-self:flex-start;margin-top:0.25rem">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -922,8 +976,9 @@
             { cmd: '/tool', desc: 'Tool operations', args: '<list|info|exec> [name]', category: 'Tools' },
 
             // Skills
-            { cmd: '/skills', desc: 'List installed skills', category: 'Skills' },
-            { cmd: '/skill', desc: 'Skill operations', args: '<list|info|create> [name]', category: 'Skills' },
+            { cmd: '/skills', desc: 'List local skills (/skills network for P2P)', category: 'Skills' },
+            { cmd: '/skill', desc: 'Skill info', args: 'info <name>', category: 'Skills' },
+            { cmd: '/mcp', desc: 'MCP sidecar / bridge status', category: 'Tools' },
 
             // Network
             { cmd: '/peers', desc: 'Show connected peers', category: 'Network' },
@@ -947,6 +1002,41 @@
         let composerMode = 'chat';
         const agentPolls = new Map();
         const agentRunFinished = new Set();
+        const agentPollFailures = new Map();
+        const agentPollStartedAt = new Map();
+        const agentPollImmediate = new Set();
+        let agentTaskWs = null;
+
+        const AGENT_POLL_MS = 900;
+        const AGENT_POLL_MAX_FAILS = 8;
+        const AGENT_POLL_MAX_MS = 6 * 60 * 1000;
+
+        const CHAT_SESSION_KEY = 'peerclaw_chat_session_v1';
+        function getOrCreateChatSessionId() {
+            try {
+                let id = localStorage.getItem(CHAT_SESSION_KEY);
+                if (!id || id.length < 8) {
+                    id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                        ? crypto.randomUUID()
+                        : String(Date.now()) + Math.random().toString(36).slice(2);
+                    localStorage.setItem(CHAT_SESSION_KEY, id);
+                }
+                return id;
+            } catch (_) {
+                return null;
+            }
+        }
+        let chatSessionId = getOrCreateChatSessionId();
+
+        function updateSessionLine() {
+            const el = document.getElementById('session-line');
+            if (!el) return;
+            if (chatSessionId) {
+                el.textContent = 'Session ' + chatSessionId.slice(0, 8) + '…';
+            } else {
+                el.textContent = 'Session: ephemeral';
+            }
+        }
 
         // DOM elements
         const messagesContainer = document.getElementById('messages-container');
@@ -960,10 +1050,43 @@
 
         // Initialize
         async function init() {
+            updateSessionLine();
             await fetchStatus();
             await loadChatModels();
+            await fetchReadiness();
             setupEventListeners();
+            connectAgentTaskWebSocket();
             setInterval(fetchStatus, 5000);
+            setInterval(fetchReadiness, 20000);
+        }
+
+        async function fetchReadiness() {
+            const chips = document.getElementById('readiness-chips');
+            if (!chips) return;
+            try {
+                const r = await fetch('/api/onboarding');
+                const d = await r.json();
+                const labels = {
+                    inference: 'Inference',
+                    agent_tasks: 'Agent',
+                    p2p_peers: 'Peers',
+                    job_marketplace: 'Jobs',
+                    skills_registry: 'Skills',
+                };
+                const steps = d.steps || [];
+                if (!steps.length) {
+                    chips.innerHTML = '<span class="readiness-chip warn">No data</span>';
+                    return;
+                }
+                chips.innerHTML = steps.map((s) => {
+                    const lab = labels[s.id] || s.id;
+                    const safeTitle = escapeHtml(s.detail || '').replace(/"/g, '&quot;');
+                    const safeLab = escapeHtml(lab);
+                    return `<span class="readiness-chip ${s.ok ? 'ok' : 'warn'}" title="${safeTitle}">${safeLab}</span>`;
+                }).join('');
+            } catch (_) {
+                chips.innerHTML = '<span class="readiness-chip warn" title="Is the web server running?">Offline</span>';
+            }
         }
 
         async function fetchStatus() {
@@ -1017,6 +1140,47 @@
             agentPolls.forEach((intervalId) => clearInterval(intervalId));
             agentPolls.clear();
             agentRunFinished.clear();
+            agentPollFailures.clear();
+            agentPollStartedAt.clear();
+            agentPollImmediate.clear();
+        }
+
+        function stopAgentPollForTask(taskId) {
+            const intv = agentPolls.get(taskId);
+            if (intv) clearInterval(intv);
+            agentPolls.delete(taskId);
+            agentPollFailures.delete(taskId);
+        }
+
+        function connectAgentTaskWebSocket() {
+            try {
+                const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                if (agentTaskWs && agentTaskWs.readyState === WebSocket.OPEN) return;
+                agentTaskWs = new WebSocket(`${proto}//${window.location.host}/ws`);
+                agentTaskWs.onmessage = (event) => {
+                    try {
+                        const d = JSON.parse(event.data);
+                        if (d.type !== 'tasks_changed') return;
+                        agentPolls.forEach((_, tid) => {
+                            if (!agentRunFinished.has(tid)) triggerAgentPollNow(tid);
+                        });
+                    } catch (_) { /* ignore */ }
+                };
+                agentTaskWs.onclose = () => {
+                    agentTaskWs = null;
+                    setTimeout(connectAgentTaskWebSocket, 3500);
+                };
+            } catch (_) { /* no ws */ }
+        }
+
+        function triggerAgentPollNow(taskId) {
+            if (agentRunFinished.has(taskId)) return;
+            if (agentPollImmediate.has(taskId)) return;
+            agentPollImmediate.add(taskId);
+            queueMicrotask(async () => {
+                agentPollImmediate.delete(taskId);
+                await agentPollTickOnce(taskId);
+            });
         }
 
         function setComposerMode(mode) {
@@ -1046,7 +1210,7 @@
         function addAgentRunMessage(taskId) {
             const msgEl = document.createElement('div');
             msgEl.className = 'message system agent-run';
-            msgEl.dataset.agentTaskId = taskId;
+            msgEl.setAttribute('data-agent-task-id', taskId);
             msgEl.innerHTML = `
                 <div class="message-avatar" style="background:var(--purple)">A</div>
                 <div class="message-content">
@@ -1054,7 +1218,7 @@
                         <span class="message-author">Agent run</span>
                         <span class="message-meta agent-run-meta">starting…</span>
                     </div>
-                    <div class="message-text" style="font-size:0.8125rem;color:var(--text-secondary)">Live execution log (updates every ~1s)</div>
+                    <div class="message-text agent-run-hint" style="font-size:0.8125rem;color:var(--text-secondary)">Fetching status from your node…</div>
                     <pre class="agent-logs" id="agent-logs-${taskId.replace(/[^a-zA-Z0-9_-]/g, '_')}"></pre>
                 </div>`;
             messagesDiv.appendChild(msgEl);
@@ -1062,7 +1226,25 @@
         }
 
         function findAgentRunRoot(taskId) {
-            return messagesDiv.querySelector('[data-agent-task-id="' + taskId.replace(/"/g, '') + '"]');
+            const nodes = messagesDiv.querySelectorAll('.message.agent-run[data-agent-task-id]');
+            for (let i = 0; i < nodes.length; i++) {
+                if (nodes[i].getAttribute('data-agent-task-id') === taskId) return nodes[i];
+            }
+            return null;
+        }
+
+        function markAgentRunError(taskId, headline, detailLine) {
+            const root = findAgentRunRoot(taskId);
+            if (!root) return;
+            const meta = root.querySelector('.agent-run-meta');
+            if (meta) meta.textContent = headline;
+            const hint = root.querySelector('.agent-run-hint');
+            if (hint) hint.textContent = detailLine || '';
+            const pre = root.querySelector('.agent-logs');
+            if (pre && detailLine) {
+                pre.textContent = (pre.textContent ? pre.textContent + '\n' : '') + detailLine;
+                pre.scrollTop = pre.scrollHeight;
+            }
         }
 
         function updateAgentRunMessage(taskId, t) {
@@ -1072,41 +1254,144 @@
             if (meta) {
                 meta.textContent = `${t.status} · ${t.iterations || 0} iters · ${t.tokens_used || 0} tok`;
             }
+            const logs = Array.isArray(t.logs) ? t.logs : [];
+            const hint = root.querySelector('.agent-run-hint');
+            if (hint) {
+                if (logs.length) {
+                    hint.textContent = `Execution log (${logs.length} lines) · poll + push when the node updates the task`;
+                } else if (t.status === 'running') {
+                    hint.textContent = 'Agent running… log lines appear here as the node streams them.';
+                } else if (t.status === 'pending') {
+                    hint.textContent = 'Task queued… waiting for the agent runtime.';
+                } else {
+                    hint.textContent = 'Status synced from your node.';
+                }
+            }
             const safeId = taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
             const pre = document.getElementById('agent-logs-' + safeId) || root.querySelector('.agent-logs');
             if (pre) {
-                pre.textContent = (t.logs || []).join('\n');
+                pre.textContent = logs.map((l) => (typeof l === 'string' ? l : String(l))).join('\n');
                 pre.scrollTop = pre.scrollHeight;
             }
         }
 
+        async function agentPollTickOnce(taskId) {
+            if (agentRunFinished.has(taskId)) return;
+
+            const started = agentPollStartedAt.get(taskId) || Date.now();
+            if (Date.now() - started > AGENT_POLL_MAX_MS) {
+                agentRunFinished.add(taskId);
+                stopAgentPollForTask(taskId);
+                agentPollStartedAt.delete(taskId);
+                markAgentRunError(
+                    taskId,
+                    'timed out',
+                    '[client] No terminal status after 6 minutes. Check Node console → Agent and server logs.',
+                );
+                addMessage({
+                    role: 'error',
+                    content:
+                        'Agent run did not reach a finished state in time. Open the node console Agent tab or verify the agent is running with --agent.',
+                });
+                return;
+            }
+
+            let res;
+            let raw;
+            try {
+                res = await fetch('/api/tasks/' + encodeURIComponent(taskId));
+                raw = await res.text();
+            } catch (e) {
+                const n = (agentPollFailures.get(taskId) || 0) + 1;
+                agentPollFailures.set(taskId, n);
+                if (n >= AGENT_POLL_MAX_FAILS) {
+                    agentRunFinished.add(taskId);
+                    stopAgentPollForTask(taskId);
+                    agentPollStartedAt.delete(taskId);
+                    markAgentRunError(
+                        taskId,
+                        'disconnected',
+                        '[client] Network error after ' + n + ' tries: ' + (e.message || e),
+                    );
+                    addMessage({
+                        role: 'error',
+                        content:
+                            'Could not reach /api/tasks for this run. Check your connection and that the PeerClaw web server is still up.',
+                    });
+                }
+                return;
+            }
+
+            let t;
+            try {
+                t = raw ? JSON.parse(raw) : null;
+            } catch (_) {
+                const n = (agentPollFailures.get(taskId) || 0) + 1;
+                agentPollFailures.set(taskId, n);
+                if (n >= AGENT_POLL_MAX_FAILS) {
+                    agentRunFinished.add(taskId);
+                    stopAgentPollForTask(taskId);
+                    agentPollStartedAt.delete(taskId);
+                    markAgentRunError(taskId, 'bad response', '[client] Server did not return valid JSON for task status.');
+                    addMessage({ role: 'error', content: 'Task status API returned invalid JSON. Try Node console → Agent.' });
+                }
+                return;
+            }
+
+            if (t == null || typeof t !== 'object' || Array.isArray(t)) {
+                const n = (agentPollFailures.get(taskId) || 0) + 1;
+                agentPollFailures.set(taskId, n);
+                if (n >= AGENT_POLL_MAX_FAILS) {
+                    agentRunFinished.add(taskId);
+                    stopAgentPollForTask(taskId);
+                    agentPollStartedAt.delete(taskId);
+                    markAgentRunError(taskId, 'invalid payload', '[client] Empty or non-object JSON from task detail API.');
+                    addMessage({ role: 'error', content: 'Unexpected task status response. Refresh and use the console Agent tab if this persists.' });
+                }
+                return;
+            }
+
+            if (t.error) {
+                agentRunFinished.add(taskId);
+                stopAgentPollForTask(taskId);
+                agentPollStartedAt.delete(taskId);
+                const msg = t.message ? String(t.message) : String(t.error);
+                markAgentRunError(taskId, 'error', '[status] ' + msg);
+                addMessage({ role: 'error', content: 'Agent task: ' + msg });
+                return;
+            }
+
+            agentPollFailures.delete(taskId);
+            updateAgentRunMessage(taskId, t);
+
+            if (t.status === 'completed' || t.status === 'failed') {
+                stopAgentPollForTask(taskId);
+                agentPollStartedAt.delete(taskId);
+                if (agentRunFinished.has(taskId)) return;
+                agentRunFinished.add(taskId);
+                const summary = t.result
+                    ? t.result
+                    : t.status === 'failed'
+                      ? 'Agent run failed.'
+                      : 'Done.';
+                addMessage({
+                    role: 'assistant',
+                    content: summary,
+                    meta: `${t.status} · ${t.tokens_used || 0} tokens`,
+                });
+            }
+        }
+
         function startAgentPoll(taskId) {
-            if (agentPolls.has(taskId)) clearInterval(agentPolls.get(taskId));
-            const tick = async () => {
-                try {
-                    const res = await fetch('/api/tasks/' + encodeURIComponent(taskId));
-                    const t = await res.json();
-                    if (t.error) return;
-                    updateAgentRunMessage(taskId, t);
-                    if (t.status === 'completed' || t.status === 'failed') {
-                        if (agentRunFinished.has(taskId)) return;
-                        agentRunFinished.add(taskId);
-                        const intv = agentPolls.get(taskId);
-                        if (intv) clearInterval(intv);
-                        agentPolls.delete(taskId);
-                        const summary = t.result
-                            ? t.result
-                            : (t.status === 'failed' ? 'Agent run failed.' : 'Done.');
-                        addMessage({
-                            role: 'assistant',
-                            content: summary,
-                            meta: `${t.status} · ${t.tokens_used || 0} tokens`,
-                        });
-                    }
-                } catch (_) { /* keep polling */ }
+            stopAgentPollForTask(taskId);
+            agentPollFailures.delete(taskId);
+            agentPollStartedAt.set(taskId, Date.now());
+
+            const run = () => {
+                agentPollTickOnce(taskId);
             };
-            tick();
-            const intervalId = setInterval(tick, 1200);
+            run();
+            const intervalId = setInterval(run, AGENT_POLL_MS);
             agentPolls.set(taskId, intervalId);
         }
 
@@ -1128,7 +1413,17 @@
                         budget,
                     }),
                 });
-                const data = await res.json();
+                const raw = await res.text();
+                let data = {};
+                try {
+                    data = raw ? JSON.parse(raw) : {};
+                } catch (_) {
+                    addMessage({
+                        role: 'error',
+                        content: 'Server returned non-JSON for /api/tasks (HTTP ' + res.status + ').',
+                    });
+                    return;
+                }
                 if (!data.success || !data.task_id) {
                     addMessage({
                         role: 'error',
@@ -1151,6 +1446,15 @@
             messages = [];
             messagesDiv.innerHTML = '';
             sessionStats = { tokens: 0, requests: 0, startTime: Date.now() };
+            try {
+                chatSessionId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                    ? crypto.randomUUID()
+                    : String(Date.now()) + Math.random().toString(36).slice(2);
+                localStorage.setItem(CHAT_SESSION_KEY, chatSessionId);
+            } catch (_) {
+                chatSessionId = getOrCreateChatSessionId();
+            }
+            updateSessionLine();
             if (welcomeScreen) {
                 welcomeScreen.style.display = '';
             }
@@ -1352,6 +1656,7 @@
                         model: modelSelect.value,
                         max_tokens: settings.maxTokens,
                         temperature: settings.temperature,
+                        ...(chatSessionId ? { session_id: chatSessionId } : {}),
                     })
                 });
 
@@ -1415,8 +1720,15 @@
                         messages = [];
                         messagesDiv.innerHTML = '';
                         sessionStats = { tokens: 0, requests: 0, startTime: Date.now() };
+                        try {
+                            chatSessionId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                                ? crypto.randomUUID()
+                                : String(Date.now()) + Math.random().toString(36).slice(2);
+                            localStorage.setItem(CHAT_SESSION_KEY, chatSessionId);
+                            updateSessionLine();
+                        } catch (_) { /* ignore */ }
                         if (welcomeScreen) welcomeScreen.style.display = '';
-                        output = 'Conversation cleared.';
+                        output = 'Conversation cleared. New chat session started for server-side memory.';
                         break;
 
                     case 'status':
@@ -1527,6 +1839,16 @@ Active jobs: ${status.active_jobs}`;
                         output = await runHealthCheck();
                         break;
 
+                    case 'mcp':
+                        try {
+                            const m = await fetch('/api/mcp/status').then((x) => x.json());
+                            const n = m.config && m.config.servers ? m.config.servers.length : 0;
+                            output = `MCP mode: ${m.mode}\nIn core: ${m.in_core}\nServers in config: ${n}\nTimeout: ${m.config && m.config.timeout_secs != null ? m.config.timeout_secs + 's' : '—'}\n\n${m.hint}\n\nSpec: ${m.spec_url || ''}`;
+                        } catch (e) {
+                            output = 'Could not load /api/mcp/status: ' + e.message;
+                        }
+                        break;
+
                     default:
                         output = `Unknown command: /${cmd}\nType /help for available commands.`;
                 }
@@ -1566,30 +1888,68 @@ Parameters: {...}`;
         }
 
         async function handleSkillCommand(args) {
-            const subCmd = args[0] || 'list';
+            const subCmd = (args[0] || 'list').toLowerCase();
 
-            switch (subCmd) {
-                case 'list':
-                    return `Installed skills:
-  • code-review (v1.0.0) - Code review assistant
-  • writing (v1.0.0) - Writing helper
-
-Use /skill info <name> for details.`;
-
-                case 'info':
-                    if (!args[1]) return 'Usage: /skill info <name>';
-                    return `Skill: ${args[1]}
-Version: 1.0.0
-Description: Skill description here`;
-
-                case 'create':
-                    if (!args[1]) return 'Usage: /skill create <name>';
-                    return `Created skill template: ${args[1]}
-Edit the file to customize, then run /skill scan`;
-
-                default:
-                    return 'Usage: /skill <list|info|create> [name]';
+            if (subCmd === 'list' || subCmd === 'local') {
+                try {
+                    const r = await fetch('/api/skills/local');
+                    const items = await r.json();
+                    if (!items.length) {
+                        return 'No local or installed skills. Open Node console → Skills, or add SKILL.md files on the node.';
+                    }
+                    return (
+                        'Local & installed skills:\n' +
+                        items
+                            .map(
+                                (s) =>
+                                    `• ${s.name} (${s.version}) [${s.trust}] — ${s.description || ''}`
+                            )
+                            .join('\n')
+                    );
+                } catch (e) {
+                    return 'Could not fetch /api/skills/local: ' + e.message;
+                }
             }
+
+            if (subCmd === 'network' || subCmd === 'p2p') {
+                try {
+                    const r = await fetch('/api/skills/network');
+                    const items = await r.json();
+                    if (!items.length) {
+                        return 'No peer-advertised skills yet (P2P gossip).';
+                    }
+                    return (
+                        'Network skills:\n' +
+                        items
+                            .map(
+                                (s) =>
+                                    `• ${s.name} (${s.version}) from ${(s.provider || '').slice(0, 14)}… — ${s.description || ''}`
+                            )
+                            .join('\n')
+                    );
+                } catch (e) {
+                    return 'Could not fetch /api/skills/network: ' + e.message;
+                }
+            }
+
+            if (subCmd === 'info') {
+                const name = args[1];
+                if (!name) return 'Usage: /skill info <name>';
+                try {
+                    const [lr, nr] = await Promise.all([
+                        fetch('/api/skills/local'),
+                        fetch('/api/skills/network'),
+                    ]);
+                    const all = [...(await lr.json()), ...(await nr.json())];
+                    const s = all.find((x) => x.name === name);
+                    if (!s) return `Skill "${name}" not found in local or network lists.`;
+                    return `Skill: ${s.name}\nVersion: ${s.version}\nTrust: ${s.trust}\nProvider: ${s.provider}\nAvailable: ${s.available}\nPrice: ${s.price}\n\n${s.description || ''}`;
+                } catch (e) {
+                    return 'Error: ' + e.message;
+                }
+            }
+
+            return 'Usage:\n  /skills or /skills local — list local skills\n  /skills network — list P2P skills\n  /skill info <name> — details';
         }
 
         async function runHealthCheck() {

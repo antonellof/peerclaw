@@ -226,7 +226,10 @@ fn unix_timestamp() -> u64 {
 }
 
 fn generate_completion_id() -> String {
-    format!("chatcmpl-{}", &uuid::Uuid::new_v4().to_string().replace("-", "")[..24])
+    format!(
+        "chatcmpl-{}",
+        &uuid::Uuid::new_v4().to_string().replace("-", "")[..24]
+    )
 }
 
 /// Convert OpenAI messages to a prompt string.
@@ -293,11 +296,13 @@ async fn handle_non_streaming(
         max_tokens: req.max_tokens.unwrap_or(500),
         temperature: req.temperature.unwrap_or(0.7),
         response_tx,
+        stream_delta_tx: None,
     };
 
-    inference_tx.send(inference_req).await.map_err(|_| {
-        error_response("Failed to send inference request", "internal_error")
-    })?;
+    inference_tx
+        .send(inference_req)
+        .await
+        .map_err(|_| error_response("Failed to send inference request", "internal_error"))?;
 
     let response = tokio::time::timeout(Duration::from_secs(120), response_rx)
         .await
@@ -356,11 +361,13 @@ async fn handle_streaming(
         max_tokens: req.max_tokens.unwrap_or(500),
         temperature: req.temperature.unwrap_or(0.7),
         response_tx,
+        stream_delta_tx: None,
     };
 
-    inference_tx.send(inference_req).await.map_err(|_| {
-        error_response("Failed to send inference request", "internal_error")
-    })?;
+    inference_tx
+        .send(inference_req)
+        .await
+        .map_err(|_| error_response("Failed to send inference request", "internal_error"))?;
 
     // Wait for the full response first (we simulate streaming)
     let response = tokio::time::timeout(Duration::from_secs(120), response_rx)
@@ -394,7 +401,9 @@ async fn handle_streaming(
         };
 
         let _ = tx
-            .send(Ok(Event::default().data(serde_json::to_string(&initial_chunk).unwrap())))
+            .send(Ok(
+                Event::default().data(serde_json::to_string(&initial_chunk).unwrap())
+            ))
             .await;
 
         // Stream content in word-boundary chunks
@@ -416,7 +425,9 @@ async fn handle_streaming(
             };
 
             let _ = tx
-                .send(Ok(Event::default().data(serde_json::to_string(&content_chunk).unwrap())))
+                .send(Ok(
+                    Event::default().data(serde_json::to_string(&content_chunk).unwrap())
+                ))
                 .await;
 
             // Small delay for streaming effect (20ms per word chunk)
@@ -442,7 +453,9 @@ async fn handle_streaming(
         };
 
         let _ = tx
-            .send(Ok(Event::default().data(serde_json::to_string(&finish_chunk).unwrap())))
+            .send(Ok(
+                Event::default().data(serde_json::to_string(&finish_chunk).unwrap())
+            ))
             .await;
 
         // Send [DONE] sentinel
@@ -464,11 +477,7 @@ pub async fn list_models(State(_state): State<Arc<WebState>>) -> Json<ModelsResp
         .map(|entries| {
             entries
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .is_some_and(|ext| ext == "gguf")
-                })
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "gguf"))
                 .map(|e| {
                     let file_name = e.file_name().to_string_lossy().to_string();
                     let model_id = file_name
@@ -493,14 +502,14 @@ pub async fn list_models(State(_state): State<Arc<WebState>>) -> Json<ModelsResp
 }
 
 /// POST /v1/embeddings (stub - not implemented)
-pub async fn embeddings(
-    Json(_req): Json<EmbeddingsRequest>,
-) -> (StatusCode, Json<ErrorResponse>) {
+pub async fn embeddings(Json(_req): Json<EmbeddingsRequest>) -> (StatusCode, Json<ErrorResponse>) {
     (
         StatusCode::NOT_IMPLEMENTED,
         Json(ErrorResponse {
             error: ErrorDetail {
-                message: "Embeddings are not yet implemented. This endpoint is reserved for future use.".to_string(),
+                message:
+                    "Embeddings are not yet implemented. This endpoint is reserved for future use."
+                        .to_string(),
                 error_type: "not_implemented".to_string(),
                 param: None,
                 code: Some("embeddings_not_available".to_string()),

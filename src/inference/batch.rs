@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{mpsc, oneshot, RwLock, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use uuid::Uuid;
 
 use super::GenerateResponse;
@@ -269,7 +269,7 @@ impl BatchProcessor {
             // Wait for first request
             match tokio::time::timeout(Duration::from_millis(100), request_rx.recv()).await {
                 Ok(Some(req)) => batch.push(req),
-                Ok(None) => break, // Channel closed
+                Ok(None) => break,  // Channel closed
                 Err(_) => continue, // Timeout, check shutdown and try again
             }
 
@@ -305,10 +305,7 @@ impl BatchProcessor {
             // Group by model for efficient processing
             let mut by_model: HashMap<String, Vec<BatchRequest>> = HashMap::new();
             for req in batch {
-                by_model
-                    .entry(req.model.clone())
-                    .or_default()
-                    .push(req);
+                by_model.entry(req.model.clone()).or_default().push(req);
             }
 
             // Process each model group
@@ -317,18 +314,30 @@ impl BatchProcessor {
                 let inference_start = Instant::now();
 
                 // Collect request metadata and senders
-                let mut request_data: Vec<(Uuid, String, u32, f32, Instant)> = Vec::with_capacity(batch_size);
-                let mut result_senders: HashMap<Uuid, oneshot::Sender<Result<BatchResponse, BatchError>>> = HashMap::new();
+                let mut request_data: Vec<(Uuid, String, u32, f32, Instant)> =
+                    Vec::with_capacity(batch_size);
+                let mut result_senders: HashMap<
+                    Uuid,
+                    oneshot::Sender<Result<BatchResponse, BatchError>>,
+                > = HashMap::new();
 
                 for req in requests {
-                    request_data.push((req.id, req.prompt, req.max_tokens, req.temperature, req.submitted_at));
+                    request_data.push((
+                        req.id,
+                        req.prompt,
+                        req.max_tokens,
+                        req.temperature,
+                        req.submitted_at,
+                    ));
                     result_senders.insert(req.id, req.result_tx);
                 }
 
                 // Prepare batch input for inference function
                 let batch_input: Vec<(Uuid, String, u32, f32)> = request_data
                     .iter()
-                    .map(|(id, prompt, max_tokens, temp, _)| (*id, prompt.clone(), *max_tokens, *temp))
+                    .map(|(id, prompt, max_tokens, temp, _)| {
+                        (*id, prompt.clone(), *max_tokens, *temp)
+                    })
                     .collect();
 
                 // Execute batch inference
@@ -340,7 +349,8 @@ impl BatchProcessor {
                 for (id, result) in results {
                     if let Some(tx) = result_senders.remove(&id) {
                         // Find submit time for this request
-                        let submitted_at = request_data.iter()
+                        let submitted_at = request_data
+                            .iter()
                             .find(|(req_id, _, _, _, _)| *req_id == id)
                             .map(|(_, _, _, _, t)| *t)
                             .unwrap_or(inference_start);
@@ -367,9 +377,10 @@ impl BatchProcessor {
 
                 // Send errors to any requests that didn't get a response
                 for (id, tx) in result_senders {
-                    let _ = tx.send(Err(BatchError::InferenceFailed(
-                        format!("No result returned for request {}", id)
-                    )));
+                    let _ = tx.send(Err(BatchError::InferenceFailed(format!(
+                        "No result returned for request {}",
+                        id
+                    ))));
                 }
 
                 // Update statistics
@@ -382,8 +393,9 @@ impl BatchProcessor {
                     let n = stats.total_batches as f32;
                     stats.avg_batch_size =
                         (stats.avg_batch_size * (n - 1.0) + batch_size as f32) / n;
-                    stats.avg_inference_time_ms =
-                        (stats.avg_inference_time_ms * (n - 1.0) + inference_time.as_millis() as f32) / n;
+                    stats.avg_inference_time_ms = (stats.avg_inference_time_ms * (n - 1.0)
+                        + inference_time.as_millis() as f32)
+                        / n;
 
                     *stats.batches_by_model.entry(model).or_insert(0) += 1;
                 }

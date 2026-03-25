@@ -14,7 +14,10 @@ pub struct JobId(pub String);
 impl JobId {
     /// Generate a new random job ID.
     pub fn new() -> Self {
-        Self(format!("job_{}", Uuid::new_v4().to_string().replace("-", "")))
+        Self(format!(
+            "job_{}",
+            Uuid::new_v4().to_string().replace("-", "")
+        ))
     }
 }
 
@@ -103,7 +106,7 @@ impl JobRequest {
             timeout_secs,
             created_at: now,
             expires_at: now + chrono::Duration::seconds(60), // 60 second bid window
-            requester_id: String::new(), // Set by caller
+            requester_id: String::new(),                     // Set by caller
             payload: None,
         }
     }
@@ -143,7 +146,10 @@ impl JobRequest {
             ResourceType::Inference { tokens, .. } => *tokens,
             ResourceType::Embedding { tokens, .. } => *tokens,
             ResourceType::ImageGeneration { count, .. } => *count,
-            ResourceType::Cpu { cores, duration_secs } => (*cores as u64 * duration_secs) as u32,
+            ResourceType::Cpu {
+                cores,
+                duration_secs,
+            } => (*cores as u64 * duration_secs) as u32,
             ResourceType::Gpu { duration_secs, .. } => *duration_secs as u32,
             ResourceType::Storage { bytes, .. } => (*bytes / 1024) as u32, // KB
             ResourceType::WebFetch { url_count } => *url_count,
@@ -194,11 +200,8 @@ mod tests {
 
     #[test]
     fn test_job_request_expiry() {
-        let mut request = JobRequest::new(
-            ResourceType::WebFetch { url_count: 5 },
-            to_micro(1.0),
-            60,
-        );
+        let mut request =
+            JobRequest::new(ResourceType::WebFetch { url_count: 5 }, to_micro(1.0), 60);
 
         // Should not be expired initially
         assert!(!request.is_expired());

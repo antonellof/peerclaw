@@ -149,10 +149,7 @@ impl Identity {
     pub fn to_system_prompt(&self) -> String {
         let mut prompt = String::new();
 
-        prompt.push_str(&format!(
-            "You are {}, a {}.\n\n",
-            self.name, self.nature
-        ));
+        prompt.push_str(&format!("You are {}, a {}.\n\n", self.name, self.nature));
 
         prompt.push_str(&format!("Communication style: {}\n\n", self.vibe));
 
@@ -279,7 +276,12 @@ impl Soul {
 
             // Purpose line
             if line.starts_with("purpose:") || line.starts_with("Purpose:") {
-                soul.purpose = line.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string();
+                soul.purpose = line
+                    .split_once(':')
+                    .map(|x| x.1)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
                 continue;
             }
 

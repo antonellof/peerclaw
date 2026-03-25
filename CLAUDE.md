@@ -36,6 +36,22 @@ cargo test module_name::
 ./target/release/peerclaw --help
 ```
 
+### Web UI (Vite + React + shadcn)
+
+```bash
+# Terminal 1 — API + WebSocket + legacy HTML embeds
+peerclaw serve --web 127.0.0.1:8080
+
+# Terminal 2 — hot reload (proxies /api, /v1, /ws, /embed to :8080)
+cd web && npm install && npm run dev
+# Open http://127.0.0.1:5173
+
+# Production bundle for the binary to serve from web/dist (or set PEERCLAW_WEB_DIST)
+cd web && npm run build
+```
+
+See `web/README.md` for details.
+
 ## Architecture
 
 ### Single Binary Design

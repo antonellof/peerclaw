@@ -68,8 +68,10 @@ async fn show_status() -> anyhow::Result<()> {
     let config_path = bootstrap::config_path();
     let web_addr = if config_path.exists() {
         let config_str = std::fs::read_to_string(&config_path).unwrap_or_default();
-        let config: toml::Value = toml::from_str(&config_str).unwrap_or(toml::Value::Table(Default::default()));
-        config.get("web")
+        let config: toml::Value =
+            toml::from_str(&config_str).unwrap_or(toml::Value::Table(Default::default()));
+        config
+            .get("web")
             .and_then(|w| w.get("listen_addr"))
             .and_then(|a| a.as_str())
             .unwrap_or("127.0.0.1:8080")
@@ -147,7 +149,7 @@ async fn list_peers() -> anyhow::Result<()> {
 
         // Truncate peer ID for display
         let display_id = if id.len() > 50 {
-            format!("{}...{}", &id[..8], &id[id.len()-8..])
+            format!("{}...{}", &id[..8], &id[id.len() - 8..])
         } else {
             id.clone()
         };
@@ -200,7 +202,10 @@ async fn show_identity() -> anyhow::Result<()> {
     println!("Node Identity");
     println!("{}", "=".repeat(40));
     println!("Peer ID:       {}", identity.peer_id());
-    println!("Public Key:    {}", hex::encode(identity.public_key_bytes()));
+    println!(
+        "Public Key:    {}",
+        hex::encode(identity.public_key_bytes())
+    );
     println!("Key File:      {}", identity_path.display());
     println!("Algorithm:     Ed25519");
 

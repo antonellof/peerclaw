@@ -51,7 +51,10 @@ pub struct ChannelId(pub String);
 impl ChannelId {
     /// Generate a new channel ID.
     pub fn new() -> Self {
-        Self(format!("chan_{}", Uuid::new_v4().to_string().replace("-", "")))
+        Self(format!(
+            "chan_{}",
+            Uuid::new_v4().to_string().replace("-", "")
+        ))
     }
 
     /// Create a deterministic channel ID from two peer IDs.
@@ -317,15 +320,19 @@ impl ChannelManager {
         }
 
         // Lock funds from wallet
-        let _escrow = self.wallet.create_escrow(
-            capacity,
-            remote_peer.clone(),
-            format!("channel_{}", remote_peer),
-            duration_hours * 3600,
-        ).await?;
+        let _escrow = self
+            .wallet
+            .create_escrow(
+                capacity,
+                remote_peer.clone(),
+                format!("channel_{}", remote_peer),
+                duration_hours * 3600,
+            )
+            .await?;
 
         // Create channel
-        let channel = PaymentChannel::new(local_peer, remote_peer.clone(), capacity, duration_hours);
+        let channel =
+            PaymentChannel::new(local_peer, remote_peer.clone(), capacity, duration_hours);
         let channel_id = channel.id.clone();
 
         // Store channel
@@ -375,7 +382,8 @@ impl ChannelManager {
         amount: u64,
     ) -> Result<SignedUpdate, ChannelError> {
         let mut channels = self.channels.write().await;
-        let channel = channels.get_mut(channel_id)
+        let channel = channels
+            .get_mut(channel_id)
             .ok_or_else(|| ChannelError::NotFound(channel_id.clone()))?;
 
         let update = channel.create_payment(amount)?;
@@ -387,11 +395,7 @@ impl ChannelManager {
     }
 
     /// Pay a peer (opens channel if needed, pays through existing otherwise).
-    pub async fn pay_peer(
-        &self,
-        peer_id: &str,
-        amount: u64,
-    ) -> Result<SignedUpdate, ChannelError> {
+    pub async fn pay_peer(&self, peer_id: &str, amount: u64) -> Result<SignedUpdate, ChannelError> {
         // Try to find existing channel
         if let Some(channel_id) = self.by_peer.read().await.get(peer_id).cloned() {
             return self.pay(&channel_id, amount).await;
@@ -405,15 +409,13 @@ impl ChannelManager {
     }
 
     /// Receive a payment update from remote peer.
-    pub async fn receive_payment(
-        &self,
-        signed_update: &SignedUpdate,
-    ) -> Result<(), ChannelError> {
+    pub async fn receive_payment(&self, signed_update: &SignedUpdate) -> Result<(), ChannelError> {
         // Verify signature
         // TODO: Get remote peer's public key and verify
 
         let mut channels = self.channels.write().await;
-        let channel = channels.get_mut(&signed_update.update.channel_id)
+        let channel = channels
+            .get_mut(&signed_update.update.channel_id)
             .ok_or_else(|| ChannelError::NotFound(signed_update.update.channel_id.clone()))?;
 
         channel.receive_payment(&signed_update.update)?;
@@ -425,7 +427,8 @@ impl ChannelManager {
     /// Close a channel cooperatively.
     pub async fn close_channel(&self, channel_id: &ChannelId) -> Result<(), ChannelError> {
         let mut channels = self.channels.write().await;
-        let channel = channels.get_mut(channel_id)
+        let channel = channels
+            .get_mut(channel_id)
             .ok_or_else(|| ChannelError::NotFound(channel_id.clone()))?;
 
         if !matches!(channel.status, ChannelStatus::Open | ChannelStatus::Opening) {
@@ -501,10 +504,26 @@ impl std::fmt::Display for ChannelStats {
         writeln!(f, "Channel Statistics")?;
         writeln!(f, "──────────────────")?;
         writeln!(f, "Active channels: {}", self.active_channels)?;
-        writeln!(f, "Total capacity:  {:.6} PCLAW", from_micro(self.total_capacity))?;
-        writeln!(f, "Local balance:   {:.6} PCLAW", from_micro(self.total_local_balance))?;
-        writeln!(f, "Total sent:      {:.6} PCLAW", from_micro(self.total_sent))?;
-        writeln!(f, "Total received:  {:.6} PCLAW", from_micro(self.total_received))?;
+        writeln!(
+            f,
+            "Total capacity:  {:.6} PCLAW",
+            from_micro(self.total_capacity)
+        )?;
+        writeln!(
+            f,
+            "Local balance:   {:.6} PCLAW",
+            from_micro(self.total_local_balance)
+        )?;
+        writeln!(
+            f,
+            "Total sent:      {:.6} PCLAW",
+            from_micro(self.total_sent)
+        )?;
+        writeln!(
+            f,
+            "Total received:  {:.6} PCLAW",
+            from_micro(self.total_received)
+        )?;
         writeln!(f, "Total updates:   {}", self.total_updates)
     }
 }
@@ -513,7 +532,7 @@ impl std::fmt::Display for ChannelStats {
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::wallet::{WalletConfig, to_micro};
+    use crate::wallet::{to_micro, WalletConfig};
     use tempfile::tempdir;
 
     fn create_test_channel() -> PaymentChannel {
@@ -553,7 +572,10 @@ mod tests {
         channel.status = ChannelStatus::Open;
 
         let result = channel.create_payment(to_micro(200.0));
-        assert!(matches!(result, Err(ChannelError::InsufficientBalance { .. })));
+        assert!(matches!(
+            result,
+            Err(ChannelError::InsufficientBalance { .. })
+        ));
     }
 
     #[test]
@@ -568,9 +590,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let db = Database::open(&dir.path().join("test.redb")).unwrap();
         let identity = Arc::new(NodeIdentity::generate());
-        let wallet = Arc::new(
-            Wallet::new(identity.clone(), WalletConfig::default(), db).unwrap()
-        );
+        let wallet = Arc::new(Wallet::new(identity.clone(), WalletConfig::default(), db).unwrap());
 
         // Credit some tokens
         wallet.credit(to_micro(1000.0), "test").await.unwrap();
@@ -578,11 +598,10 @@ mod tests {
         let manager = ChannelManager::new(identity, wallet);
 
         // Open channel
-        let channel = manager.open_channel(
-            "remote_peer".to_string(),
-            to_micro(100.0),
-            24,
-        ).await.unwrap();
+        let channel = manager
+            .open_channel("remote_peer".to_string(), to_micro(100.0), 24)
+            .await
+            .unwrap();
 
         assert_eq!(channel.status, ChannelStatus::Opening);
 

@@ -11,8 +11,8 @@ use std::time::Instant;
 use async_trait::async_trait;
 
 use crate::tools::tool::{
-    Tool, ToolContext, ToolError, ToolOutput, ToolDomain, ApprovalRequirement,
-    require_str, optional_str, optional_i64, optional_bool,
+    optional_bool, optional_i64, optional_str, require_str, ApprovalRequirement, Tool, ToolContext,
+    ToolDomain, ToolError, ToolOutput,
 };
 
 /// Job submission tool - submit work to the P2P network.
@@ -96,7 +96,8 @@ impl Tool for JobSubmitTool {
         let job_type = require_str(&params, "type")?;
         let timeout_secs = optional_i64(&params, "timeout_secs", 300) as u64;
         let prefer_local = optional_bool(&params, "prefer_local", true);
-        let max_budget = params.get("max_budget")
+        let max_budget = params
+            .get("max_budget")
             .and_then(|v| v.as_f64())
             .unwrap_or(10.0);
 
@@ -117,7 +118,10 @@ impl Tool for JobSubmitTool {
             }
             "tool" => {
                 let tool_name = require_str(&params, "tool_name")?;
-                let tool_params = params.get("tool_params").cloned().unwrap_or(serde_json::json!({}));
+                let tool_params = params
+                    .get("tool_params")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
                 serde_json::json!({
                     "type": "tool",
                     "tool_name": tool_name,
@@ -130,7 +134,12 @@ impl Tool for JobSubmitTool {
                     "params": params.clone(),
                 })
             }
-            _ => return Err(ToolError::InvalidParameters(format!("Unknown job type: {}", job_type))),
+            _ => {
+                return Err(ToolError::InvalidParameters(format!(
+                    "Unknown job type: {}",
+                    job_type
+                )))
+            }
         };
 
         // TODO: Actually submit to JobManager and P2P network
@@ -328,17 +337,15 @@ impl Tool for PeerDiscoveryTool {
 
         // TODO: Actually query P2P network
         // For now, return a placeholder response with the local peer
-        let peers = vec![
-            serde_json::json!({
-                "peer_id": ctx.peer_id,
-                "capabilities": ["inference", "compute"],
-                "models": ["llama-3.2-3b", "qwen-2.5-7b"],
-                "price_per_token": 0.001,
-                "reliability": 100,
-                "latency_ms": 0,
-                "is_local": true,
-            })
-        ];
+        let peers = vec![serde_json::json!({
+            "peer_id": ctx.peer_id,
+            "capabilities": ["inference", "compute"],
+            "models": ["llama-3.2-3b", "qwen-2.5-7b"],
+            "price_per_token": 0.001,
+            "reliability": 100,
+            "latency_ms": 0,
+            "is_local": true,
+        })];
 
         let result = serde_json::json!({
             "peers": peers,
@@ -469,14 +476,17 @@ mod tests {
         let tool = JobSubmitTool::new();
         let ctx = ToolContext::local("test-peer".to_string());
 
-        let result = tool.execute(
-            serde_json::json!({
-                "type": "inference",
-                "prompt": "Hello, world!",
-                "model": "llama-3.2-3b"
-            }),
-            &ctx,
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                serde_json::json!({
+                    "type": "inference",
+                    "prompt": "Hello, world!",
+                    "model": "llama-3.2-3b"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.data["job_id"].as_str().is_some());
@@ -488,12 +498,15 @@ mod tests {
         let tool = PeerDiscoveryTool::new();
         let ctx = ToolContext::local("test-peer".to_string());
 
-        let result = tool.execute(
-            serde_json::json!({
-                "capability": "inference"
-            }),
-            &ctx,
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                serde_json::json!({
+                    "capability": "inference"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.data["peers"].as_array().is_some());
@@ -504,10 +517,7 @@ mod tests {
         let tool = WalletBalanceTool::new();
         let ctx = ToolContext::local("test-peer".to_string());
 
-        let result = tool.execute(
-            serde_json::json!({}),
-            &ctx,
-        ).await.unwrap();
+        let result = tool.execute(serde_json::json!({}), &ctx).await.unwrap();
 
         assert!(result.success);
         assert!(result.data["balance"]["available"].as_f64().is_some());

@@ -247,9 +247,7 @@ impl Workspace {
 
     /// Check if file exists
     pub fn exists(&self, path: &str) -> bool {
-        self.resolve_path(path)
-            .map(|p| p.exists())
-            .unwrap_or(false)
+        self.resolve_path(path).map(|p| p.exists()).unwrap_or(false)
     }
 
     /// List files in a directory

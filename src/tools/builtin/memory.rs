@@ -14,12 +14,10 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 use crate::tools::tool::{
-    ApprovalRequirement, Tool, ToolContext, ToolDomain, ToolError, ToolOutput, optional_bool,
-    optional_i64, optional_str, require_str,
+    optional_bool, optional_i64, optional_str, require_str, ApprovalRequirement, Tool, ToolContext,
+    ToolDomain, ToolError, ToolOutput,
 };
-use crate::vector::{
-    SearchResult, VectorStore, VectorStoreConfig, get_embedder,
-};
+use crate::vector::{get_embedder, SearchResult, VectorStore, VectorStoreConfig};
 
 /// Memory collection name in vector store
 const MEMORY_COLLECTION: &str = "memories";
@@ -76,26 +74,31 @@ impl MemoryEntry {
         Some(Self {
             id: result.id.clone(),
             content: result.text.clone().unwrap_or_default(),
-            category: payload.get("category")
+            category: payload
+                .get("category")
                 .and_then(|v| v.as_str())
                 .unwrap_or("facts")
                 .to_string(),
-            source_peer: payload.get("source_peer")
+            source_peer: payload
+                .get("source_peer")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string(),
-            created_at: payload.get("created_at")
+            created_at: payload
+                .get("created_at")
                 .and_then(|v| v.as_str())
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
                 .map(|d| d.with_timezone(&Utc))
                 .unwrap_or_else(Utc::now),
-            modified_at: payload.get("modified_at")
+            modified_at: payload
+                .get("modified_at")
                 .and_then(|v| v.as_str())
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
                 .map(|d| d.with_timezone(&Utc))
                 .unwrap_or_else(Utc::now),
             score: Some(result.score),
-            replicated: payload.get("replicated")
+            replicated: payload
+                .get("replicated")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
         })
@@ -373,7 +376,11 @@ impl Tool for MemoryWriteTool {
         }
 
         // Create memory entry
-        let entry = MemoryEntry::new(content.to_string(), category.to_string(), ctx.peer_id.clone());
+        let entry = MemoryEntry::new(
+            content.to_string(),
+            category.to_string(),
+            ctx.peer_id.clone(),
+        );
 
         // Generate embedding
         let embedder = get_embedder();
@@ -479,9 +486,7 @@ impl Tool for MemoryStatsTool {
         let store = get_memory_store();
         let collections = store.list_collections();
 
-        let memory_collection = collections
-            .iter()
-            .find(|c| c.name == MEMORY_COLLECTION);
+        let memory_collection = collections.iter().find(|c| c.name == MEMORY_COLLECTION);
 
         let result = serde_json::json!({
             "collection": MEMORY_COLLECTION,

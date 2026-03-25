@@ -188,9 +188,10 @@ impl HostState {
             return true;
         }
 
-        self.capabilities.allowed_paths.iter().any(|allowed| {
-            path.starts_with(allowed)
-        })
+        self.capabilities
+            .allowed_paths
+            .iter()
+            .any(|allowed| path.starts_with(allowed))
     }
 }
 

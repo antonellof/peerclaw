@@ -6,8 +6,10 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use super::{LoadedSkill, SkillAnnouncement, SkillSource, SkillTrust};
+use serde::Serialize;
+
 use super::parser::{parse_skill, ParseError};
+use super::{LoadedSkill, SkillAnnouncement, SkillSource, SkillTrust};
 
 /// Skill registry manages local and network skills.
 pub struct SkillRegistry {
@@ -41,8 +43,8 @@ impl SkillRegistry {
         skills.clear();
 
         // Scan skills directory
-        let entries = std::fs::read_dir(&self.skills_dir)
-            .map_err(|e| ScanError::IoError(e.to_string()))?;
+        let entries =
+            std::fs::read_dir(&self.skills_dir).map_err(|e| ScanError::IoError(e.to_string()))?;
 
         for entry in entries.flatten() {
             let path = entry.path();
@@ -131,10 +133,15 @@ impl SkillRegistry {
     /// Register a skill announcement from the network.
     pub async fn register_network_skill(&self, announcement: SkillAnnouncement) {
         let mut network = self.network_skills.write().await;
-        let announcements = network.entry(announcement.name.clone()).or_insert_with(Vec::new);
+        let announcements = network
+            .entry(announcement.name.clone())
+            .or_insert_with(Vec::new);
 
         // Update or add
-        if let Some(existing) = announcements.iter_mut().find(|a| a.provider == announcement.provider) {
+        if let Some(existing) = announcements
+            .iter_mut()
+            .find(|a| a.provider == announcement.provider)
+        {
             *existing = announcement;
         } else {
             announcements.push(announcement);
@@ -147,7 +154,8 @@ impl SkillRegistry {
     /// Get local skill announcements for sharing.
     pub async fn get_announcements(&self) -> Vec<SkillAnnouncement> {
         let skills = self.local_skills.read().await;
-        skills.values()
+        skills
+            .values()
             .filter(|s| s.manifest.sharing.enabled)
             .map(|s| SkillAnnouncement {
                 name: s.name().to_string(),
@@ -163,7 +171,11 @@ impl SkillRegistry {
     }
 
     /// Install a skill from content.
-    pub async fn install(&self, content: &str, trust: SkillTrust) -> Result<Arc<LoadedSkill>, ParseError> {
+    pub async fn install(
+        &self,
+        content: &str,
+        trust: SkillTrust,
+    ) -> Result<Arc<LoadedSkill>, ParseError> {
         let source = SkillSource::Workspace(self.skills_dir.clone());
         let skill = super::parser::parse_skill_content(content, source, trust)?;
         let name = skill.name().to_string();
@@ -193,7 +205,7 @@ impl SkillRegistry {
 }
 
 /// Skill information for listing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SkillInfo {
     pub name: String,
     pub version: String,
@@ -222,10 +234,8 @@ mod tests {
     #[tokio::test]
     async fn test_registry_creation() {
         let dir = tempdir().unwrap();
-        let registry = SkillRegistry::new(
-            dir.path().to_path_buf(),
-            "test-peer".to_string(),
-        ).unwrap();
+        let registry =
+            SkillRegistry::new(dir.path().to_path_buf(), "test-peer".to_string()).unwrap();
 
         let skills = registry.list_local().await;
         assert!(skills.is_empty());
@@ -234,10 +244,8 @@ mod tests {
     #[tokio::test]
     async fn test_install_skill() {
         let dir = tempdir().unwrap();
-        let registry = SkillRegistry::new(
-            dir.path().to_path_buf(),
-            "test-peer".to_string(),
-        ).unwrap();
+        let registry =
+            SkillRegistry::new(dir.path().to_path_buf(), "test-peer".to_string()).unwrap();
 
         let content = r#"---
 name: test-skill

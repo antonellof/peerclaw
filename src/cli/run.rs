@@ -71,20 +71,23 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     let models_dir = bootstrap::base_dir().join("models");
     let model_exists = std::fs::read_dir(&models_dir)
         .map(|entries| {
-            entries.filter_map(|e| e.ok())
-                .any(|e| {
-                    e.path().file_stem()
-                        .and_then(|s| s.to_str())
-                        .map(|s| s.to_lowercase().contains(&model_name.to_lowercase()))
-                        .unwrap_or(false)
-                })
+            entries.filter_map(|e| e.ok()).any(|e| {
+                e.path()
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_lowercase().contains(&model_name.to_lowercase()))
+                    .unwrap_or(false)
+            })
         })
         .unwrap_or(false);
 
     if !model_exists && !args.distributed {
         println!("\x1b[33mModel '{}' not found locally.\x1b[0m", model_name);
         println!("Run: \x1b[36mpeerclaw pull {}\x1b[0m", args.model);
-        println!("Or use: \x1b[36mpeerclaw run {} --distributed\x1b[0m to use network peers", args.model);
+        println!(
+            "Or use: \x1b[36mpeerclaw run {} --distributed\x1b[0m to use network peers",
+            args.model
+        );
         return Ok(());
     }
 
@@ -92,10 +95,15 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     if args.distributed {
         println!("\x1b[35mMode: Distributed P2P\x1b[0m");
         if args.pipeline_peers > 1 {
-            println!("\x1b[90mPipeline peers: {} (layer sharding enabled)\x1b[0m", args.pipeline_peers);
+            println!(
+                "\x1b[90mPipeline peers: {} (layer sharding enabled)\x1b[0m",
+                args.pipeline_peers
+            );
             println!("\x1b[33mNote: Pipeline parallelism splits model layers across peers.\x1b[0m");
             println!("\x1b[33m      This is different from vLLM's tensor parallelism which\x1b[0m");
-            println!("\x1b[33m      splits weights within layers (requires fast interconnect).\x1b[0m");
+            println!(
+                "\x1b[33m      splits weights within layers (requires fast interconnect).\x1b[0m"
+            );
         }
     } else {
         println!("\x1b[36mMode: Local\x1b[0m");
@@ -126,18 +134,20 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
 
     // If prompt provided, run single inference
     if let Some(prompt) = args.prompt {
-        let system = args.system.as_deref().unwrap_or("You are a helpful assistant.");
+        let system = args
+            .system
+            .as_deref()
+            .unwrap_or("You are a helpful assistant.");
         let full_prompt = format!("System: {}\n\nUser: {}\nAssistant:", system, prompt);
 
-        let result = runtime.inference_streaming_print(
-            &model_name,
-            &full_prompt,
-            args.max_tokens,
-            args.temperature,
-        ).await?;
+        let result = runtime
+            .inference_streaming_print(&model_name, &full_prompt, args.max_tokens, args.temperature)
+            .await?;
 
-        println!("\n\x1b[90m[{} tokens, {:.1} tok/s]\x1b[0m\n",
-            result.tokens_generated, result.tokens_per_second);
+        println!(
+            "\n\x1b[90m[{} tokens, {:.1} tok/s]\x1b[0m\n",
+            result.tokens_generated, result.tokens_per_second
+        );
         return Ok(());
     }
 
@@ -145,7 +155,10 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     println!("\n\x1b[1m{}\x1b[0m", model_name);
     println!("Type your message and press Enter. Type \x1b[33m/bye\x1b[0m to exit.\n");
 
-    let system = args.system.as_deref().unwrap_or("You are a helpful assistant.");
+    let system = args
+        .system
+        .as_deref()
+        .unwrap_or("You are a helpful assistant.");
     let mut history: Vec<(String, String)> = Vec::new();
 
     let stdin = io::stdin();
@@ -170,18 +183,17 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         let full_prompt = build_prompt(system, &history, input);
 
         // Run inference with streaming
-        let result = runtime.inference_streaming_print(
-            &model_name,
-            &full_prompt,
-            args.max_tokens,
-            args.temperature,
-        ).await;
+        let result = runtime
+            .inference_streaming_print(&model_name, &full_prompt, args.max_tokens, args.temperature)
+            .await;
 
         match result {
             Ok(r) => {
                 history.push((input.to_string(), r.text.clone()));
-                println!("\n\x1b[90m[{} tokens, {:.1} tok/s]\x1b[0m\n",
-                    r.tokens_generated, r.tokens_per_second);
+                println!(
+                    "\n\x1b[90m[{} tokens, {:.1} tok/s]\x1b[0m\n",
+                    r.tokens_generated, r.tokens_per_second
+                );
             }
             Err(e) => {
                 println!("\n\x1b[31mError: {}\x1b[0m\n", e);
@@ -200,14 +212,16 @@ pub async fn pull(args: PullArgs) -> anyhow::Result<()> {
             model: args.model,
             quant: args.quant,
         }),
-    }).await
+    })
+    .await
 }
 
 /// List models (delegates to models list)
 pub async fn list() -> anyhow::Result<()> {
     crate::cli::models::run(crate::cli::models::ModelsArgs {
         cmd: Some(crate::cli::models::ModelsCommand::List),
-    }).await
+    })
+    .await
 }
 
 /// Show running processes/jobs
@@ -225,7 +239,11 @@ pub async fn ps() -> anyhow::Result<()> {
     } else {
         for job in &active {
             let id_str = &job.id.0;
-            let short = if id_str.len() > 20 { &id_str[..20] } else { id_str };
+            let short = if id_str.len() > 20 {
+                &id_str[..20]
+            } else {
+                id_str
+            };
             println!("{:<22} {:>8}  \x1b[32m{}\x1b[0m", short, "-", job.status);
         }
     }

@@ -6,8 +6,8 @@
 //! - Keepalive heartbeats
 //! - Event filtering by type
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -24,27 +24,55 @@ pub enum SseEvent {
     /// Thinking indicator
     Thinking { message: String },
     /// Tool execution started
-    ToolStarted { tool: String, params: serde_json::Value },
+    ToolStarted {
+        tool: String,
+        params: serde_json::Value,
+    },
     /// Tool execution completed
-    ToolCompleted { tool: String, success: bool, duration_ms: u64 },
+    ToolCompleted {
+        tool: String,
+        success: bool,
+        duration_ms: u64,
+    },
     /// Tool result
-    ToolResult { tool: String, result: serde_json::Value },
+    ToolResult {
+        tool: String,
+        result: serde_json::Value,
+    },
     /// Job started
     JobStarted { job_id: String, title: String },
     /// Job message
     JobMessage { job_id: String, message: String },
     /// Job status update
-    JobStatus { job_id: String, status: String, progress: Option<f32> },
+    JobStatus {
+        job_id: String,
+        status: String,
+        progress: Option<f32>,
+    },
     /// Job completed
-    JobResult { job_id: String, success: bool, result: Option<String> },
+    JobResult {
+        job_id: String,
+        success: bool,
+        result: Option<String>,
+    },
     /// Approval needed
-    ApprovalNeeded { action: String, description: String, timeout_secs: u32 },
+    ApprovalNeeded {
+        action: String,
+        description: String,
+        timeout_secs: u32,
+    },
     /// Error occurred
-    Error { message: String, code: Option<String> },
+    Error {
+        message: String,
+        code: Option<String>,
+    },
     /// Heartbeat (keepalive)
     Heartbeat { timestamp: u64 },
     /// Custom event
-    Custom { name: String, data: serde_json::Value },
+    Custom {
+        name: String,
+        data: serde_json::Value,
+    },
 }
 
 impl SseEvent {

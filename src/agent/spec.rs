@@ -92,10 +92,18 @@ pub struct BudgetSpec {
     pub total: f64,
 }
 
-fn default_per_request() -> f64 { 2.0 }
-fn default_per_hour() -> f64 { 20.0 }
-fn default_per_day() -> f64 { 100.0 }
-fn default_total() -> f64 { 1000.0 }
+fn default_per_request() -> f64 {
+    2.0
+}
+fn default_per_hour() -> f64 {
+    20.0
+}
+fn default_per_day() -> f64 {
+    100.0
+}
+fn default_total() -> f64 {
+    1000.0
+}
 
 impl Default for BudgetSpec {
     fn default() -> Self {

@@ -117,7 +117,8 @@ impl OllamaProvider {
 
     /// List available models from Ollama.
     pub async fn list_models(&self) -> Result<Vec<OllamaModelInfo>, String> {
-        let resp = self.client
+        let resp = self
+            .client
             .get(format!("{}/api/tags", self.config.base_url))
             .send()
             .await
@@ -150,17 +151,26 @@ impl OllamaProvider {
         let normalized = normalize_model_name(model_name);
 
         // Exact match first
-        if let Some(m) = models.iter().find(|m| normalize_model_name(&m.name) == normalized) {
+        if let Some(m) = models
+            .iter()
+            .find(|m| normalize_model_name(&m.name) == normalized)
+        {
             return Some(m.name.clone());
         }
 
         // Prefix match (e.g. "llama3.2" matches "llama3.2:latest")
-        if let Some(m) = models.iter().find(|m| normalize_model_name(&m.name).starts_with(&normalized)) {
+        if let Some(m) = models
+            .iter()
+            .find(|m| normalize_model_name(&m.name).starts_with(&normalized))
+        {
             return Some(m.name.clone());
         }
 
         // Reverse prefix (e.g. "llama-3.2-3b" matches "llama3.2")
-        if let Some(m) = models.iter().find(|m| normalized.starts_with(&normalize_model_name(&m.name))) {
+        if let Some(m) = models
+            .iter()
+            .find(|m| normalized.starts_with(&normalize_model_name(&m.name)))
+        {
             return Some(m.name.clone());
         }
 
@@ -177,7 +187,9 @@ impl OllamaProvider {
         system_prompt: Option<&str>,
     ) -> Result<OllamaGenerateResult, String> {
         // Resolve model name
-        let ollama_model = self.resolve_model(model).await
+        let ollama_model = self
+            .resolve_model(model)
+            .await
             .unwrap_or_else(|| model.to_string());
 
         let mut messages = Vec::new();
@@ -208,7 +220,8 @@ impl OllamaProvider {
 
         let start = std::time::Instant::now();
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(format!("{}/api/chat", self.config.base_url))
             .json(&request)
             .send()

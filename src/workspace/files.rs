@@ -61,10 +61,7 @@ pub fn format_memory(entries: &[MemoryEntry]) -> String {
         std::collections::HashMap::new();
 
     for entry in entries {
-        categories
-            .entry(&entry.category)
-            .or_default()
-            .push(entry);
+        categories.entry(&entry.category).or_default().push(entry);
     }
 
     // Standard order
@@ -271,6 +268,9 @@ mod tests {
     #[test]
     fn test_sanitize_filename() {
         assert_eq!(sanitize_filename("hello world.txt"), "hello_world.txt");
-        assert_eq!(sanitize_filename("file/with:bad*chars"), "file_with_bad_chars");
+        assert_eq!(
+            sanitize_filename("file/with:bad*chars"),
+            "file_with_bad_chars"
+        );
     }
 }

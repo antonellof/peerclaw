@@ -86,7 +86,6 @@ impl HeartbeatResult {
             duration_ms: 0,
         }
     }
-
 }
 
 impl std::fmt::Display for HeartbeatResult {
@@ -95,8 +94,16 @@ impl std::fmt::Display for HeartbeatResult {
             return write!(f, "HEARTBEAT_OK");
         }
 
-        writeln!(f, "Heartbeat at {}", self.timestamp.format("%Y-%m-%d %H:%M:%S UTC"))?;
-        writeln!(f, "Status: {}\n", if self.ok { "OK" } else { "ISSUES FOUND" })?;
+        writeln!(
+            f,
+            "Heartbeat at {}",
+            self.timestamp.format("%Y-%m-%d %H:%M:%S UTC")
+        )?;
+        writeln!(
+            f,
+            "Status: {}\n",
+            if self.ok { "OK" } else { "ISSUES FOUND" }
+        )?;
 
         for check in &self.checks {
             let status = if check.passed { "[PASS]" } else { "[FAIL]" };
@@ -114,7 +121,8 @@ impl std::fmt::Display for HeartbeatResult {
 }
 
 /// Heartbeat callback type
-pub type HeartbeatCallback = Box<dyn Fn() -> futures::future::BoxFuture<'static, HeartbeatResult> + Send + Sync>;
+pub type HeartbeatCallback =
+    Box<dyn Fn() -> futures::future::BoxFuture<'static, HeartbeatResult> + Send + Sync>;
 
 /// Heartbeat system
 pub struct Heartbeat {
@@ -148,7 +156,8 @@ impl Heartbeat {
             return;
         }
 
-        self.running.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         tracing::info!(
             interval_secs = self.config.interval_secs,
             "Starting heartbeat"
@@ -157,7 +166,8 @@ impl Heartbeat {
 
     /// Stop the heartbeat
     pub async fn stop(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         tracing::info!("Stopped heartbeat");
     }
 
@@ -191,7 +201,8 @@ impl Heartbeat {
                 if result.ok {
                     consecutive_failures.store(0, std::sync::atomic::Ordering::SeqCst);
                 } else {
-                    let failures = consecutive_failures.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                    let failures =
+                        consecutive_failures.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                     if failures >= max_failures {
                         tracing::warn!(
                             failures = failures,
@@ -219,7 +230,8 @@ impl Heartbeat {
 
     /// Get consecutive failures count
     pub fn consecutive_failures(&self) -> u32 {
-        self.consecutive_failures.load(std::sync::atomic::Ordering::SeqCst)
+        self.consecutive_failures
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Check if running

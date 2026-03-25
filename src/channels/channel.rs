@@ -171,7 +171,8 @@ impl RateLimiter {
         {
             let mut last_reset = self.last_minute_reset.write().unwrap();
             if now.duration_since(*last_reset) >= Duration::from_secs(60) {
-                self.minute_count.store(0, std::sync::atomic::Ordering::SeqCst);
+                self.minute_count
+                    .store(0, std::sync::atomic::Ordering::SeqCst);
                 *last_reset = now;
             }
         }
@@ -180,7 +181,8 @@ impl RateLimiter {
         {
             let mut last_reset = self.last_hour_reset.write().unwrap();
             if now.duration_since(*last_reset) >= Duration::from_secs(3600) {
-                self.hour_count.store(0, std::sync::atomic::Ordering::SeqCst);
+                self.hour_count
+                    .store(0, std::sync::atomic::Ordering::SeqCst);
                 *last_reset = now;
             }
         }
@@ -194,8 +196,10 @@ impl RateLimiter {
         }
 
         // Increment
-        self.minute_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.hour_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.minute_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.hour_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         true
     }

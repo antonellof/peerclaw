@@ -2,18 +2,15 @@
 
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use parking_lot::RwLock;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{
-    McpServerConfig, McpServerCapabilities,
-    types::*,
-};
+use super::{types::*, McpServerCapabilities, McpServerConfig};
 
 /// MCP client for communicating with an MCP server
 #[derive(Clone)]
@@ -67,8 +64,14 @@ impl McpClient {
         }
 
         let mut child = cmd.spawn()?;
-        let stdin = child.stdin.take().ok_or_else(|| anyhow::anyhow!("No stdin"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow::anyhow!("No stdout"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("No stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("No stdout"))?;
 
         let (tx, mut rx) = mpsc::channel::<String>(100);
 
@@ -147,7 +150,9 @@ impl McpClient {
             },
         };
 
-        let response = self.request("initialize", Some(serde_json::to_value(params)?)).await?;
+        let response = self
+            .request("initialize", Some(serde_json::to_value(params)?))
+            .await?;
 
         if let Some(result) = response.result {
             let init_result: McpInitializeResult = serde_json::from_value(result)?;
@@ -162,7 +167,11 @@ impl McpClient {
     }
 
     /// Send a request
-    async fn request(&self, method: &str, params: Option<serde_json::Value>) -> anyhow::Result<McpResponse> {
+    async fn request(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> anyhow::Result<McpResponse> {
         let id = self.inner.request_id.fetch_add(1, Ordering::SeqCst);
         let request = McpRequest::new(id, method, params);
 
@@ -176,13 +185,10 @@ impl McpClient {
         let msg = serde_json::to_string(&request)?;
         self.inner.tx.send(msg).await?;
 
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            rx,
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("Request timeout"))?
-        .map_err(|_| anyhow::anyhow!("Response channel closed"))?;
+        let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
+            .await
+            .map_err(|_| anyhow::anyhow!("Request timeout"))?
+            .map_err(|_| anyhow::anyhow!("Response channel closed"))?;
 
         if let Some(error) = &response.error {
             anyhow::bail!("MCP error {}: {}", error.code, error.message);
@@ -218,13 +224,19 @@ impl McpClient {
     }
 
     /// Call a tool
-    pub async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> anyhow::Result<McpToolResult> {
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> anyhow::Result<McpToolResult> {
         let params = McpCallToolParams {
             name: name.to_string(),
             arguments: Some(arguments),
         };
 
-        let response = self.request("tools/call", Some(serde_json::to_value(params)?)).await?;
+        let response = self
+            .request("tools/call", Some(serde_json::to_value(params)?))
+            .await?;
 
         if let Some(result) = response.result {
             let tool_result: McpToolResult = serde_json::from_value(result)?;
@@ -255,7 +267,9 @@ impl McpClient {
             uri: uri.to_string(),
         };
 
-        let response = self.request("resources/read", Some(serde_json::to_value(params)?)).await?;
+        let response = self
+            .request("resources/read", Some(serde_json::to_value(params)?))
+            .await?;
 
         if let Some(result) = response.result {
             let read_result: McpReadResourceResult = serde_json::from_value(result)?;

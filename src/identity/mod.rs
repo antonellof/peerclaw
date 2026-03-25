@@ -1,7 +1,7 @@
 //! Node identity - Ed25519 keypair management.
 
-use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
-use libp2p::identity::{Keypair as Libp2pKeypair, ed25519};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use libp2p::identity::{ed25519, Keypair as Libp2pKeypair};
 use libp2p::PeerId;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -36,14 +36,20 @@ impl NodeIdentity {
     pub fn generate() -> Self {
         let signing_key = SigningKey::generate(&mut OsRng);
         let peer_id = Self::derive_peer_id(&signing_key);
-        Self { signing_key, peer_id }
+        Self {
+            signing_key,
+            peer_id,
+        }
     }
 
     /// Create identity from raw secret key bytes.
     pub fn from_bytes(secret: &[u8; 32]) -> Result<Self, IdentityError> {
         let signing_key = SigningKey::from_bytes(secret);
         let peer_id = Self::derive_peer_id(&signing_key);
-        Ok(Self { signing_key, peer_id })
+        Ok(Self {
+            signing_key,
+            peer_id,
+        })
     }
 
     /// Load identity from a file.
@@ -85,7 +91,10 @@ impl NodeIdentity {
 
     /// Verify a signature.
     pub fn verify(&self, message: &[u8], signature: &Signature) -> bool {
-        self.signing_key.verifying_key().verify(message, signature).is_ok()
+        self.signing_key
+            .verifying_key()
+            .verify(message, signature)
+            .is_ok()
     }
 
     /// Convert to a libp2p Keypair.

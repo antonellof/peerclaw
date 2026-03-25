@@ -12,7 +12,7 @@ use std::sync::Arc;
 use crate::bootstrap;
 use crate::config::Config;
 use crate::db::Database;
-use crate::executor::task::{ExecutionTask, ExecutionLocation, InferenceTask, TaskData};
+use crate::executor::task::{ExecutionLocation, ExecutionTask, InferenceTask, TaskData};
 use crate::identity::NodeIdentity;
 use crate::runtime::Runtime;
 
@@ -22,14 +22,35 @@ use crate::runtime::Runtime;
 
 /// All slash commands available for tab completion
 const SLASH_COMMANDS: &[&str] = &[
-    "/help", "/clear", "/status", "/settings", "/history",
-    "/export", "/quit", "/exit",
-    "/model", "/temperature", "/max-tokens", "/system",
-    "/stream", "/distributed",
-    "/cost", "/balance", "/peers", "/jobs",
-    "/compact", "/doctor", "/config",
-    "/tools", "/tool info", "/tool exec", "/tool list",
-    "/skills", "/skill info", "/skill create", "/skill scan",
+    "/help",
+    "/clear",
+    "/status",
+    "/settings",
+    "/history",
+    "/export",
+    "/quit",
+    "/exit",
+    "/model",
+    "/temperature",
+    "/max-tokens",
+    "/system",
+    "/stream",
+    "/distributed",
+    "/cost",
+    "/balance",
+    "/peers",
+    "/jobs",
+    "/compact",
+    "/doctor",
+    "/config",
+    "/tools",
+    "/tool info",
+    "/tool exec",
+    "/tool list",
+    "/skills",
+    "/skill info",
+    "/skill create",
+    "/skill scan",
 ];
 
 struct ChatHelper;
@@ -83,7 +104,9 @@ pub struct ChatSettings {
     pub stream: bool,
 }
 
-fn default_stream() -> bool { true }
+fn default_stream() -> bool {
+    true
+}
 
 impl Default for ChatSettings {
     fn default() -> Self {
@@ -183,23 +206,25 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "clear" | "c" => Some(SlashCommand::Clear),
         "status" | "s" => Some(SlashCommand::Status),
         "model" | "m" => arg.map(|s| SlashCommand::Model(s.to_string())),
-        "temperature" | "temp" | "t" => {
-            arg.and_then(|s| s.parse().ok()).map(SlashCommand::Temperature)
-        }
-        "max-tokens" | "tokens" | "max" => {
-            arg.and_then(|s| s.parse().ok()).map(SlashCommand::MaxTokens)
-        }
+        "temperature" | "temp" | "t" => arg
+            .and_then(|s| s.parse().ok())
+            .map(SlashCommand::Temperature),
+        "max-tokens" | "tokens" | "max" => arg
+            .and_then(|s| s.parse().ok())
+            .map(SlashCommand::MaxTokens),
         "system" | "sys" => arg.map(|s| SlashCommand::System(s.to_string())),
         "settings" => Some(SlashCommand::Settings),
         "history" | "hist" => Some(SlashCommand::History),
         "export" | "save" => arg.map(|s| SlashCommand::Export(PathBuf::from(s))),
         "distributed" | "dist" | "d" => {
-            let enabled = arg.map(|s| matches!(s.to_lowercase().as_str(), "on" | "true" | "1" | "yes"))
+            let enabled = arg
+                .map(|s| matches!(s.to_lowercase().as_str(), "on" | "true" | "1" | "yes"))
                 .unwrap_or(true);
             Some(SlashCommand::Distributed(enabled))
         }
         "stream" => {
-            let enabled = arg.map(|s| matches!(s.to_lowercase().as_str(), "on" | "true" | "1" | "yes"))
+            let enabled = arg
+                .map(|s| matches!(s.to_lowercase().as_str(), "on" | "true" | "1" | "yes"))
                 .unwrap_or(true);
             Some(SlashCommand::Stream(enabled))
         }
@@ -222,7 +247,10 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
                     let rest = parts.get(1).unwrap_or(&"");
                     let exec_parts: Vec<&str> = rest.splitn(2, ' ').collect();
                     exec_parts.first().map(|name| {
-                        SlashCommand::ToolExec(name.to_string(), exec_parts.get(1).unwrap_or(&"").to_string())
+                        SlashCommand::ToolExec(
+                            name.to_string(),
+                            exec_parts.get(1).unwrap_or(&"").to_string(),
+                        )
                     })
                 }
                 _ => Some(SlashCommand::Tools),
@@ -235,7 +263,9 @@ fn parse_slash_command(input: &str) -> Option<SlashCommand> {
             match parts.first().map(|s| s.to_lowercase()).as_deref() {
                 Some("list") | None => Some(SlashCommand::Skills),
                 Some("info") => parts.get(1).map(|s| SlashCommand::SkillInfo(s.to_string())),
-                Some("create") => parts.get(1).map(|s| SlashCommand::SkillCreate(s.to_string())),
+                Some("create") => parts
+                    .get(1)
+                    .map(|s| SlashCommand::SkillCreate(s.to_string())),
                 Some("scan") => Some(SlashCommand::SkillScan),
                 _ => Some(SlashCommand::Skills),
             }
@@ -295,9 +325,18 @@ fn show_settings_menu(settings: &mut ChatSettings) -> bool {
     println!();
     println!("  \x1b[33m1.\x1b[0m Model:        {}", settings.model);
     println!("  \x1b[33m2.\x1b[0m Max Tokens:   {}", settings.max_tokens);
-    println!("  \x1b[33m3.\x1b[0m Temperature:  {:.2}", settings.temperature);
-    println!("  \x1b[33m4.\x1b[0m System:       {}...", &settings.system_prompt[..settings.system_prompt.len().min(40)]);
-    println!("  \x1b[33m5.\x1b[0m Distributed:  {}", if settings.distributed { "On" } else { "Off" });
+    println!(
+        "  \x1b[33m3.\x1b[0m Temperature:  {:.2}",
+        settings.temperature
+    );
+    println!(
+        "  \x1b[33m4.\x1b[0m System:       {}...",
+        &settings.system_prompt[..settings.system_prompt.len().min(40)]
+    );
+    println!(
+        "  \x1b[33m5.\x1b[0m Distributed:  {}",
+        if settings.distributed { "On" } else { "Off" }
+    );
     println!();
     println!("Enter number to edit, or press Enter to return:");
 
@@ -338,7 +377,10 @@ fn show_settings_menu(settings: &mut ChatSettings) -> bool {
             io::stdin().lock().read_line(&mut val).ok();
             if let Ok(t) = val.trim().parse::<f32>() {
                 settings.temperature = t.clamp(0.0, 2.0);
-                println!("\x1b[32mTemperature set to: {:.2}\x1b[0m", settings.temperature);
+                println!(
+                    "\x1b[32mTemperature set to: {:.2}\x1b[0m",
+                    settings.temperature
+                );
             }
         }
         "4" => {
@@ -354,7 +396,10 @@ fn show_settings_menu(settings: &mut ChatSettings) -> bool {
         }
         "5" => {
             settings.distributed = !settings.distributed;
-            println!("\x1b[32mDistributed mode: {}\x1b[0m", if settings.distributed { "On" } else { "Off" });
+            println!(
+                "\x1b[32mDistributed mode: {}\x1b[0m",
+                if settings.distributed { "On" } else { "Off" }
+            );
         }
         _ => {
             println!("\x1b[33mInvalid option\x1b[0m");
@@ -375,17 +420,32 @@ fn show_history(history: &[(String, String)]) {
         return;
     }
 
-    println!("\n\x1b[1m=== Conversation History ({} exchanges) ===\x1b[0m\n", history.len());
+    println!(
+        "\n\x1b[1m=== Conversation History ({} exchanges) ===\x1b[0m\n",
+        history.len()
+    );
     for (i, (user, assistant)) in history.iter().enumerate() {
-        let user_preview = if user.len() > 50 { format!("{}...", &user[..50]) } else { user.clone() };
-        let assistant_preview = if assistant.len() > 50 { format!("{}...", &assistant[..50]) } else { assistant.clone() };
+        let user_preview = if user.len() > 50 {
+            format!("{}...", &user[..50])
+        } else {
+            user.clone()
+        };
+        let assistant_preview = if assistant.len() > 50 {
+            format!("{}...", &assistant[..50])
+        } else {
+            assistant.clone()
+        };
         println!("  \x1b[36m{}.\x1b[0m You: {}", i + 1, user_preview);
         println!("     AI: {}", assistant_preview);
     }
     println!();
 }
 
-fn export_conversation(path: &PathBuf, history: &[(String, String)], settings: &ChatSettings) -> anyhow::Result<()> {
+fn export_conversation(
+    path: &PathBuf,
+    history: &[(String, String)],
+    settings: &ChatSettings,
+) -> anyhow::Result<()> {
     let mut content = String::new();
     content.push_str("# PeerClaw Chat Export\n\n");
     content.push_str(&format!("Model: {}\n", settings.model));
@@ -493,21 +553,37 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
     println!("Model: \x1b[36m{}\x1b[0m", settings.model);
     println!("Max tokens: {}", settings.max_tokens);
     println!("Temperature: {:.2}", settings.temperature);
-    println!("Streaming: {}", if settings.stream { "\x1b[32mOn\x1b[0m" } else { "\x1b[33mOff\x1b[0m" });
+    println!(
+        "Streaming: {}",
+        if settings.stream {
+            "\x1b[32mOn\x1b[0m"
+        } else {
+            "\x1b[33mOff\x1b[0m"
+        }
+    );
 
     // Determine mode
     let mode = if args.standalone {
         println!("Mode: \x1b[33mStandalone\x1b[0m");
-        ChatMode::Local { runtime: Box::new(create_standalone_runtime().await?) }
+        ChatMode::Local {
+            runtime: Box::new(create_standalone_runtime().await?),
+        }
     } else if let Some(base_url) = check_running_node().await {
-        println!("Mode: \x1b[32mConnected to running node\x1b[0m at {}", base_url);
+        println!(
+            "Mode: \x1b[32mConnected to running node\x1b[0m at {}",
+            base_url
+        );
         ChatMode::Api { base_url }
     } else if settings.distributed {
         println!("Mode: \x1b[35mDistributed\x1b[0m (will use network peers if needed)");
-        ChatMode::Local { runtime: Box::new(create_standalone_runtime().await?) }
+        ChatMode::Local {
+            runtime: Box::new(create_standalone_runtime().await?),
+        }
     } else {
         println!("Mode: \x1b[36mLocal\x1b[0m");
-        ChatMode::Local { runtime: Box::new(create_standalone_runtime().await?) }
+        ChatMode::Local {
+            runtime: Box::new(create_standalone_runtime().await?),
+        }
     };
 
     println!();
@@ -611,14 +687,21 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                             println!("Connected peers: \x1b[32m{}\x1b[0m", stats.connected_peers);
                             println!("Balance: \x1b[33m{:.6} PCLAW\x1b[0m", stats.balance);
                             println!("CPU usage: {:.1}%", stats.resource_state.cpu_usage * 100.0);
-                            println!("RAM: {}/{} MB", stats.resource_state.ram_available_mb, stats.resource_state.ram_total_mb);
+                            println!(
+                                "RAM: {}/{} MB",
+                                stats.resource_state.ram_available_mb,
+                                stats.resource_state.ram_total_mb
+                            );
                             println!("Active jobs: {}", stats.active_jobs);
                             println!();
                             println!("Current settings:");
                             println!("  Model: \x1b[36m{}\x1b[0m", settings.model);
                             println!("  Max tokens: {}", settings.max_tokens);
                             println!("  Temperature: {:.2}", settings.temperature);
-                            println!("  Distributed: {}", if settings.distributed { "On" } else { "Off" });
+                            println!(
+                                "  Distributed: {}",
+                                if settings.distributed { "On" } else { "Off" }
+                            );
                         }
                         ChatMode::Api { base_url } => {
                             if let Ok(status) = fetch_api_status(base_url).await {
@@ -641,7 +724,10 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                 SlashCommand::Temperature(t) => {
                     settings.temperature = t.clamp(0.0, 2.0);
                     settings.save().ok();
-                    println!("\x1b[32mTemperature set to: {:.2}\x1b[0m\n", settings.temperature);
+                    println!(
+                        "\x1b[32mTemperature set to: {:.2}\x1b[0m\n",
+                        settings.temperature
+                    );
                     continue;
                 }
                 SlashCommand::MaxTokens(n) => {
@@ -667,7 +753,10 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                 }
                 SlashCommand::Export(path) => {
                     match export_conversation(&path, &history, &settings) {
-                        Ok(_) => println!("\x1b[32mConversation exported to: {}\x1b[0m\n", path.display()),
+                        Ok(_) => println!(
+                            "\x1b[32mConversation exported to: {}\x1b[0m\n",
+                            path.display()
+                        ),
                         Err(e) => println!("\x1b[31mExport failed: {}\x1b[0m\n", e),
                     }
                     continue;
@@ -675,19 +764,28 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                 SlashCommand::Distributed(enabled) => {
                     settings.distributed = enabled;
                     settings.save().ok();
-                    println!("\x1b[32mDistributed mode: {}\x1b[0m\n", if enabled { "On" } else { "Off" });
+                    println!(
+                        "\x1b[32mDistributed mode: {}\x1b[0m\n",
+                        if enabled { "On" } else { "Off" }
+                    );
                     continue;
                 }
                 SlashCommand::Stream(enabled) => {
                     settings.stream = enabled;
                     settings.save().ok();
-                    println!("\x1b[32mStreaming: {}\x1b[0m\n", if enabled { "On" } else { "Off" });
+                    println!(
+                        "\x1b[32mStreaming: {}\x1b[0m\n",
+                        if enabled { "On" } else { "Off" }
+                    );
                     continue;
                 }
                 // New Claude-Code-style commands
                 SlashCommand::Cost => {
                     println!("\n\x1b[1m=== Session Cost ===\x1b[0m");
-                    println!("  Tokens used:    \x1b[36m{}\x1b[0m", session_stats.total_tokens);
+                    println!(
+                        "  Tokens used:    \x1b[36m{}\x1b[0m",
+                        session_stats.total_tokens
+                    );
                     println!("  Requests:       {}", session_stats.total_requests);
                     if let Some(start) = session_stats.start_time {
                         let elapsed = start.elapsed().as_secs();
@@ -697,7 +795,10 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                     }
                     // Estimate cost in PCLAW (rough: 1 PCLAW per 1000 tokens)
                     let estimated_cost = session_stats.total_tokens as f64 / 1000.0;
-                    println!("  Est. cost:      \x1b[33m{:.4} PCLAW\x1b[0m", estimated_cost);
+                    println!(
+                        "  Est. cost:      \x1b[33m{:.4} PCLAW\x1b[0m",
+                        estimated_cost
+                    );
                     println!();
                     continue;
                 }
@@ -728,9 +829,11 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                                 println!("  \x1b[33mNo peers connected\x1b[0m");
                             } else {
                                 for peer in peers.iter().take(10) {
-                                    let short = format!("{}...{}",
+                                    let short = format!(
+                                        "{}...{}",
                                         &peer.to_string()[..8],
-                                        &peer.to_string()[peer.to_string().len()-8..]);
+                                        &peer.to_string()[peer.to_string().len() - 8..]
+                                    );
                                     println!("  • \x1b[36m{}\x1b[0m", short);
                                 }
                                 if peers.len() > 10 {
@@ -756,14 +859,22 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                             if !active.is_empty() {
                                 for job in active.iter().take(5) {
                                     let id_str = &job.id.0;
-                                    let short_id = if id_str.len() > 12 { &id_str[..12] } else { id_str };
+                                    let short_id = if id_str.len() > 12 {
+                                        &id_str[..12]
+                                    } else {
+                                        id_str
+                                    };
                                     println!("    • {} - {}", short_id, job.status);
                                 }
                             }
                             println!("  Recent completed: {}", completed.len());
                             for job in completed.iter().take(3) {
                                 let id_str = &job.id.0;
-                                let short_id = if id_str.len() > 12 { &id_str[..12] } else { id_str };
+                                let short_id = if id_str.len() > 12 {
+                                    &id_str[..12]
+                                } else {
+                                    id_str
+                                };
                                 println!("    • {} - {}", short_id, job.status);
                             }
                             println!();
@@ -783,13 +894,26 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                         let summary = format!(
                             "[Previous {} exchanges summarized: discussed {}]",
                             old_len - 2,
-                            history.iter().take(old_len - 2)
-                                .map(|(q, _)| q.split_whitespace().take(3).collect::<Vec<_>>().join(" "))
-                                .collect::<Vec<_>>().join(", ")
+                            history
+                                .iter()
+                                .take(old_len - 2)
+                                .map(|(q, _)| q
+                                    .split_whitespace()
+                                    .take(3)
+                                    .collect::<Vec<_>>()
+                                    .join(" "))
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         );
                         history = history.split_off(old_len - 2);
-                        history.insert(0, (summary, "Understood, continuing from context.".to_string()));
-                        println!("\n  \x1b[32mCompacted {} exchanges into summary\x1b[0m\n", old_len - 2);
+                        history.insert(
+                            0,
+                            (summary, "Understood, continuing from context.".to_string()),
+                        );
+                        println!(
+                            "\n  \x1b[32mCompacted {} exchanges into summary\x1b[0m\n",
+                            old_len - 2
+                        );
                     }
                     continue;
                 }
@@ -799,12 +923,17 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                     // Check models
                     let models_dir = bootstrap::base_dir().join("models");
                     let model_count = std::fs::read_dir(&models_dir)
-                        .map(|e| e.filter_map(|f| f.ok())
-                            .filter(|f| f.path().extension().is_some_and(|e| e == "gguf"))
-                            .count())
+                        .map(|e| {
+                            e.filter_map(|f| f.ok())
+                                .filter(|f| f.path().extension().is_some_and(|e| e == "gguf"))
+                                .count()
+                        })
                         .unwrap_or(0);
                     if model_count > 0 {
-                        println!("  \x1b[32m✓\x1b[0m Models: {} GGUF files found", model_count);
+                        println!(
+                            "  \x1b[32m✓\x1b[0m Models: {} GGUF files found",
+                            model_count
+                        );
                     } else {
                         println!("  \x1b[31m✗\x1b[0m Models: No models found");
                         println!("    Run: peerclaw models download llama-3.2-1b");
@@ -853,9 +982,18 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                     let settings_path = bootstrap::base_dir().join("chat_settings.json");
                     println!("\n\x1b[1m=== Config Files ===\x1b[0m");
                     println!("  Main config:    \x1b[36m{}\x1b[0m", config_path.display());
-                    println!("  Chat settings:  \x1b[36m{}\x1b[0m", settings_path.display());
-                    println!("  Data directory: \x1b[36m{}\x1b[0m", bootstrap::base_dir().display());
-                    println!("  Models:         \x1b[36m{}\x1b[0m", bootstrap::base_dir().join("models").display());
+                    println!(
+                        "  Chat settings:  \x1b[36m{}\x1b[0m",
+                        settings_path.display()
+                    );
+                    println!(
+                        "  Data directory: \x1b[36m{}\x1b[0m",
+                        bootstrap::base_dir().display()
+                    );
+                    println!(
+                        "  Models:         \x1b[36m{}\x1b[0m",
+                        bootstrap::base_dir().join("models").display()
+                    );
                     println!();
                     continue;
                 }
@@ -864,18 +1002,31 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                     match &mode {
                         ChatMode::Local { runtime: rt } => {
                             let tools = rt.tools.list_tools().await;
-                            println!("\n\x1b[1m=== Available Tools ({}) ===\x1b[0m\n", tools.len());
+                            println!(
+                                "\n\x1b[1m=== Available Tools ({}) ===\x1b[0m\n",
+                                tools.len()
+                            );
                             if tools.is_empty() {
                                 println!("  No tools found.");
-                                println!("  Tools directory: {}", bootstrap::base_dir().join("tools").display());
+                                println!(
+                                    "  Tools directory: {}",
+                                    bootstrap::base_dir().join("tools").display()
+                                );
                             } else {
                                 for tool in &tools {
                                     let loc = match tool.location {
                                         crate::tools::ToolLocation::Local => "\x1b[32mlocal\x1b[0m",
-                                        crate::tools::ToolLocation::Remote => "\x1b[36mremote\x1b[0m",
+                                        crate::tools::ToolLocation::Remote => {
+                                            "\x1b[36mremote\x1b[0m"
+                                        }
                                         crate::tools::ToolLocation::Auto => "\x1b[33mauto\x1b[0m",
                                     };
-                                    println!("  {:20} {} - {}", tool.name, loc, truncate(&tool.description, 40));
+                                    println!(
+                                        "  {:20} {} - {}",
+                                        tool.name,
+                                        loc,
+                                        truncate(&tool.description, 40)
+                                    );
                                 }
                             }
                             println!();
@@ -899,10 +1050,18 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                                 println!("  Domain:      {:?}", tool.domain());
                                 let schema = tool.parameters_schema();
                                 println!("\n  Parameters:");
-                                if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
+                                if let Some(props) =
+                                    schema.get("properties").and_then(|p| p.as_object())
+                                {
                                     for (key, value) in props {
-                                        let desc = value.get("description").and_then(|d| d.as_str()).unwrap_or("");
-                                        let typ = value.get("type").and_then(|t| t.as_str()).unwrap_or("any");
+                                        let desc = value
+                                            .get("description")
+                                            .and_then(|d| d.as_str())
+                                            .unwrap_or("");
+                                        let typ = value
+                                            .get("type")
+                                            .and_then(|t| t.as_str())
+                                            .unwrap_or("any");
                                         println!("    {} ({}) - {}", key, typ, desc);
                                     }
                                 } else {
@@ -928,13 +1087,17 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                                 let params_json: serde_json::Value = if params.is_empty() {
                                     serde_json::json!({})
                                 } else {
-                                    serde_json::from_str(&params).unwrap_or_else(|_| serde_json::json!({"input": params}))
+                                    serde_json::from_str(&params)
+                                        .unwrap_or_else(|_| serde_json::json!({"input": params}))
                                 };
                                 let peer_id = rt.local_peer_id.to_string();
                                 let ctx = crate::tools::ToolContext::local(peer_id);
                                 match tool.execute(params_json, &ctx).await {
                                     Ok(output) => {
-                                        println!("  \x1b[32mSuccess\x1b[0m ({}ms)", output.duration_ms);
+                                        println!(
+                                            "  \x1b[32mSuccess\x1b[0m ({}ms)",
+                                            output.duration_ms
+                                        );
                                         println!("  Result: {}", output.data);
                                     }
                                     Err(e) => {
@@ -957,15 +1120,26 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                     match &mode {
                         ChatMode::Local { runtime: rt } => {
                             let skills = rt.skills.list_local().await;
-                            println!("\n\x1b[1m=== Available Skills ({}) ===\x1b[0m\n", skills.len());
+                            println!(
+                                "\n\x1b[1m=== Available Skills ({}) ===\x1b[0m\n",
+                                skills.len()
+                            );
                             if skills.is_empty() {
                                 println!("  No skills found.");
-                                println!("  Skills directory: {}", bootstrap::base_dir().join("skills").display());
+                                println!(
+                                    "  Skills directory: {}",
+                                    bootstrap::base_dir().join("skills").display()
+                                );
                                 println!("  Create a SKILL.md file to add a skill.");
                             } else {
                                 for skill in &skills {
-                                    let status = if skill.is_available() { "\x1b[32m✓\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
-                                    println!("  {} {:20} {} (v{})",
+                                    let status = if skill.is_available() {
+                                        "\x1b[32m✓\x1b[0m"
+                                    } else {
+                                        "\x1b[31m✗\x1b[0m"
+                                    };
+                                    println!(
+                                        "  {} {:20} {} (v{})",
                                         status,
                                         skill.name(),
                                         truncate(skill.description(), 30),
@@ -998,10 +1172,16 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                                     println!("  Author:      {}", author);
                                 }
                                 if !skill.manifest.activation.keywords.is_empty() {
-                                    println!("\n  Keywords: {}", skill.manifest.activation.keywords.join(", "));
+                                    println!(
+                                        "\n  Keywords: {}",
+                                        skill.manifest.activation.keywords.join(", ")
+                                    );
                                 }
                                 if !skill.manifest.activation.tags.is_empty() {
-                                    println!("  Tags:     {}", skill.manifest.activation.tags.join(", "));
+                                    println!(
+                                        "  Tags:     {}",
+                                        skill.manifest.activation.tags.join(", ")
+                                    );
                                 }
                                 println!("\n  Prompt Preview:");
                                 println!("  {:-<56}", "");
@@ -1028,9 +1208,14 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
                     let skills_dir = bootstrap::base_dir().join("skills");
                     let skill_path = skills_dir.join(format!("{}.md", &name));
                     if skill_path.exists() {
-                        println!("\n  \x1b[33mSkill '{}' already exists at {}\x1b[0m", name, skill_path.display());
+                        println!(
+                            "\n  \x1b[33mSkill '{}' already exists at {}\x1b[0m",
+                            name,
+                            skill_path.display()
+                        );
                     } else {
-                        let template = format!(r#"---
+                        let template = format!(
+                            r#"---
 name: {}
 version: 1.0.0
 description: A custom skill
@@ -1062,13 +1247,20 @@ When helping users:
 - Follow best practices
 - Be security-conscious
 - Cite sources when applicable
-"#, name, name, name.replace("-", " ").to_uppercase());
+"#,
+                            name,
+                            name,
+                            name.replace("-", " ").to_uppercase()
+                        );
                         if let Err(e) = std::fs::create_dir_all(&skills_dir) {
                             println!("\n  \x1b[31mError creating skills dir: {}\x1b[0m", e);
                         } else if let Err(e) = std::fs::write(&skill_path, template) {
                             println!("\n  \x1b[31mError creating skill: {}\x1b[0m", e);
                         } else {
-                            println!("\n  \x1b[32mCreated skill template:\x1b[0m {}", skill_path.display());
+                            println!(
+                                "\n  \x1b[32mCreated skill template:\x1b[0m {}",
+                                skill_path.display()
+                            );
                             println!("\n  Edit the file to customize, then run \x1b[36m/skill scan\x1b[0m");
                         }
                     }
@@ -1119,12 +1311,14 @@ When helping users:
             ChatMode::Local { runtime: rt } => {
                 if settings.stream {
                     // Use streaming inference - tokens print directly as they're generated
-                    let result = rt.inference_streaming_print(
-                        &settings.model,
-                        &full_prompt,
-                        settings.max_tokens,
-                        settings.temperature,
-                    ).await;
+                    let result = rt
+                        .inference_streaming_print(
+                            &settings.model,
+                            &full_prompt,
+                            settings.max_tokens,
+                            settings.temperature,
+                        )
+                        .await;
 
                     match result {
                         Ok(result) => {
@@ -1132,8 +1326,7 @@ When helping users:
                             let metrics = if result.tokens_generated > 0 {
                                 Some(format!(
                                     "\x1b[90m[{} tokens, {:.1} tok/s, Local, streamed]\x1b[0m",
-                                    result.tokens_generated,
-                                    result.tokens_per_second,
+                                    result.tokens_generated, result.tokens_per_second,
                                 ))
                             } else {
                                 None
@@ -1154,7 +1347,11 @@ When helping users:
                                 ExecutionLocation::Local => "Local".to_string(),
                                 ExecutionLocation::Remote { peer_id, .. } => {
                                     let short = if peer_id.len() > 16 {
-                                        format!("{}...{}", &peer_id[..8], &peer_id[peer_id.len()-8..])
+                                        format!(
+                                            "{}...{}",
+                                            &peer_id[..8],
+                                            &peer_id[peer_id.len() - 8..]
+                                        )
                                     } else {
                                         peer_id.clone()
                                     };
@@ -1166,9 +1363,7 @@ When helping users:
                                     let metrics = if r.tokens_generated > 0 {
                                         Some(format!(
                                             "\x1b[90m[{} tokens, {:.1} tok/s, {}]\x1b[0m",
-                                            r.tokens_generated,
-                                            r.tokens_per_second,
-                                            provider_info
+                                            r.tokens_generated, r.tokens_per_second, provider_info
                                         ))
                                     } else {
                                         None
@@ -1185,7 +1380,14 @@ When helping users:
             }
             ChatMode::Api { base_url } => {
                 // Use the API endpoint (non-streaming for now)
-                execute_via_api(base_url, &settings.model, &full_prompt, settings.max_tokens, settings.temperature).await
+                execute_via_api(
+                    base_url,
+                    &settings.model,
+                    &full_prompt,
+                    settings.max_tokens,
+                    settings.temperature,
+                )
+                .await
             }
         };
 
@@ -1253,10 +1455,16 @@ async fn fetch_api_status(base_url: &str) -> anyhow::Result<String> {
 
     Ok(format!(
         "Peer ID: {}\nConnected peers: {}\nBalance: {} PCLAW\nActive jobs: {}",
-        resp.get("peer_id").and_then(|v| v.as_str()).unwrap_or("unknown"),
-        resp.get("connected_peers").and_then(|v| v.as_u64()).unwrap_or(0),
+        resp.get("peer_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown"),
+        resp.get("connected_peers")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
         resp.get("balance").and_then(|v| v.as_f64()).unwrap_or(0.0),
-        resp.get("active_jobs").and_then(|v| v.as_u64()).unwrap_or(0),
+        resp.get("active_jobs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
     ))
 }
 
@@ -1283,7 +1491,8 @@ async fn execute_via_api(
             if resp.status().is_success() {
                 match resp.json::<serde_json::Value>().await {
                     Ok(json) => {
-                        let text = json.get("text")
+                        let text = json
+                            .get("text")
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
@@ -1291,7 +1500,9 @@ async fn execute_via_api(
                         let tps = json.get("tokens_per_second").and_then(|v| v.as_f64());
 
                         let metrics = match (tokens, tps) {
-                            (Some(t), Some(s)) if t > 0 => Some(format!("[{} tokens, {:.1} tok/s, via API]", t, s)),
+                            (Some(t), Some(s)) if t > 0 => {
+                                Some(format!("[{} tokens, {:.1} tok/s, via API]", t, s))
+                            }
                             _ => None,
                         };
 

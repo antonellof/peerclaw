@@ -8,8 +8,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::messaging::{
-    Channel, ChannelConfig, ChannelError, ChannelId, ChannelMessage, ChannelUser,
-    MessageDirection, MessageId, Platform, UserTrust,
+    Channel, ChannelConfig, ChannelError, ChannelId, ChannelMessage, ChannelUser, MessageDirection,
+    MessageId, Platform, UserTrust,
 };
 
 /// Webhook channel configuration.
@@ -92,10 +92,8 @@ impl WebhookChannel {
         match &self.webhook_config.secret {
             Some(secret) => {
                 // Simple HMAC verification (would use proper HMAC-SHA256 in production)
-                let expected = blake3::keyed_hash(
-                    blake3::hash(secret.as_bytes()).as_bytes(),
-                    payload,
-                );
+                let expected =
+                    blake3::keyed_hash(blake3::hash(secret.as_bytes()).as_bytes(), payload);
                 signature == expected.to_hex().as_str()
             }
             None => true, // No secret configured, accept all
@@ -109,7 +107,8 @@ impl WebhookChannel {
             .map_err(|e| ChannelError::InvalidFormat(e.to_string()))?;
 
         // Extract message content
-        let content = value.get("message")
+        let content = value
+            .get("message")
             .or_else(|| value.get("text"))
             .or_else(|| value.get("content"))
             .and_then(|v| v.as_str())
@@ -117,13 +116,15 @@ impl WebhookChannel {
             .to_string();
 
         // Extract sender info
-        let sender_id = value.get("user_id")
+        let sender_id = value
+            .get("user_id")
             .or_else(|| value.get("sender"))
             .and_then(|v| v.as_str())
             .unwrap_or("webhook_user")
             .to_string();
 
-        let sender_name = value.get("user_name")
+        let sender_name = value
+            .get("user_name")
             .or_else(|| value.get("name"))
             .and_then(|v| v.as_str())
             .map(String::from);
@@ -172,7 +173,9 @@ impl Channel for WebhookChannel {
         // Create HTTP client for outgoing webhooks
         self.client = Some(
             reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(self.webhook_config.timeout_secs))
+                .timeout(std::time::Duration::from_secs(
+                    self.webhook_config.timeout_secs,
+                ))
                 .build()
                 .map_err(|e| ChannelError::ConnectionFailed(e.to_string()))?,
         );

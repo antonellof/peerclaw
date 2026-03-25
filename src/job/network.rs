@@ -1,8 +1,8 @@
 //! P2P network integration for job broadcasting.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use serde::{Deserialize, Serialize};
 use libp2p::PeerId;
+use serde::{Deserialize, Serialize};
 
 use super::{JobBid, JobId, JobRequest, JobResult};
 
@@ -193,7 +193,10 @@ pub enum JobStatusUpdate {
     /// Job execution started
     Started,
     /// Progress update (0-100%)
-    Progress { percent: u8, message: Option<String> },
+    Progress {
+        percent: u8,
+        message: Option<String>,
+    },
     /// Job completed successfully
     Completed,
     /// Job failed
@@ -215,7 +218,7 @@ pub fn deserialize_message(data: &[u8]) -> Result<JobMessage, rmp_serde::decode:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::job::{ResourceType, JobRequirements};
+    use crate::job::{JobRequirements, ResourceType};
     use crate::wallet::to_micro;
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;

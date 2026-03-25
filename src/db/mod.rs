@@ -54,9 +54,8 @@ impl Database {
     pub fn open(path: &Path) -> Result<Self, DatabaseError> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                DatabaseError::Storage(redb::StorageError::Io(e))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| DatabaseError::Storage(redb::StorageError::Io(e)))?;
         }
 
         let db = RedbDatabase::create(path)?;
@@ -81,8 +80,8 @@ impl Database {
 
     /// Store peer information.
     pub fn store_peer<T: Serialize>(&self, peer_id: &str, info: &T) -> Result<(), DatabaseError> {
-        let bytes = rmp_serde::to_vec(info)
-            .map_err(|e| DatabaseError::Serialization(e.to_string()))?;
+        let bytes =
+            rmp_serde::to_vec(info).map_err(|e| DatabaseError::Serialization(e.to_string()))?;
 
         let write_txn = self.db.begin_write()?;
         {
@@ -137,9 +136,13 @@ impl Database {
     // =========================================================================
 
     /// Store agent state.
-    pub fn store_agent<T: Serialize>(&self, agent_id: &str, state: &T) -> Result<(), DatabaseError> {
-        let bytes = rmp_serde::to_vec(state)
-            .map_err(|e| DatabaseError::Serialization(e.to_string()))?;
+    pub fn store_agent<T: Serialize>(
+        &self,
+        agent_id: &str,
+        state: &T,
+    ) -> Result<(), DatabaseError> {
+        let bytes =
+            rmp_serde::to_vec(state).map_err(|e| DatabaseError::Serialization(e.to_string()))?;
 
         let write_txn = self.db.begin_write()?;
         {
@@ -151,7 +154,10 @@ impl Database {
     }
 
     /// Get agent state.
-    pub fn get_agent<T: DeserializeOwned>(&self, agent_id: &str) -> Result<Option<T>, DatabaseError> {
+    pub fn get_agent<T: DeserializeOwned>(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<T>, DatabaseError> {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(AGENTS)?;
 
@@ -223,8 +229,8 @@ impl Database {
 
     /// Store a setting.
     pub fn store_setting<T: Serialize>(&self, key: &str, value: &T) -> Result<(), DatabaseError> {
-        let bytes = rmp_serde::to_vec(value)
-            .map_err(|e| DatabaseError::Serialization(e.to_string()))?;
+        let bytes =
+            rmp_serde::to_vec(value).map_err(|e| DatabaseError::Serialization(e.to_string()))?;
 
         let write_txn = self.db.begin_write()?;
         {

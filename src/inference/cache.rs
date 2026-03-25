@@ -271,13 +271,22 @@ mod tests {
     async fn test_cache_lru_eviction() {
         let cache = ModelCache::new(2, 100_000); // Max 2 models
 
-        cache.insert(make_test_model("model-1", 4000)).await.unwrap();
+        cache
+            .insert(make_test_model("model-1", 4000))
+            .await
+            .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        cache.insert(make_test_model("model-2", 4000)).await.unwrap();
+        cache
+            .insert(make_test_model("model-2", 4000))
+            .await
+            .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         // This should evict model-1 (oldest)
-        cache.insert(make_test_model("model-3", 4000)).await.unwrap();
+        cache
+            .insert(make_test_model("model-3", 4000))
+            .await
+            .unwrap();
 
         assert!(!cache.is_loaded("model-1").await);
         assert!(cache.is_loaded("model-2").await);

@@ -269,17 +269,17 @@ pub struct LlamaCppBackend {
 }
 
 #[cfg(feature = "local-inference")]
-use llama_cpp_2::model::LlamaModel;
-#[cfg(feature = "local-inference")]
-use llama_cpp_2::model::params::LlamaModelParams;
-#[cfg(feature = "local-inference")]
 use llama_cpp_2::context::params::LlamaContextParams;
 #[cfg(feature = "local-inference")]
 use llama_cpp_2::llama_batch::LlamaBatch;
 #[cfg(feature = "local-inference")]
-use llama_cpp_2::sampling::LlamaSampler;
+use llama_cpp_2::model::params::LlamaModelParams;
 #[cfg(feature = "local-inference")]
 use llama_cpp_2::model::AddBos;
+#[cfg(feature = "local-inference")]
+use llama_cpp_2::model::LlamaModel;
+#[cfg(feature = "local-inference")]
+use llama_cpp_2::sampling::LlamaSampler;
 
 /// Wrapper to hold the actual llama.cpp model.
 #[cfg(feature = "local-inference")]
@@ -320,8 +320,8 @@ impl GgufBackend for LlamaCppBackend {
         let start = Instant::now();
 
         // Create model params
-        let model_params = LlamaModelParams::default()
-            .with_n_gpu_layers(config.n_gpu_layers as u32);
+        let model_params =
+            LlamaModelParams::default().with_n_gpu_layers(config.n_gpu_layers as u32);
 
         let model = LlamaModel::load_from_file(&self.backend, path, &model_params)
             .map_err(|e| GgufError::LoadFailed(format!("{:?}", e)))?;
@@ -368,7 +368,9 @@ impl GgufBackend for LlamaCppBackend {
             "Generating completion with llama-cpp-2"
         );
 
-        let inner = model.inner.as_ref()
+        let inner = model
+            .inner
+            .as_ref()
             .ok_or_else(|| GgufError::GenerationFailed("Model not loaded".to_string()))?;
 
         // Create context params
@@ -379,38 +381,43 @@ impl GgufBackend for LlamaCppBackend {
             .with_n_threads_batch(self.config.n_threads as i32);
 
         // Create context
-        let mut ctx = inner.model.model.new_context(&self.backend, ctx_params)
-            .map_err(|e| GgufError::GenerationFailed(format!("Failed to create context: {:?}", e)))?;
+        let mut ctx = inner
+            .model
+            .model
+            .new_context(&self.backend, ctx_params)
+            .map_err(|e| {
+                GgufError::GenerationFailed(format!("Failed to create context: {:?}", e))
+            })?;
 
         // Tokenize the prompt
-        let tokens = inner.model.model.str_to_token(&request.prompt, AddBos::Always)
+        let tokens = inner
+            .model
+            .model
+            .str_to_token(&request.prompt, AddBos::Always)
             .map_err(|e| GgufError::TokenizationFailed(format!("{:?}", e)))?;
 
-        tracing::debug!(
-            token_count = tokens.len(),
-            "Tokenized prompt"
-        );
+        tracing::debug!(token_count = tokens.len(), "Tokenized prompt");
 
         // Create batch and add prompt tokens
         let mut batch = LlamaBatch::new(512, 1);
 
         for (i, token) in tokens.iter().enumerate() {
             let is_last = i == tokens.len() - 1;
-            batch.add(*token, i as i32, &[0], is_last)
-                .map_err(|e| GgufError::GenerationFailed(format!("Failed to add token to batch: {:?}", e)))?;
+            batch.add(*token, i as i32, &[0], is_last).map_err(|e| {
+                GgufError::GenerationFailed(format!("Failed to add token to batch: {:?}", e))
+            })?;
         }
 
         // Decode the prompt
-        ctx.decode(&mut batch)
-            .map_err(|e| GgufError::GenerationFailed(format!("Failed to decode prompt: {:?}", e)))?;
+        ctx.decode(&mut batch).map_err(|e| {
+            GgufError::GenerationFailed(format!("Failed to decode prompt: {:?}", e))
+        })?;
 
         let ttfb = start.elapsed();
 
         // Set up sampler
-        let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::dist(1234),
-            LlamaSampler::greedy(),
-        ]);
+        let mut sampler =
+            LlamaSampler::chain_simple([LlamaSampler::dist(1234), LlamaSampler::greedy()]);
 
         // Generate tokens
         let mut output = String::new();
@@ -429,7 +436,11 @@ impl GgufBackend for LlamaCppBackend {
 
             // Decode token to text using bytes
             // Args: token, buffer_size, special (decode specials), lstrip
-            if let Ok(bytes) = inner.model.model.token_to_piece_bytes(new_token, 256, false, None) {
+            if let Ok(bytes) = inner
+                .model
+                .model
+                .token_to_piece_bytes(new_token, 256, false, None)
+            {
                 if let Ok(s) = std::str::from_utf8(&bytes) {
                     output.push_str(s);
                 }
@@ -439,8 +450,11 @@ impl GgufBackend for LlamaCppBackend {
 
             // Prepare for next token
             batch.clear();
-            batch.add(new_token, n_cur as i32, &[0], true)
-                .map_err(|e| GgufError::GenerationFailed(format!("Failed to add token: {:?}", e)))?;
+            batch
+                .add(new_token, n_cur as i32, &[0], true)
+                .map_err(|e| {
+                    GgufError::GenerationFailed(format!("Failed to add token: {:?}", e))
+                })?;
 
             // Decode
             ctx.decode(&mut batch)
@@ -496,7 +510,9 @@ impl GgufBackend for LlamaCppBackend {
             "Generating completion with streaming"
         );
 
-        let inner = model.inner.as_ref()
+        let inner = model
+            .inner
+            .as_ref()
             .ok_or_else(|| GgufError::GenerationFailed("Model not loaded".to_string()))?;
 
         // Create context params
@@ -507,11 +523,19 @@ impl GgufBackend for LlamaCppBackend {
             .with_n_threads_batch(self.config.n_threads as i32);
 
         // Create context
-        let mut ctx = inner.model.model.new_context(&self.backend, ctx_params)
-            .map_err(|e| GgufError::GenerationFailed(format!("Failed to create context: {:?}", e)))?;
+        let mut ctx = inner
+            .model
+            .model
+            .new_context(&self.backend, ctx_params)
+            .map_err(|e| {
+                GgufError::GenerationFailed(format!("Failed to create context: {:?}", e))
+            })?;
 
         // Tokenize the prompt
-        let tokens = inner.model.model.str_to_token(&request.prompt, AddBos::Always)
+        let tokens = inner
+            .model
+            .model
+            .str_to_token(&request.prompt, AddBos::Always)
             .map_err(|e| GgufError::TokenizationFailed(format!("{:?}", e)))?;
 
         // Create batch and add prompt tokens
@@ -519,21 +543,21 @@ impl GgufBackend for LlamaCppBackend {
 
         for (i, token) in tokens.iter().enumerate() {
             let is_last = i == tokens.len() - 1;
-            batch.add(*token, i as i32, &[0], is_last)
-                .map_err(|e| GgufError::GenerationFailed(format!("Failed to add token to batch: {:?}", e)))?;
+            batch.add(*token, i as i32, &[0], is_last).map_err(|e| {
+                GgufError::GenerationFailed(format!("Failed to add token to batch: {:?}", e))
+            })?;
         }
 
         // Decode the prompt
-        ctx.decode(&mut batch)
-            .map_err(|e| GgufError::GenerationFailed(format!("Failed to decode prompt: {:?}", e)))?;
+        ctx.decode(&mut batch).map_err(|e| {
+            GgufError::GenerationFailed(format!("Failed to decode prompt: {:?}", e))
+        })?;
 
         let ttfb = start.elapsed();
 
         // Set up sampler
-        let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::dist(1234),
-            LlamaSampler::greedy(),
-        ]);
+        let mut sampler =
+            LlamaSampler::chain_simple([LlamaSampler::dist(1234), LlamaSampler::greedy()]);
 
         // Generate tokens with streaming
         let mut output = String::new();
@@ -551,7 +575,11 @@ impl GgufBackend for LlamaCppBackend {
             }
 
             // Decode token to text and stream it
-            if let Ok(bytes) = inner.model.model.token_to_piece_bytes(new_token, 256, false, None) {
+            if let Ok(bytes) = inner
+                .model
+                .model
+                .token_to_piece_bytes(new_token, 256, false, None)
+            {
                 if let Ok(s) = std::str::from_utf8(&bytes) {
                     output.push_str(s);
                     // Stream the token to the callback
@@ -563,8 +591,11 @@ impl GgufBackend for LlamaCppBackend {
 
             // Prepare for next token
             batch.clear();
-            batch.add(new_token, n_cur as i32, &[0], true)
-                .map_err(|e| GgufError::GenerationFailed(format!("Failed to add token: {:?}", e)))?;
+            batch
+                .add(new_token, n_cur as i32, &[0], true)
+                .map_err(|e| {
+                    GgufError::GenerationFailed(format!("Failed to add token: {:?}", e))
+                })?;
 
             // Decode
             ctx.decode(&mut batch)
@@ -672,7 +703,8 @@ impl GgufEngine {
         request: &GenerateRequest,
         token_callback: TokenCallback,
     ) -> Result<GenerateResponse, GgufError> {
-        self.backend.generate_streaming(model, request, token_callback)
+        self.backend
+            .generate_streaming(model, request, token_callback)
     }
 
     /// Get model info.
@@ -732,7 +764,10 @@ impl AsyncGgufEngine {
         &self,
         model: &GgufModelHandle,
         request: &GenerateRequest,
-    ) -> (mpsc::Receiver<String>, tokio::task::JoinHandle<Result<GenerateResponse, GgufError>>) {
+    ) -> (
+        mpsc::Receiver<String>,
+        tokio::task::JoinHandle<Result<GenerateResponse, GgufError>>,
+    ) {
         let (tx, rx) = mpsc::channel::<String>(256);
 
         // Clone values needed for the closure

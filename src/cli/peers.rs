@@ -105,7 +105,8 @@ async fn join_peer(addr: &str) -> anyhow::Result<()> {
     println!();
 
     // Parse multiaddr
-    let multiaddr: libp2p::Multiaddr = addr.parse()
+    let multiaddr: libp2p::Multiaddr = addr
+        .parse()
         .map_err(|e| anyhow::anyhow!("Invalid multiaddr: {}", e))?;
 
     let runtime = create_runtime().await?;
@@ -155,11 +156,18 @@ async fn show_info() -> anyhow::Result<()> {
 
     // Get listen addresses from config
     let config = Config::load()?;
-    let listen_addr = config.p2p.listen_addresses.first()
+    let listen_addr = config
+        .p2p
+        .listen_addresses
+        .first()
         .cloned()
         .unwrap_or_else(|| "/ip4/0.0.0.0/tcp/9000".to_string());
 
-    println!("  \x1b[90m{}/p2p/{}\x1b[0m", listen_addr, identity.peer_id());
+    println!(
+        "  \x1b[90m{}/p2p/{}\x1b[0m",
+        listen_addr,
+        identity.peer_id()
+    );
     println!();
     println!("  Note: Replace the IP with your public IP if connecting over internet.");
     println!();

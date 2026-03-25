@@ -32,19 +32,19 @@ pub mod web;
 pub mod workspace;
 
 // Re-export commonly used types
+pub use channels::{Channel, ChannelManager, IncomingMessage, OutgoingResponse};
 pub use config::Config;
 pub use executor::{ExecutorConfig, ResourceMonitor, TaskExecutor};
 pub use identity::NodeIdentity;
 pub use inference::{InferenceConfig, InferenceEngine};
+pub use mcp::{McpClient, McpConfig, McpManager};
 pub use node::Node;
+pub use routines::{Heartbeat, Routine, RoutineConfig, RoutineEngine};
 pub use runtime::Runtime;
-pub use skills::{SkillRegistry, LoadedSkill, SkillTrust};
-pub use tools::{Tool, ToolRegistry, ToolContext, ToolOutput, ToolError};
-pub use safety::{SafetyLayer, SafetyConfig, LeakDetector, Sanitizer};
-pub use swarm::{SwarmManager, SwarmAgent, SwarmEvent, AgentProfile};
-pub use vector::{VectorStore, VectorStoreConfig, SearchResult};
+pub use safety::{LeakDetector, SafetyConfig, SafetyLayer, Sanitizer};
+pub use skills::{LoadedSkill, SkillRegistry, SkillTrust};
+pub use swarm::{AgentProfile, SwarmAgent, SwarmEvent, SwarmManager};
+pub use tools::{Tool, ToolContext, ToolError, ToolOutput, ToolRegistry};
+pub use vector::{SearchResult, VectorStore, VectorStoreConfig};
 pub use wallet::{Wallet, WalletConfig};
 pub use workspace::{Workspace, WorkspaceConfig};
-pub use channels::{Channel, ChannelManager, IncomingMessage, OutgoingResponse};
-pub use routines::{RoutineEngine, RoutineConfig, Routine, Heartbeat};
-pub use mcp::{McpManager, McpConfig, McpClient};

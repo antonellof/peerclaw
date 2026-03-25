@@ -8,8 +8,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use crate::executor::task::{ChatMessage, ExecutionTask, InferenceTask, MessageRole, TaskData};
 use crate::executor::TaskExecutor;
-use crate::executor::task::{ChatMessage, InferenceTask, ExecutionTask, TaskData, MessageRole};
 use crate::tools::{ToolContext, ToolRegistry};
 
 use super::budget::BudgetTracker;
@@ -31,7 +31,10 @@ impl AgentConfig {
     /// Create from an AgentSpec.
     pub fn from_spec(spec: &AgentSpec) -> Self {
         Self {
-            id: format!("agent_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]),
+            id: format!(
+                "agent_{}",
+                &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
+            ),
             name: spec.agent.name.clone(),
             model: spec.model.name.clone(),
             max_tokens: spec.model.max_tokens,
@@ -156,7 +159,8 @@ impl AgentRuntime {
             iterations += 1;
 
             if iterations > MAX_ITERATIONS {
-                self.log("Max iterations reached, returning partial result").await;
+                self.log("Max iterations reached, returning partial result")
+                    .await;
                 return AgentResult {
                     answer: self.extract_last_text(),
                     tool_calls,
@@ -184,7 +188,11 @@ impl AgentRuntime {
             }
 
             // Call LLM
-            self.log(&format!("LLM iteration {} (model: {})", iterations, self.config.model)).await;
+            self.log(&format!(
+                "LLM iteration {} (model: {})",
+                iterations, self.config.model
+            ))
+            .await;
 
             let task = InferenceTask {
                 model: self.config.model.clone(),
@@ -198,38 +206,36 @@ impl AgentRuntime {
             let result = self.executor.execute(ExecutionTask::Inference(task)).await;
 
             let response_text = match result {
-                Ok(task_result) => {
-                    match &task_result.data {
-                        TaskData::Inference(r) => {
-                            total_tokens += r.tokens_generated;
-                            let cost = (r.tokens_generated as f64 / 1000.0) * COST_PER_1K_TOKENS;
-                            self.budget.spend(cost);
-                            r.text.clone()
-                        }
-                        TaskData::Error(e) => {
-                            return AgentResult {
-                                answer: String::new(),
-                                tool_calls,
-                                iterations,
-                                total_tokens,
-                                budget_spent: self.budget.total_spent(),
-                                success: false,
-                                error: Some(format!("Inference error: {}", e)),
-                            };
-                        }
-                        _ => {
-                            return AgentResult {
-                                answer: String::new(),
-                                tool_calls,
-                                iterations,
-                                total_tokens,
-                                budget_spent: self.budget.total_spent(),
-                                success: false,
-                                error: Some("Unexpected response type".to_string()),
-                            };
-                        }
+                Ok(task_result) => match &task_result.data {
+                    TaskData::Inference(r) => {
+                        total_tokens += r.tokens_generated;
+                        let cost = (r.tokens_generated as f64 / 1000.0) * COST_PER_1K_TOKENS;
+                        self.budget.spend(cost);
+                        r.text.clone()
                     }
-                }
+                    TaskData::Error(e) => {
+                        return AgentResult {
+                            answer: String::new(),
+                            tool_calls,
+                            iterations,
+                            total_tokens,
+                            budget_spent: self.budget.total_spent(),
+                            success: false,
+                            error: Some(format!("Inference error: {}", e)),
+                        };
+                    }
+                    _ => {
+                        return AgentResult {
+                            answer: String::new(),
+                            tool_calls,
+                            iterations,
+                            total_tokens,
+                            budget_spent: self.budget.total_spent(),
+                            success: false,
+                            error: Some("Unexpected response type".to_string()),
+                        };
+                    }
+                },
                 Err(e) => {
                     return AgentResult {
                         answer: String::new(),
@@ -244,7 +250,8 @@ impl AgentRuntime {
             };
 
             // Add assistant response to conversation
-            self.conversation.push(ChatMessage::assistant(&response_text));
+            self.conversation
+                .push(ChatMessage::assistant(&response_text));
 
             // Check for tool calls in the response
             let parsed_calls = parse_tool_calls(&response_text);
@@ -265,7 +272,11 @@ impl AgentRuntime {
 
             // Execute tool calls
             for call in parsed_calls {
-                self.log(&format!("Calling tool: {} with args: {}", call.name, call.args)).await;
+                self.log(&format!(
+                    "Calling tool: {} with args: {}",
+                    call.name, call.args
+                ))
+                .await;
 
                 // Check if tool is allowed
                 if !self.config.allowed_tools.is_empty()
@@ -273,9 +284,8 @@ impl AgentRuntime {
                 {
                     let error_msg = format!("Tool '{}' is not in allowed tools list", call.name);
                     self.log(&error_msg).await;
-                    self.conversation.push(ChatMessage::user(
-                        format!("Tool error: {}", error_msg),
-                    ));
+                    self.conversation
+                        .push(ChatMessage::user(format!("Tool error: {}", error_msg)));
                     tool_calls.push(ToolCallRecord {
                         tool_name: call.name,
                         args: call.args,
@@ -287,11 +297,10 @@ impl AgentRuntime {
                 }
 
                 let start = std::time::Instant::now();
-                let tool_result = self.tools.execute_local(
-                    &call.name,
-                    call.args.clone(),
-                    &self.tool_context,
-                ).await;
+                let tool_result = self
+                    .tools
+                    .execute_local(&call.name, call.args.clone(), &self.tool_context)
+                    .await;
 
                 let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -304,12 +313,17 @@ impl AgentRuntime {
                                 .unwrap_or_else(|_| "{}".to_string())
                         };
 
-                        self.log(&format!("Tool '{}' succeeded ({} ms)", call.name, duration_ms)).await;
+                        self.log(&format!(
+                            "Tool '{}' succeeded ({} ms)",
+                            call.name, duration_ms
+                        ))
+                        .await;
 
                         // Feed result back into conversation
-                        self.conversation.push(ChatMessage::user(
-                            format!("Tool result for {}:\n{}", call.name, result_text),
-                        ));
+                        self.conversation.push(ChatMessage::user(format!(
+                            "Tool result for {}:\n{}",
+                            call.name, result_text
+                        )));
 
                         tool_calls.push(ToolCallRecord {
                             tool_name: call.name,
@@ -321,11 +335,13 @@ impl AgentRuntime {
                     }
                     Err(e) => {
                         let error_msg = format!("Tool error: {}", e);
-                        self.log(&format!("Tool '{}' failed: {}", call.name, e)).await;
+                        self.log(&format!("Tool '{}' failed: {}", call.name, e))
+                            .await;
 
-                        self.conversation.push(ChatMessage::user(
-                            format!("Tool '{}' failed: {}", call.name, e),
-                        ));
+                        self.conversation.push(ChatMessage::user(format!(
+                            "Tool '{}' failed: {}",
+                            call.name, e
+                        )));
 
                         tool_calls.push(ToolCallRecord {
                             tool_name: call.name,
@@ -358,7 +374,8 @@ impl AgentRuntime {
         let available: Vec<_> = if self.config.allowed_tools.is_empty() {
             tools
         } else {
-            tools.into_iter()
+            tools
+                .into_iter()
                 .filter(|t| self.config.allowed_tools.contains(&t.name))
                 .collect()
         };
@@ -370,7 +387,9 @@ impl AgentRuntime {
             }
 
             prompt.push_str("\nTo use a tool, include a tool_call block in your response:\n\n");
-            prompt.push_str("<tool_call>\nname: tool_name\nargs: {\"param\": \"value\"}\n</tool_call>\n\n");
+            prompt.push_str(
+                "<tool_call>\nname: tool_name\nargs: {\"param\": \"value\"}\n</tool_call>\n\n",
+            );
             prompt.push_str("You can make multiple tool calls in one response. After tool results are returned, continue reasoning and make more tool calls if needed. When you have the final answer, respond without any tool_call blocks.\n");
         }
 
@@ -407,15 +426,15 @@ impl AgentRuntime {
 }
 
 /// A parsed tool call from LLM output.
-#[derive(Debug)]
-struct ParsedToolCall {
-    name: String,
-    args: serde_json::Value,
+#[derive(Debug, Clone)]
+pub struct ParsedToolCall {
+    pub name: String,
+    pub args: serde_json::Value,
 }
 
 /// Parse tool calls from LLM output text.
 /// Looks for: <tool_call>\nname: X\nargs: {...}\n</tool_call>
-fn parse_tool_calls(text: &str) -> Vec<ParsedToolCall> {
+pub fn parse_tool_calls(text: &str) -> Vec<ParsedToolCall> {
     let mut calls = Vec::new();
     let mut remaining = text;
 
@@ -452,7 +471,7 @@ fn parse_tool_calls(text: &str) -> Vec<ParsedToolCall> {
 }
 
 /// Extract the final answer from LLM text (remove any tool_call blocks).
-fn extract_answer(text: &str) -> String {
+pub fn extract_answer(text: &str) -> String {
     let mut result = text.to_string();
 
     // Remove all tool_call blocks

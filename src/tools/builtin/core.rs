@@ -5,7 +5,10 @@ use std::time::Instant;
 use async_trait::async_trait;
 use chrono::{DateTime, Local, Utc};
 
-use crate::tools::tool::{Tool, ToolContext, ToolError, ToolOutput, ToolDomain, ApprovalRequirement, require_str, optional_str};
+use crate::tools::tool::{
+    optional_str, require_str, ApprovalRequirement, Tool, ToolContext, ToolDomain, ToolError,
+    ToolOutput,
+};
 
 /// Echo tool - returns the input message.
 pub struct EchoTool;
@@ -194,50 +197,47 @@ impl Tool for JsonTool {
         let input = require_str(&params, "input")?;
 
         match action {
-            "parse" | "validate" => {
-                match serde_json::from_str::<serde_json::Value>(input) {
-                    Ok(parsed) => {
-                        if action == "validate" {
-                            Ok(ToolOutput::success(
-                                serde_json::json!({ "valid": true, "type": value_type(&parsed) }),
-                                start.elapsed(),
-                            ))
-                        } else {
-                            Ok(ToolOutput::success(parsed, start.elapsed()))
-                        }
-                    }
-                    Err(e) => {
-                        if action == "validate" {
-                            Ok(ToolOutput::success(
-                                serde_json::json!({ "valid": false, "error": e.to_string() }),
-                                start.elapsed(),
-                            ))
-                        } else {
-                            Err(ToolError::ExecutionFailed(format!("Invalid JSON: {}", e)))
-                        }
+            "parse" | "validate" => match serde_json::from_str::<serde_json::Value>(input) {
+                Ok(parsed) => {
+                    if action == "validate" {
+                        Ok(ToolOutput::success(
+                            serde_json::json!({ "valid": true, "type": value_type(&parsed) }),
+                            start.elapsed(),
+                        ))
+                    } else {
+                        Ok(ToolOutput::success(parsed, start.elapsed()))
                     }
                 }
-            }
+                Err(e) => {
+                    if action == "validate" {
+                        Ok(ToolOutput::success(
+                            serde_json::json!({ "valid": false, "error": e.to_string() }),
+                            start.elapsed(),
+                        ))
+                    } else {
+                        Err(ToolError::ExecutionFailed(format!("Invalid JSON: {}", e)))
+                    }
+                }
+            },
             "format" => {
                 let parsed: serde_json::Value = serde_json::from_str(input)
                     .map_err(|e| ToolError::ExecutionFailed(format!("Invalid JSON: {}", e)))?;
 
-                let indent = params
-                    .get("indent")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(2) as usize;
+                let indent = params.get("indent").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
 
                 let formatted = if indent == 0 {
                     serde_json::to_string(&parsed)
                 } else {
                     serde_json::to_string_pretty(&parsed)
-                }.map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+                }
+                .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
 
                 Ok(ToolOutput::text(formatted, start.elapsed()))
             }
             "query" => {
-                let query = optional_str(&params, "query")
-                    .ok_or_else(|| ToolError::InvalidParameters("query required for query action".to_string()))?;
+                let query = optional_str(&params, "query").ok_or_else(|| {
+                    ToolError::InvalidParameters("query required for query action".to_string())
+                })?;
 
                 let parsed: serde_json::Value = serde_json::from_str(input)
                     .map_err(|e| ToolError::ExecutionFailed(format!("Invalid JSON: {}", e)))?;
@@ -246,7 +246,10 @@ impl Tool for JsonTool {
                 let result = json_query(&parsed, query)?;
                 Ok(ToolOutput::success(result, start.elapsed()))
             }
-            _ => Err(ToolError::InvalidParameters(format!("Unknown action: {}", action))),
+            _ => Err(ToolError::InvalidParameters(format!(
+                "Unknown action: {}",
+                action
+            ))),
         }
     }
 
@@ -289,19 +292,22 @@ fn json_query(value: &serde_json::Value, query: &str) -> Result<serde_json::Valu
             let index_str = &part[bracket_pos + 1..part.len() - 1];
 
             if !key.is_empty() {
-                current = current.get(key)
+                current = current
+                    .get(key)
                     .cloned()
                     .ok_or_else(|| ToolError::ExecutionFailed(format!("Key not found: {}", key)))?;
             }
 
-            let index: usize = index_str.parse()
-                .map_err(|_| ToolError::ExecutionFailed(format!("Invalid array index: {}", index_str)))?;
+            let index: usize = index_str.parse().map_err(|_| {
+                ToolError::ExecutionFailed(format!("Invalid array index: {}", index_str))
+            })?;
 
-            current = current.get(index)
-                .cloned()
-                .ok_or_else(|| ToolError::ExecutionFailed(format!("Index out of bounds: {}", index)))?;
+            current = current.get(index).cloned().ok_or_else(|| {
+                ToolError::ExecutionFailed(format!("Index out of bounds: {}", index))
+            })?;
         } else {
-            current = current.get(part)
+            current = current
+                .get(part)
                 .cloned()
                 .ok_or_else(|| ToolError::ExecutionFailed(format!("Key not found: {}", part)))?;
         }
@@ -318,7 +324,10 @@ mod tests {
     async fn test_echo() {
         let tool = EchoTool;
         let ctx = ToolContext::local("test".to_string());
-        let result = tool.execute(serde_json::json!({"message": "hello"}), &ctx).await.unwrap();
+        let result = tool
+            .execute(serde_json::json!({"message": "hello"}), &ctx)
+            .await
+            .unwrap();
         assert!(result.success);
         assert_eq!(result.message, Some("hello".to_string()));
     }
@@ -336,10 +345,13 @@ mod tests {
     async fn test_json_parse() {
         let tool = JsonTool;
         let ctx = ToolContext::local("test".to_string());
-        let result = tool.execute(
-            serde_json::json!({"action": "parse", "input": r#"{"name": "test"}"#}),
-            &ctx,
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                serde_json::json!({"action": "parse", "input": r#"{"name": "test"}"#}),
+                &ctx,
+            )
+            .await
+            .unwrap();
         assert!(result.success);
         assert_eq!(result.data["name"], "test");
     }
@@ -348,14 +360,17 @@ mod tests {
     async fn test_json_query() {
         let tool = JsonTool;
         let ctx = ToolContext::local("test".to_string());
-        let result = tool.execute(
-            serde_json::json!({
-                "action": "query",
-                "input": r#"{"user": {"name": "alice", "age": 30}}"#,
-                "query": "user.name"
-            }),
-            &ctx,
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                serde_json::json!({
+                    "action": "query",
+                    "input": r#"{"user": {"name": "alice", "age": 30}}"#,
+                    "query": "user.name"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
         assert!(result.success);
         assert_eq!(result.data, "alice");
     }

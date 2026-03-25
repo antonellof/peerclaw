@@ -162,11 +162,7 @@ pub static SECRET_PATTERNS: &[SecretPattern] = &[
 static COMPILED_PATTERNS: LazyLock<Vec<(SecretPattern, Regex)>> = LazyLock::new(|| {
     SECRET_PATTERNS
         .iter()
-        .filter_map(|p| {
-            Regex::new(p.regex)
-                .ok()
-                .map(|r| (p.clone(), r))
-        })
+        .filter_map(|p| Regex::new(p.regex).ok().map(|r| (p.clone(), r)))
         .collect()
 });
 
@@ -191,9 +187,7 @@ impl LeakDetector {
     pub fn with_custom_patterns(patterns: Vec<(String, String)>) -> Self {
         let custom = patterns
             .into_iter()
-            .filter_map(|(name, pattern)| {
-                Regex::new(&pattern).ok().map(|r| (name, r))
-            })
+            .filter_map(|(name, pattern)| Regex::new(&pattern).ok().map(|r| (name, r)))
             .collect();
 
         Self {
@@ -251,7 +245,11 @@ impl LeakDetector {
     }
 
     /// Scan and clean (redact) secrets from content
-    pub fn scan_and_clean(&self, content: &str, redaction: &str) -> Result<(String, usize), String> {
+    pub fn scan_and_clean(
+        &self,
+        content: &str,
+        redaction: &str,
+    ) -> Result<(String, usize), String> {
         let matches = self.scan(content);
 
         if matches.is_empty() {
@@ -401,7 +399,9 @@ mod tests {
     #[test]
     fn test_custom_pattern() {
         let mut detector = LeakDetector::new();
-        detector.add_pattern("custom_secret", r"MYSECRET_[A-Z0-9]{10}").unwrap();
+        detector
+            .add_pattern("custom_secret", r"MYSECRET_[A-Z0-9]{10}")
+            .unwrap();
 
         let content = "Secret: MYSECRET_ABCD123456";
         let matches = detector.scan(content);

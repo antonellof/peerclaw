@@ -13,7 +13,7 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 
 use super::builtin;
-use super::tool::{Tool, ToolContext, ToolError, ToolDomain};
+use super::tool::{Tool, ToolContext, ToolDomain, ToolError};
 use super::{ToolCapabilities, ToolLocation, ToolResult};
 
 /// Tool availability on the network.
@@ -176,7 +176,8 @@ impl ToolRegistry {
     ) -> Result<ToolResult, ToolError> {
         let start = Instant::now();
 
-        let tool = self.get(name)
+        let tool = self
+            .get(name)
             .ok_or_else(|| ToolError::NotFound(name.to_string()))?;
 
         let output = tool.execute(params, ctx).await?;
@@ -219,14 +220,18 @@ impl ToolRegistry {
         providers.sort_by(|a, b| {
             let a_score = a.price_per_call as f64 / (a.reliability as f64 + 1.0);
             let b_score = b.price_per_call as f64 / (b.reliability as f64 + 1.0);
-            a_score.partial_cmp(&b_score).unwrap_or(std::cmp::Ordering::Equal)
+            a_score
+                .partial_cmp(&b_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
 
     /// Get best provider for a network tool.
     pub async fn best_provider(&self, name: &str) -> Option<NetworkToolInfo> {
         let network = self.network_tools.read().await;
-        network.get(name).and_then(|providers| providers.first().cloned())
+        network
+            .get(name)
+            .and_then(|providers| providers.first().cloned())
     }
 
     /// Get tool execution statistics.
@@ -296,11 +301,10 @@ mod tests {
         let registry = ToolRegistry::new("test-peer".to_string());
         let ctx = ToolContext::local("test-peer".to_string());
 
-        let result = registry.execute_local(
-            "echo",
-            serde_json::json!({"message": "hello"}),
-            &ctx,
-        ).await.unwrap();
+        let result = registry
+            .execute_local("echo", serde_json::json!({"message": "hello"}), &ctx)
+            .await
+            .unwrap();
 
         assert!(result.output.success);
         assert_eq!(result.location, ToolLocation::Local);

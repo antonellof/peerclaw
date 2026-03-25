@@ -195,11 +195,7 @@ mod tests {
         let resources = Resources::default();
         let capabilities = vec![Capability::Inference];
 
-        let mut manifest = ResourceManifest::new(
-            "test-peer".to_string(),
-            resources,
-            capabilities,
-        );
+        let mut manifest = ResourceManifest::new("test-peer".to_string(), resources, capabilities);
 
         // Simple mock signer
         manifest.sign(|data| {

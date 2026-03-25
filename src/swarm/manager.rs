@@ -116,7 +116,11 @@ impl SwarmManager {
     }
 
     /// Register an agent from a discovered peer
-    pub fn register_peer_agent(&self, peer_id: PeerId, manifest: Option<&ResourceManifest>) -> Uuid {
+    pub fn register_peer_agent(
+        &self,
+        peer_id: PeerId,
+        manifest: Option<&ResourceManifest>,
+    ) -> Uuid {
         let peer_id_str = peer_id.to_string();
 
         // Check if already registered
@@ -141,7 +145,9 @@ impl SwarmManager {
         let name = agent.name.clone();
 
         self.agents.write().insert(agent_id, agent);
-        self.peer_to_agent.write().insert(peer_id_str.clone(), agent_id);
+        self.peer_to_agent
+            .write()
+            .insert(peer_id_str.clone(), agent_id);
 
         // Broadcast join event
         let event = SwarmEvent::AgentJoined {
@@ -169,7 +175,9 @@ impl SwarmManager {
             }
 
             // Remove connections involving this agent
-            self.connections.write().retain(|c| c.from != agent_id && c.to != agent_id);
+            self.connections
+                .write()
+                .retain(|c| c.from != agent_id && c.to != agent_id);
 
             // Broadcast leave event
             let event = SwarmEvent::AgentLeft {
@@ -258,7 +266,10 @@ impl SwarmManager {
         }
 
         // Update job stats
-        if matches!(action_type, ActionType::JobCompleted | ActionType::JobFailed) {
+        if matches!(
+            action_type,
+            ActionType::JobCompleted | ActionType::JobFailed
+        ) {
             self.stats.write().total_jobs += 1;
             if let Some(agent) = self.agents.write().get_mut(&agent_id) {
                 agent.record_job_result(success);
@@ -306,11 +317,12 @@ impl SwarmManager {
             }
             NetworkEvent::ResourceAdvertised { peer_id, manifest } => {
                 let peer_id_str = peer_id.to_string();
-                let agent_id = if let Some(id) = self.peer_to_agent.read().get(&peer_id_str).copied() {
-                    id
-                } else {
-                    self.register_peer_agent(peer_id, Some(&manifest))
-                };
+                let agent_id =
+                    if let Some(id) = self.peer_to_agent.read().get(&peer_id_str).copied() {
+                        id
+                    } else {
+                        self.register_peer_agent(peer_id, Some(&manifest))
+                    };
 
                 // Update profile with new capabilities
                 let capabilities: Vec<AgentCapability> = manifest
@@ -389,10 +401,7 @@ impl SwarmManager {
         let agents = self.agents.read();
         let stats = self.stats.read();
 
-        let active_count = agents
-            .values()
-            .filter(|a| a.is_busy())
-            .count();
+        let active_count = agents.values().filter(|a| a.is_busy()).count();
 
         SwarmEvent::StatsUpdate {
             total_agents: agents.len(),
@@ -437,10 +446,8 @@ mod tests {
         let manager = SwarmManager::with_defaults();
         let mut rx = manager.subscribe();
 
-        let agent_id = manager.register_local_agent(
-            "TestAgent".to_string(),
-            AgentProfile::default(),
-        );
+        let agent_id =
+            manager.register_local_agent("TestAgent".to_string(), AgentProfile::default());
 
         // Should have the agent
         assert!(manager.get_agent(agent_id).is_some());
@@ -453,10 +460,8 @@ mod tests {
     #[test]
     fn test_record_action() {
         let manager = SwarmManager::with_defaults();
-        let agent_id = manager.register_local_agent(
-            "TestAgent".to_string(),
-            AgentProfile::default(),
-        );
+        let agent_id =
+            manager.register_local_agent("TestAgent".to_string(), AgentProfile::default());
 
         let action = AgentAction::new(
             agent_id,

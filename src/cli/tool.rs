@@ -73,10 +73,12 @@ pub async fn run(cmd: ToolCommand) -> anyhow::Result<()> {
                 println!("  No tools available.");
             } else {
                 // Group by location
-                let local_tools: Vec<_> = tools.iter()
+                let local_tools: Vec<_> = tools
+                    .iter()
                     .filter(|t| matches!(t.location, crate::tools::ToolLocation::Local))
                     .collect();
-                let remote_tools: Vec<_> = tools.iter()
+                let remote_tools: Vec<_> = tools
+                    .iter()
                     .filter(|t| matches!(t.location, crate::tools::ToolLocation::Remote))
                     .collect();
 
@@ -86,7 +88,10 @@ pub async fn run(cmd: ToolCommand) -> anyhow::Result<()> {
                     for tool in &local_tools {
                         if verbose {
                             println!("  {} - {}", tool.name, tool.description);
-                            println!("    Domain: {:?}, Price: {} micro-PCLAW", tool.domain, tool.price);
+                            println!(
+                                "    Domain: {:?}, Price: {} micro-PCLAW",
+                                tool.domain, tool.price
+                            );
                         } else {
                             println!("  {:20} {}", tool.name, truncate(&tool.description, 35));
                         }
@@ -99,12 +104,17 @@ pub async fn run(cmd: ToolCommand) -> anyhow::Result<()> {
                     for tool in &remote_tools {
                         if verbose {
                             println!("  {} - {}", tool.name, tool.description);
-                            println!("    Peer: {}, Price: {} micro-PCLAW",
-                                tool.peer_id.as_ref().map(|s| &s[..12.min(s.len())]).unwrap_or("?"),
+                            println!(
+                                "    Peer: {}, Price: {} micro-PCLAW",
+                                tool.peer_id
+                                    .as_ref()
+                                    .map(|s| &s[..12.min(s.len())])
+                                    .unwrap_or("?"),
                                 tool.price
                             );
                         } else {
-                            println!("  {:20} {} ({} μPCLAW)",
+                            println!(
+                                "  {:20} {} ({} μPCLAW)",
                                 tool.name,
                                 truncate(&tool.description, 25),
                                 tool.price
@@ -135,10 +145,13 @@ pub async fn run(cmd: ToolCommand) -> anyhow::Result<()> {
                     println!("    Total calls:     {}", stats.total_calls);
                     println!("    Successful:      {}", stats.successful_calls);
                     println!("    Failed:          {}", stats.failed_calls);
-                    println!("    Avg time:        {} ms",
+                    println!(
+                        "    Avg time:        {} ms",
                         if stats.total_calls > 0 {
                             stats.total_time_ms / stats.total_calls
-                        } else { 0 }
+                        } else {
+                            0
+                        }
                     );
                 }
             } else {
@@ -242,11 +255,19 @@ fn print_stats(name: &str, stats: &crate::tools::registry::ToolStats) {
     };
 
     println!("  {}", name);
-    println!("    Calls: {} total, {} success, {} failed ({:.1}% success rate)",
-        stats.total_calls, stats.successful_calls, stats.failed_calls, success_rate);
-    println!("    Avg time: {} ms, Total time: {} ms", avg_time, stats.total_time_ms);
+    println!(
+        "    Calls: {} total, {} success, {} failed ({:.1}% success rate)",
+        stats.total_calls, stats.successful_calls, stats.failed_calls, success_rate
+    );
+    println!(
+        "    Avg time: {} ms, Total time: {} ms",
+        avg_time, stats.total_time_ms
+    );
     if stats.tokens_earned > 0 || stats.tokens_spent > 0 {
-        println!("    Tokens: {} earned, {} spent", stats.tokens_earned, stats.tokens_spent);
+        println!(
+            "    Tokens: {} earned, {} spent",
+            stats.tokens_earned, stats.tokens_spent
+        );
     }
     println!();
 }

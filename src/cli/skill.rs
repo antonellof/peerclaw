@@ -51,7 +51,7 @@ pub async fn run(cmd: SkillCommand) -> anyhow::Result<()> {
     let skills_dir = crate::bootstrap::base_dir().join("skills");
     let registry = Arc::new(
         SkillRegistry::new(skills_dir.clone(), "cli-user".to_string())
-            .map_err(|e| anyhow::anyhow!("Failed to create skill registry: {}", e))?
+            .map_err(|e| anyhow::anyhow!("Failed to create skill registry: {}", e))?,
     );
 
     // Scan for skills
@@ -62,15 +62,20 @@ pub async fn run(cmd: SkillCommand) -> anyhow::Result<()> {
             let skills = if network {
                 registry.list_all().await
             } else {
-                registry.list_local().await.into_iter().map(|s| crate::skills::SkillInfo {
-                    name: s.name().to_string(),
-                    version: s.manifest.version.clone(),
-                    description: s.description().to_string(),
-                    trust: s.trust,
-                    available: s.is_available(),
-                    provider: "local".to_string(),
-                    price: s.manifest.sharing.price,
-                }).collect()
+                registry
+                    .list_local()
+                    .await
+                    .into_iter()
+                    .map(|s| crate::skills::SkillInfo {
+                        name: s.name().to_string(),
+                        version: s.manifest.version.clone(),
+                        description: s.description().to_string(),
+                        trust: s.trust,
+                        available: s.is_available(),
+                        provider: "local".to_string(),
+                        price: s.manifest.sharing.price,
+                    })
+                    .collect()
             };
 
             println!("\n{:=<60}", "");
@@ -87,14 +92,18 @@ pub async fn run(cmd: SkillCommand) -> anyhow::Result<()> {
                     if verbose {
                         println!("  {} (v{})", skill.name, skill.version);
                         println!("    Description: {}", skill.description);
-                        println!("    Trust: {:?}, Available: {}", skill.trust, skill.available);
+                        println!(
+                            "    Trust: {:?}, Available: {}",
+                            skill.trust, skill.available
+                        );
                         if skill.price > 0 {
                             println!("    Price: {} micro-PCLAW", skill.price);
                         }
                         println!();
                     } else {
                         let status = if skill.available { "✓" } else { "✗" };
-                        println!("  {} {:20} {} (v{})",
+                        println!(
+                            "  {} {:20} {} (v{})",
                             status,
                             skill.name,
                             truncate(&skill.description, 30),
@@ -123,7 +132,10 @@ pub async fn run(cmd: SkillCommand) -> anyhow::Result<()> {
 
                 // Keywords
                 if !skill.manifest.activation.keywords.is_empty() {
-                    println!("\n  Keywords: {}", skill.manifest.activation.keywords.join(", "));
+                    println!(
+                        "\n  Keywords: {}",
+                        skill.manifest.activation.keywords.join(", ")
+                    );
                 }
 
                 // Tags
@@ -133,16 +145,25 @@ pub async fn run(cmd: SkillCommand) -> anyhow::Result<()> {
 
                 // Requirements
                 if !skill.manifest.requires.bins.is_empty() {
-                    println!("\n  Required binaries: {}", skill.manifest.requires.bins.join(", "));
+                    println!(
+                        "\n  Required binaries: {}",
+                        skill.manifest.requires.bins.join(", ")
+                    );
                 }
                 if !skill.manifest.requires.env.is_empty() {
-                    println!("  Required env vars: {}", skill.manifest.requires.env.join(", "));
+                    println!(
+                        "  Required env vars: {}",
+                        skill.manifest.requires.env.join(", ")
+                    );
                 }
 
                 // Sharing settings
                 if skill.manifest.sharing.enabled {
                     println!("\n  Sharing: Enabled");
-                    println!("    Price: {} micro-PCLAW per use", skill.manifest.sharing.price);
+                    println!(
+                        "    Price: {} micro-PCLAW per use",
+                        skill.manifest.sharing.price
+                    );
                     if let Some(limit) = skill.manifest.sharing.rate_limit {
                         println!("    Rate limit: {} uses/day", limit);
                     }
@@ -182,9 +203,16 @@ pub async fn run(cmd: SkillCommand) -> anyhow::Result<()> {
             let path = std::path::Path::new(&source);
             if path.exists() {
                 let content = std::fs::read_to_string(path)?;
-                match registry.install(&content, crate::skills::SkillTrust::Installed).await {
+                match registry
+                    .install(&content, crate::skills::SkillTrust::Installed)
+                    .await
+                {
                     Ok(skill) => {
-                        println!("Installed skill: {} (v{})", skill.name(), skill.manifest.version);
+                        println!(
+                            "Installed skill: {} (v{})",
+                            skill.name(),
+                            skill.manifest.version
+                        );
                     }
                     Err(e) => {
                         println!("Failed to install skill: {}", e);
@@ -207,11 +235,16 @@ pub async fn run(cmd: SkillCommand) -> anyhow::Result<()> {
         SkillCommand::Create { name } => {
             let skill_path = skills_dir.join(format!("{}.md", &name));
             if skill_path.exists() {
-                println!("Skill '{}' already exists at {}", name, skill_path.display());
+                println!(
+                    "Skill '{}' already exists at {}",
+                    name,
+                    skill_path.display()
+                );
                 return Ok(());
             }
 
-            let template = format!(r#"---
+            let template = format!(
+                r#"---
 name: {}
 version: 1.0.0
 description: A custom skill
@@ -243,7 +276,11 @@ When helping users:
 - Follow best practices
 - Be security-conscious
 - Cite sources when applicable
-"#, name, name, name.replace("-", " ").to_uppercase());
+"#,
+                name,
+                name,
+                name.replace("-", " ").to_uppercase()
+            );
 
             std::fs::write(&skill_path, template)?;
             println!("Created skill template: {}", skill_path.display());

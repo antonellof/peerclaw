@@ -189,7 +189,11 @@ impl Policy {
                 violations.push(PolicyViolation {
                     rule: rule.name.clone(),
                     description: rule.description.clone(),
-                    action: if self.strict_mode { PolicyAction::Block } else { rule.action },
+                    action: if self.strict_mode {
+                        PolicyAction::Block
+                    } else {
+                        rule.action
+                    },
                     category: rule.category,
                     preview,
                 });
@@ -280,7 +284,9 @@ mod tests {
         let violations = policy.check(content);
 
         assert!(!violations.is_empty());
-        assert!(violations.iter().any(|v| v.category == PolicyCategory::Privacy));
+        assert!(violations
+            .iter()
+            .any(|v| v.category == PolicyCategory::Privacy));
     }
 
     #[test]
@@ -297,13 +303,15 @@ mod tests {
     #[test]
     fn test_custom_rule() {
         let mut policy = Policy::new();
-        policy.add_rule(
-            "custom_block",
-            "Block custom pattern",
-            r"BLOCK_THIS",
-            PolicyAction::Block,
-            PolicyCategory::Content,
-        ).unwrap();
+        policy
+            .add_rule(
+                "custom_block",
+                "Block custom pattern",
+                r"BLOCK_THIS",
+                PolicyAction::Block,
+                PolicyCategory::Content,
+            )
+            .unwrap();
 
         let content = "Please BLOCK_THIS content";
         assert!(!policy.is_allowed(content));

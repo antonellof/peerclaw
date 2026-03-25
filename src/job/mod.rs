@@ -3,17 +3,17 @@
 //! Implements the request → bid → accept → execute → settle flow
 //! for trading compute resources on the network.
 
-mod pricing;
-mod request;
 pub mod bid;
 pub mod execution;
 pub mod network;
+mod pricing;
+mod request;
 
-pub use pricing::{ResourceType, ResourcePricing, PricingStrategy};
-pub use request::{JobRequest, JobRequirements, JobId};
-pub use bid::{JobBid, BidId, BidStatus, select_best_bid};
-pub use execution::{Job, JobStatus, JobResult, ActualUsage, ExecutionMetrics};
-pub use network::{JobMessage, topics as job_topics};
+pub use bid::{select_best_bid, BidId, BidStatus, JobBid};
+pub use execution::{ActualUsage, ExecutionMetrics, Job, JobResult, JobStatus};
+pub use network::{topics as job_topics, JobMessage};
+pub use pricing::{PricingStrategy, ResourcePricing, ResourceType};
+pub use request::{JobId, JobRequest, JobRequirements};
 
 use crate::wallet::{Wallet, WalletError};
 use chrono::Utc;
@@ -130,7 +130,9 @@ impl JobManager {
 
     /// Get all bids for a request.
     pub async fn get_bids(&self, job_id: &JobId) -> Vec<JobBid> {
-        self.bids.read().await
+        self.bids
+            .read()
+            .await
             .get(job_id)
             .cloned()
             .unwrap_or_default()
@@ -139,7 +141,10 @@ impl JobManager {
     /// Accept a bid and create escrow for the job.
     pub async fn accept_bid(&self, job_id: &JobId, bid_id: &BidId) -> Result<Job, JobError> {
         // Get the request and bid
-        let request = self.requests.read().await
+        let request = self
+            .requests
+            .read()
+            .await
             .get(job_id)
             .cloned()
             .ok_or_else(|| JobError::NotFound(job_id.clone()))?;
@@ -157,12 +162,15 @@ impl JobManager {
         }
 
         // Create escrow for the bid amount
-        let escrow = self.wallet.create_escrow(
-            bid.price,
-            bid.bidder_id.clone(),
-            job_id.0.clone(),
-            request.timeout_secs,
-        ).await?;
+        let escrow = self
+            .wallet
+            .create_escrow(
+                bid.price,
+                bid.bidder_id.clone(),
+                job_id.0.clone(),
+                request.timeout_secs,
+            )
+            .await?;
 
         // Create the active job
         let job = Job::new(request, bid, escrow.id);
@@ -170,7 +178,10 @@ impl JobManager {
         // Move from requests to active
         self.requests.write().await.remove(job_id);
         self.bids.write().await.remove(job_id);
-        self.active_jobs.write().await.insert(job_id.clone(), job.clone());
+        self.active_jobs
+            .write()
+            .await
+            .insert(job_id.clone(), job.clone());
 
         // TODO: Notify the winning bidder via P2P
 
@@ -312,7 +323,9 @@ impl JobManager {
 
     /// Get bids count for a pending request.
     pub async fn bids_count(&self, job_id: &JobId) -> usize {
-        self.bids.read().await
+        self.bids
+            .read()
+            .await
             .get(job_id)
             .map(|b| b.len())
             .unwrap_or(0)
@@ -332,12 +345,13 @@ mod tests {
         let db = Database::open(&dir.path().join("test.redb")).unwrap();
         let identity = Arc::new(NodeIdentity::generate());
         let peer_id = identity.peer_id().to_string();
-        let wallet = Arc::new(
-            Wallet::new(identity, WalletConfig::default(), db).unwrap()
-        );
+        let wallet = Arc::new(Wallet::new(identity, WalletConfig::default(), db).unwrap());
 
         // Credit some tokens for testing
-        wallet.credit(crate::wallet::to_micro(1000.0), "test").await.unwrap();
+        wallet
+            .credit(crate::wallet::to_micro(1000.0), "test")
+            .await
+            .unwrap();
 
         (JobManager::new(wallet, peer_id), dir)
     }
@@ -347,7 +361,10 @@ mod tests {
         let (manager, _dir) = setup_job_manager().await;
 
         let request = JobRequest::new(
-            ResourceType::Inference { model: "llama-3.2-8b".into(), tokens: 1000 },
+            ResourceType::Inference {
+                model: "llama-3.2-8b".into(),
+                tokens: 1000,
+            },
             crate::wallet::to_micro(10.0),
             300,
         );
@@ -362,7 +379,10 @@ mod tests {
 
         // Create request
         let request = JobRequest::new(
-            ResourceType::Inference { model: "llama-3.2-8b".into(), tokens: 1000 },
+            ResourceType::Inference {
+                model: "llama-3.2-8b".into(),
+                tokens: 1000,
+            },
             crate::wallet::to_micro(10.0),
             300,
         );

@@ -3,23 +3,21 @@
 //! This module wires up the TaskExecutor, JobManager, InferenceEngine,
 //! and P2P network to enable distributed task execution.
 
-use std::sync::Arc;
 use libp2p::PeerId;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::Config;
 use crate::db::Database;
-use crate::executor::{
-    MonitorConfig, ResourceMonitor, RouterConfig, TaskExecutor,
-};
 use crate::executor::remote::{JobProvider, RemoteExecutor, RemoteExecutorConfig};
 use crate::executor::task::{ExecutionTask, InferenceTask, TaskResult, WebFetchTask};
+use crate::executor::{MonitorConfig, ResourceMonitor, RouterConfig, TaskExecutor};
 use crate::identity::NodeIdentity;
 use crate::inference::{
-    InferenceConfig, InferenceEngine, ModelDistributor,
-    BatchAggregator, BatchConfig, BatchResponse, BatchError, BatchStats,
+    BatchAggregator, BatchConfig, BatchError, BatchResponse, BatchStats, InferenceConfig,
+    InferenceEngine, ModelDistributor,
 };
-use crate::job::{JobManager, PricingStrategy, network as job_network};
+use crate::job::{network as job_network, JobManager, PricingStrategy};
 use crate::p2p::{Network, ProviderTracker};
 use crate::skills::SkillRegistry;
 use crate::tools::ToolRegistry;
@@ -80,12 +78,17 @@ impl Runtime {
         )?);
 
         // Credit some initial tokens for testing
-        wallet.credit(crate::wallet::to_micro(1000.0), "initial_balance").await?;
+        wallet
+            .credit(crate::wallet::to_micro(1000.0), "initial_balance")
+            .await?;
 
         // Create job manager
         let local_peer_id = *identity.peer_id();
         let local_peer_id_str = local_peer_id.to_string();
-        let job_manager = Arc::new(RwLock::new(JobManager::new(wallet.clone(), local_peer_id_str)));
+        let job_manager = Arc::new(RwLock::new(JobManager::new(
+            wallet.clone(),
+            local_peer_id_str,
+        )));
 
         // Create network
         let network = Arc::new(RwLock::new(Network::new(&identity, config.p2p.clone())?));
@@ -124,7 +127,8 @@ impl Runtime {
         let inference = Arc::new(InferenceEngine::new(inference_config)?);
 
         // Create model distributor
-        let model_distributor = Arc::new(ModelDistributor::new(config.inference.models_dir.clone()));
+        let model_distributor =
+            Arc::new(ModelDistributor::new(config.inference.models_dir.clone()));
 
         // Create job provider
         let job_provider = Arc::new(JobProvider::new(
@@ -165,10 +169,14 @@ impl Runtime {
         tracing::info!(count = tools.count().await, "Registered builtin tools");
 
         // Create skill registry
-        let skills_dir = crate::bootstrap::base_dir().join("skills");
+        let skills_dir = config
+            .skills
+            .directory
+            .clone()
+            .unwrap_or_else(|| crate::bootstrap::base_dir().join("skills"));
         let skills = Arc::new(
             SkillRegistry::new(skills_dir, local_peer_id.to_string())
-                .map_err(|e| anyhow::anyhow!("Failed to create skill registry: {}", e))?
+                .map_err(|e| anyhow::anyhow!("Failed to create skill registry: {}", e))?,
         );
         // Scan for local skills
         match skills.scan().await {
@@ -229,7 +237,8 @@ impl Runtime {
                 model_name: model_info.name.clone(),
                 context_size: model_info.context_length,
                 price_per_1k_tokens: (self.config.economy.inference_price_per_1k as f64
-                    * self.config.provider_sharing.price_multiplier) as u64,
+                    * self.config.provider_sharing.price_multiplier)
+                    as u64,
                 max_tokens_per_request: model_info.context_length,
                 quantization: Some(format!("{:?}", model_info.quantization)),
                 backend: if self.config.inference.use_ollama {
@@ -281,12 +290,20 @@ impl Runtime {
     }
 
     /// Execute a task (will be routed automatically).
-    pub async fn execute_task(&self, task: ExecutionTask) -> Result<TaskResult, crate::executor::ExecutorError> {
+    pub async fn execute_task(
+        &self,
+        task: ExecutionTask,
+    ) -> Result<TaskResult, crate::executor::ExecutorError> {
         self.executor.execute(task).await
     }
 
     /// Execute an inference task.
-    pub async fn inference(&self, prompt: &str, model: &str, max_tokens: u32) -> Result<TaskResult, crate::executor::ExecutorError> {
+    pub async fn inference(
+        &self,
+        prompt: &str,
+        model: &str,
+        max_tokens: u32,
+    ) -> Result<TaskResult, crate::executor::ExecutorError> {
         let task = InferenceTask::new(model, prompt).with_max_tokens(max_tokens);
         self.executor.execute(ExecutionTask::Inference(task)).await
     }
@@ -301,13 +318,15 @@ impl Runtime {
         max_tokens: u32,
         temperature: f32,
     ) -> Result<BatchResponse, BatchError> {
-        self.batch_aggregator.submit(
-            source.to_string(),
-            model.to_string(),
-            prompt.to_string(),
-            max_tokens,
-            temperature,
-        ).await
+        self.batch_aggregator
+            .submit(
+                source.to_string(),
+                model.to_string(),
+                prompt.to_string(),
+                max_tokens,
+                temperature,
+            )
+            .await
     }
 
     /// Get batch aggregator statistics.
@@ -355,7 +374,9 @@ impl Runtime {
     pub async fn handle_gossip_message(&self, topic: &str, data: Vec<u8>, _source: Option<PeerId>) {
         match topic {
             t if t == job_network::topics::JOB_REQUESTS => {
-                if let Ok(job_network::JobMessage::Request(req_msg)) = job_network::deserialize_message(&data) {
+                if let Ok(job_network::JobMessage::Request(req_msg)) =
+                    job_network::deserialize_message(&data)
+                {
                     tracing::info!(
                         job_id = %req_msg.request.id,
                         from = %req_msg.requester_peer_id,
@@ -367,14 +388,22 @@ impl Runtime {
                 }
             }
             t if t == job_network::topics::JOB_BIDS => {
-                if let Ok(job_network::JobMessage::Bid(bid_msg)) = job_network::deserialize_message(&data) {
+                if let Ok(job_network::JobMessage::Bid(bid_msg)) =
+                    job_network::deserialize_message(&data)
+                {
                     tracing::debug!(
                         job_id = %bid_msg.bid.job_id,
                         from = %bid_msg.bidder_peer_id,
                         price = bid_msg.bid.price,
                         "Received bid"
                     );
-                    if let Err(e) = self.job_manager.write().await.receive_bid(bid_msg.bid).await {
+                    if let Err(e) = self
+                        .job_manager
+                        .write()
+                        .await
+                        .receive_bid(bid_msg.bid)
+                        .await
+                    {
                         tracing::warn!(error = %e, "Failed to process bid");
                     }
                 }
@@ -395,12 +424,15 @@ impl Runtime {
 
                                 // Get the request and execute it
                                 let job_id = accept_msg.job_id.clone();
-                                if let Some(request) = self.job_provider.get_pending_request(&job_id).await {
+                                if let Some(request) =
+                                    self.job_provider.get_pending_request(&job_id).await
+                                {
                                     self.execute_provider_job(job_id, request).await;
                                 }
                             }
 
-                            if let Err(e) = self.job_provider.handle_bid_accepted(accept_msg).await {
+                            if let Err(e) = self.job_provider.handle_bid_accepted(accept_msg).await
+                            {
                                 tracing::warn!(error = %e, "Failed to handle bid acceptance");
                             }
                         }
@@ -414,11 +446,15 @@ impl Runtime {
                             {
                                 let job_manager = self.job_manager.write().await;
                                 if let Err(e) = job_manager
-                                    .submit_result(&result_msg.job_id, result_msg.result).await {
+                                    .submit_result(&result_msg.job_id, result_msg.result)
+                                    .await
+                                {
                                     tracing::warn!(error = %e, "Failed to store job result");
                                 } else {
                                     // Auto-settle the job (verify and release payment)
-                                    if let Err(e) = job_manager.settle_job(&result_msg.job_id, true).await {
+                                    if let Err(e) =
+                                        job_manager.settle_job(&result_msg.job_id, true).await
+                                    {
                                         tracing::warn!(error = %e, "Failed to settle job");
                                     } else {
                                         tracing::info!(job_id = %result_msg.job_id, "Job settled successfully");
@@ -457,10 +493,17 @@ impl Runtime {
 
 impl Runtime {
     /// Execute a job as a provider (when our bid was accepted).
-    pub async fn execute_provider_job(&self, job_id: crate::job::JobId, request: crate::job::JobRequest) {
-        use crate::executor::task::{ExecutionTask, InferenceTask, WebFetchTask, TaskData};
-        use crate::job::{JobResult, ActualUsage, ExecutionMetrics};
-        use crate::job::network::{JobMessage, JobResultMessage, JobStatusMessage, JobStatusUpdate, serialize_message, topics};
+    pub async fn execute_provider_job(
+        &self,
+        job_id: crate::job::JobId,
+        request: crate::job::JobRequest,
+    ) {
+        use crate::executor::task::{ExecutionTask, InferenceTask, TaskData, WebFetchTask};
+        use crate::job::network::{
+            serialize_message, topics, JobMessage, JobResultMessage, JobStatusMessage,
+            JobStatusUpdate,
+        };
+        use crate::job::{ActualUsage, ExecutionMetrics, JobResult};
 
         tracing::info!(job_id = %job_id, "Executing job as provider");
 
@@ -480,30 +523,29 @@ impl Runtime {
         let result = match &request.resource_type {
             crate::job::ResourceType::Inference { model, tokens } => {
                 let prompt_cow = String::from_utf8_lossy(payload);
-                let prompt: &str = if prompt_cow.is_empty() { "Hello" } else { prompt_cow.as_ref() };
+                let prompt: &str = if prompt_cow.is_empty() {
+                    "Hello"
+                } else {
+                    prompt_cow.as_ref()
+                };
 
-                let task = InferenceTask::new(model, prompt)
-                    .with_max_tokens(*tokens);
+                let task = InferenceTask::new(model, prompt).with_max_tokens(*tokens);
 
                 match self.executor.execute(ExecutionTask::Inference(task)).await {
-                    Ok(task_result) => {
-                        match &task_result.data {
-                            TaskData::Inference(r) => {
-                                JobResult::new(r.text.as_bytes().to_vec())
-                                    .with_usage(ActualUsage {
-                                        tokens: Some(r.tokens_generated),
-                                        compute_time_ms: Some(task_result.metrics.total_time_ms),
-                                        bytes: None,
-                                    })
-                                    .with_metrics(ExecutionMetrics {
-                                        ttfb_ms: task_result.metrics.ttfb_ms,
-                                        total_time_ms: task_result.metrics.total_time_ms,
-                                        tokens_per_sec: Some(r.tokens_per_second),
-                                    })
-                            }
-                            _ => JobResult::new(b"Unexpected result type".to_vec()),
-                        }
-                    }
+                    Ok(task_result) => match &task_result.data {
+                        TaskData::Inference(r) => JobResult::new(r.text.as_bytes().to_vec())
+                            .with_usage(ActualUsage {
+                                tokens: Some(r.tokens_generated),
+                                compute_time_ms: Some(task_result.metrics.total_time_ms),
+                                bytes: None,
+                            })
+                            .with_metrics(ExecutionMetrics {
+                                ttfb_ms: task_result.metrics.ttfb_ms,
+                                total_time_ms: task_result.metrics.total_time_ms,
+                                tokens_per_sec: Some(r.tokens_per_second),
+                            }),
+                        _ => JobResult::new(b"Unexpected result type".to_vec()),
+                    },
                     Err(e) => JobResult::new(format!("Error: {}", e).into_bytes()),
                 }
             }
@@ -512,25 +554,20 @@ impl Runtime {
                 let task = WebFetchTask::get(url.as_ref());
 
                 match self.executor.execute(ExecutionTask::WebFetch(task)).await {
-                    Ok(task_result) => {
-                        match &task_result.data {
-                            TaskData::WebFetch(r) => {
-                                JobResult::new(r.body.clone())
-                                    .with_usage(ActualUsage {
-                                        tokens: None,
-                                        compute_time_ms: Some(task_result.metrics.total_time_ms),
-                                        bytes: Some(r.body.len() as u64),
-                                    })
-                            }
-                            _ => JobResult::new(b"Unexpected result type".to_vec()),
+                    Ok(task_result) => match &task_result.data {
+                        TaskData::WebFetch(r) => {
+                            JobResult::new(r.body.clone()).with_usage(ActualUsage {
+                                tokens: None,
+                                compute_time_ms: Some(task_result.metrics.total_time_ms),
+                                bytes: Some(r.body.len() as u64),
+                            })
                         }
-                    }
+                        _ => JobResult::new(b"Unexpected result type".to_vec()),
+                    },
                     Err(e) => JobResult::new(format!("Error: {}", e).into_bytes()),
                 }
             }
-            _ => {
-                JobResult::new(b"Unsupported resource type".to_vec())
-            }
+            _ => JobResult::new(b"Unsupported resource type".to_vec()),
         };
 
         tracing::info!(job_id = %job_id, "Job execution complete, sending result");
@@ -570,7 +607,13 @@ impl Runtime {
     /// Get runtime statistics.
     pub async fn stats(&self) -> RuntimeStats {
         let active_jobs = self.job_manager.read().await.active_jobs().await.len();
-        let completed_jobs = self.job_manager.read().await.completed_jobs(100).await.len();
+        let completed_jobs = self
+            .job_manager
+            .read()
+            .await
+            .completed_jobs(100)
+            .await
+            .len();
 
         RuntimeStats {
             peer_id: self.local_peer_id.to_string(),

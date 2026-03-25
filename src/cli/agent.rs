@@ -93,7 +93,10 @@ async fn run_agent(spec_path: PathBuf) -> anyhow::Result<()> {
     println!("Spec: {}", spec_path.display());
 
     // Generate agent ID
-    let agent_id = format!("agent_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]);
+    let agent_id = format!(
+        "agent_{}",
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
+    );
 
     // Store agent state in database
     let db_path = bootstrap::database_path();
@@ -138,14 +141,20 @@ async fn list_agents() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    println!("{:<16} {:<20} {:<15} {:<10}", "ID", "NAME", "MODEL", "STATUS");
+    println!(
+        "{:<16} {:<20} {:<15} {:<10}",
+        "ID", "NAME", "MODEL", "STATUS"
+    );
     println!("{}", "-".repeat(65));
 
     for id in &agent_ids {
         if let Ok(Some(state)) = db.get_agent::<serde_json::Value>(id) {
             let name = state.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             let model = state.get("model").and_then(|v| v.as_str()).unwrap_or("?");
-            let status = state.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let status = state
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             println!("{:<16} {:<20} {:<15} {:<10}", id, name, model, status);
         }
     }
@@ -217,12 +226,19 @@ async fn stop_agent(agent_id: &str) -> anyhow::Result<()> {
     }
 
     let mut state = agent.unwrap();
-    let name = state.get("name").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+    let name = state
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+        .to_string();
 
     // Update status to stopped
     if let Some(obj) = state.as_object_mut() {
         obj.insert("status".to_string(), serde_json::json!("stopped"));
-        obj.insert("stopped_at".to_string(), serde_json::json!(chrono::Utc::now().to_rfc3339()));
+        obj.insert(
+            "stopped_at".to_string(),
+            serde_json::json!(chrono::Utc::now().to_rfc3339()),
+        );
     }
     db.store_agent(agent_id, &state)?;
 

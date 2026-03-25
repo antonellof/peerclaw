@@ -10,15 +10,16 @@ mod resource;
 
 pub use behaviour::PeerclawdBehaviour;
 pub use events::NetworkEvent;
-pub use provider::{ProviderManifest, ModelOffering, ProviderBackend, ProviderRateLimits, ProviderSharingConfig};
+pub use provider::{
+    ModelOffering, ProviderBackend, ProviderManifest, ProviderRateLimits, ProviderSharingConfig,
+};
 pub use provider_tracker::ProviderTracker;
 pub use resource::{Capability, ResourceManifest, Resources};
 
 use futures::StreamExt;
 use libp2p::{
-    kad,
-    mdns,
-    swarm::{SwarmEvent, Swarm},
+    kad, mdns,
+    swarm::{Swarm, SwarmEvent},
     Multiaddr, PeerId,
 };
 use std::collections::HashSet;
@@ -100,7 +101,8 @@ impl Network {
 
     /// Run the network event loop.
     pub async fn run(&mut self, mut shutdown_rx: mpsc::Receiver<()>) -> anyhow::Result<()> {
-        let mut advertise_interval = interval(Duration::from_secs(self.config.advertise_interval_secs));
+        let mut advertise_interval =
+            interval(Duration::from_secs(self.config.advertise_interval_secs));
 
         loop {
             tokio::select! {
@@ -127,12 +129,18 @@ impl Network {
 
     /// Process a swarm event and return any resulting NetworkEvent.
     /// This is called from the serve loop to drive the network.
-    pub async fn process_swarm_event(&mut self, event: SwarmEvent<behaviour::PeerclawdBehaviourEvent>) -> Option<NetworkEvent> {
+    pub async fn process_swarm_event(
+        &mut self,
+        event: SwarmEvent<behaviour::PeerclawdBehaviourEvent>,
+    ) -> Option<NetworkEvent> {
         self.handle_swarm_event_internal(event).await
     }
 
     /// Handle a swarm event internally.
-    async fn handle_swarm_event_internal(&mut self, event: SwarmEvent<behaviour::PeerclawdBehaviourEvent>) -> Option<NetworkEvent> {
+    async fn handle_swarm_event_internal(
+        &mut self,
+        event: SwarmEvent<behaviour::PeerclawdBehaviourEvent>,
+    ) -> Option<NetworkEvent> {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
                 tracing::info!("Listening on {}", address);
@@ -151,7 +159,9 @@ impl Network {
                 Some(NetworkEvent::PeerDisconnected(peer_id))
             }
 
-            SwarmEvent::Behaviour(behaviour::PeerclawdBehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
+            SwarmEvent::Behaviour(behaviour::PeerclawdBehaviourEvent::Mdns(
+                mdns::Event::Discovered(peers),
+            )) => {
                 for (peer_id, addr) in &peers {
                     tracing::debug!("mDNS discovered peer: {} at {}", peer_id, addr);
 
@@ -162,20 +172,26 @@ impl Network {
                         .add_address(peer_id, addr.clone());
                 }
                 // Return first discovered peer
-                peers.first().map(|(peer_id, addr)| NetworkEvent::PeerDiscovered {
-                    peer_id: *peer_id,
-                    addresses: vec![addr.clone()],
-                })
+                peers
+                    .first()
+                    .map(|(peer_id, addr)| NetworkEvent::PeerDiscovered {
+                        peer_id: *peer_id,
+                        addresses: vec![addr.clone()],
+                    })
             }
 
-            SwarmEvent::Behaviour(behaviour::PeerclawdBehaviourEvent::Mdns(mdns::Event::Expired(peers))) => {
+            SwarmEvent::Behaviour(behaviour::PeerclawdBehaviourEvent::Mdns(
+                mdns::Event::Expired(peers),
+            )) => {
                 for (peer_id, _) in peers {
                     tracing::debug!("mDNS peer expired: {}", peer_id);
                 }
                 None
             }
 
-            SwarmEvent::Behaviour(behaviour::PeerclawdBehaviourEvent::Kademlia(kad::Event::RoutingUpdated { peer, .. })) => {
+            SwarmEvent::Behaviour(behaviour::PeerclawdBehaviourEvent::Kademlia(
+                kad::Event::RoutingUpdated { peer, .. },
+            )) => {
                 tracing::debug!("Kademlia routing updated for peer: {}", peer);
                 None
             }

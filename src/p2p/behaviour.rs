@@ -1,11 +1,11 @@
 //! libp2p behaviour composition.
 
 use libp2p::{
-    gossipsub, identify, kad,
-    mdns,
-    swarm::{NetworkBehaviour, Swarm},
+    gossipsub, identify,
     identity::Keypair,
-    noise, tcp, yamux, PeerId,
+    kad, mdns, noise,
+    swarm::{NetworkBehaviour, Swarm},
+    tcp, yamux, PeerId,
 };
 use std::time::Duration;
 
@@ -28,7 +28,10 @@ pub struct PeerclawdBehaviour {
 }
 
 /// Build a complete swarm with all behaviours configured.
-pub fn build_swarm(keypair: Keypair, _config: &P2pConfig) -> anyhow::Result<Swarm<PeerclawdBehaviour>> {
+pub fn build_swarm(
+    keypair: Keypair,
+    _config: &P2pConfig,
+) -> anyhow::Result<Swarm<PeerclawdBehaviour>> {
     let local_peer_id = PeerId::from(keypair.public());
 
     // Build the swarm with TCP transport
@@ -48,10 +51,7 @@ pub fn build_swarm(keypair: Keypair, _config: &P2pConfig) -> anyhow::Result<Swar
             };
 
             // mDNS
-            let mdns = mdns::tokio::Behaviour::new(
-                mdns::Config::default(),
-                local_peer_id,
-            )?;
+            let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id)?;
 
             // GossipSub
             let gossipsub = {
@@ -76,11 +76,8 @@ pub fn build_swarm(keypair: Keypair, _config: &P2pConfig) -> anyhow::Result<Swar
 
             // Identify
             let identify = identify::Behaviour::new(
-                identify::Config::new(
-                    "/peerclaw/1.0.0".to_string(),
-                    keypair.public(),
-                )
-                .with_agent_version(format!("peerclaw/{}", env!("CARGO_PKG_VERSION"))),
+                identify::Config::new("/peerclaw/1.0.0".to_string(), keypair.public())
+                    .with_agent_version(format!("peerclaw/{}", env!("CARGO_PKG_VERSION"))),
             );
 
             Ok(PeerclawdBehaviour {
@@ -90,9 +87,7 @@ pub fn build_swarm(keypair: Keypair, _config: &P2pConfig) -> anyhow::Result<Swar
                 identify,
             })
         })?
-        .with_swarm_config(|cfg| {
-            cfg.with_idle_connection_timeout(Duration::from_secs(60))
-        })
+        .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
     Ok(swarm)

@@ -41,6 +41,22 @@ pub struct Config {
     /// LLM provider sharing configuration
     #[serde(default)]
     pub provider_sharing: ProviderSharingConfig,
+
+    /// Local skills directory (`SKILL.md` files). Default: `~/.peerclaw/skills`.
+    #[serde(default)]
+    pub skills: SkillsConfig,
+
+    /// MCP client settings (used by the web UI and for future agent wiring; servers run as sidecars).
+    #[serde(default)]
+    pub mcp: crate::mcp::McpConfig,
+}
+
+/// Skills directory and discovery options.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SkillsConfig {
+    /// If set, load skills from this directory instead of `~/.peerclaw/skills`.
+    #[serde(default)]
+    pub directory: Option<PathBuf>,
 }
 
 impl Config {
@@ -109,9 +125,7 @@ pub struct P2pConfig {
 impl Default for P2pConfig {
     fn default() -> Self {
         Self {
-            listen_addresses: vec![
-                "/ip4/0.0.0.0/tcp/0".to_string(),
-            ],
+            listen_addresses: vec!["/ip4/0.0.0.0/tcp/0".to_string()],
             bootstrap_peers: vec![],
             mdns_enabled: true,
             kademlia_enabled: true,
@@ -364,14 +378,14 @@ impl Default for EconomyConfig {
             charge_for_tools: true,
             charge_for_messages: false,
             // Default prices (competitive starting points)
-            inference_price_per_1k: 100,   // 0.0001 PCLAW per 1K tokens
-            storage_price_per_mb_day: 10,  // 0.00001 PCLAW per MB/day
-            tool_price_per_call: 50,       // 0.00005 PCLAW per call
-            message_price: 1,              // 0.000001 PCLAW per message
+            inference_price_per_1k: 100,  // 0.0001 PCLAW per 1K tokens
+            storage_price_per_mb_day: 10, // 0.00001 PCLAW per MB/day
+            tool_price_per_call: 50,      // 0.00005 PCLAW per call
+            message_price: 1,             // 0.000001 PCLAW per message
             // Payment behavior
             accept_paid_jobs: true,
-            max_job_payment: 0,            // Unlimited
-            min_balance_for_paid_jobs: 0,  // No minimum
+            max_job_payment: 0,           // Unlimited
+            min_balance_for_paid_jobs: 0, // No minimum
         }
     }
 }
@@ -421,7 +435,7 @@ impl EconomyConfig {
             storage_price_per_mb_day: 0,
             tool_price_per_call: 0,
             message_price: 0,
-            accept_paid_jobs: true,  // Can still use paid public nodes
+            accept_paid_jobs: true, // Can still use paid public nodes
             max_job_payment: 0,
             min_balance_for_paid_jobs: 0,
         }
@@ -434,12 +448,11 @@ impl EconomyConfig {
 
     /// Check if any charging is enabled.
     pub fn is_charging_enabled(&self) -> bool {
-        self.enabled && (
-            self.charge_for_inference ||
-            self.charge_for_storage ||
-            self.charge_for_tools ||
-            self.charge_for_messages
-        )
+        self.enabled
+            && (self.charge_for_inference
+                || self.charge_for_storage
+                || self.charge_for_tools
+                || self.charge_for_messages)
     }
 
     /// Get the price for an inference request.

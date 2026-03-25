@@ -104,7 +104,9 @@ impl Node {
         let mut event_rx = self.network.event_receiver();
 
         // Take shutdown receiver
-        let _shutdown_rx = self.shutdown_rx.take()
+        let _shutdown_rx = self
+            .shutdown_rx
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Node already running"))?;
 
         // Spawn network task
@@ -142,7 +144,15 @@ impl Node {
 
         // Register local agent in swarm
         let local_agent_id = self.swarm_manager.register_local_agent(
-            format!("node-{}", self.identity.peer_id().to_string().chars().take(8).collect::<String>()),
+            format!(
+                "node-{}",
+                self.identity
+                    .peer_id()
+                    .to_string()
+                    .chars()
+                    .take(8)
+                    .collect::<String>()
+            ),
             Default::default(),
         );
         tracing::info!("Registered local agent: {}", local_agent_id);

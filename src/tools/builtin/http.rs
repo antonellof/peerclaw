@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 
 use crate::tools::tool::{
-    Tool, ToolContext, ToolError, ToolOutput, ToolDomain, ApprovalRequirement,
-    require_str, optional_str, optional_i64,
+    optional_i64, optional_str, require_str, ApprovalRequirement, Tool, ToolContext, ToolDomain,
+    ToolError, ToolOutput,
 };
 
 /// Default timeout for HTTP requests.
@@ -97,7 +97,9 @@ impl Tool for HttpTool {
         let start = Instant::now();
 
         let url = require_str(&params, "url")?;
-        let method = optional_str(&params, "method").unwrap_or("GET").to_uppercase();
+        let method = optional_str(&params, "method")
+            .unwrap_or("GET")
+            .to_uppercase();
         let timeout_secs = optional_i64(&params, "timeout", 30) as u64;
 
         // Validate URL
@@ -107,7 +109,7 @@ impl Tool for HttpTool {
         // Security: block local addresses
         if is_local_address(&parsed_url) {
             return Err(ToolError::NotAuthorized(
-                "Requests to local addresses are not allowed".to_string()
+                "Requests to local addresses are not allowed".to_string(),
             ));
         }
 
@@ -120,7 +122,12 @@ impl Tool for HttpTool {
             "PATCH" => self.client.patch(url),
             "HEAD" => self.client.head(url),
             "OPTIONS" => self.client.request(reqwest::Method::OPTIONS, url),
-            _ => return Err(ToolError::InvalidParameters(format!("Unknown method: {}", method))),
+            _ => {
+                return Err(ToolError::InvalidParameters(format!(
+                    "Unknown method: {}",
+                    method
+                )))
+            }
         };
 
         builder = builder.timeout(Duration::from_secs(timeout_secs));
@@ -142,14 +149,17 @@ impl Tool for HttpTool {
         }
 
         // Execute request
-        let response = builder.send().await
+        let response = builder
+            .send()
+            .await
             .map_err(|e| ToolError::ExternalService(format!("Request failed: {}", e)))?;
 
         let status = response.status().as_u16();
         let status_text = response.status().canonical_reason().unwrap_or("Unknown");
 
         // Collect headers
-        let headers: HashMap<String, String> = response.headers()
+        let headers: HashMap<String, String> = response
+            .headers()
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
@@ -163,7 +173,9 @@ impl Tool for HttpTool {
             )));
         }
 
-        let body_bytes = response.bytes().await
+        let body_bytes = response
+            .bytes()
+            .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read body: {}", e)))?;
 
         // Try to parse as text, fall back to base64
@@ -286,11 +298,15 @@ impl Tool for WebFetchTool {
 
         if is_local_address(&parsed_url) {
             return Err(ToolError::NotAuthorized(
-                "Requests to local addresses are not allowed".to_string()
+                "Requests to local addresses are not allowed".to_string(),
             ));
         }
 
-        let response = self.client.get(url).send().await
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
             .map_err(|e| ToolError::ExternalService(format!("Fetch failed: {}", e)))?;
 
         let status = response.status().as_u16();
@@ -302,13 +318,16 @@ impl Tool for WebFetchTool {
             )));
         }
 
-        let content_type = response.headers()
+        let content_type = response
+            .headers()
             .get("content-type")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("text/html")
             .to_string();
 
-        let html = response.text().await
+        let html = response
+            .text()
+            .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read response: {}", e)))?;
 
         // Extract text from HTML (simple approach)
@@ -421,7 +440,8 @@ fn html_to_text(html: &str, max_length: usize) -> String {
 
 fn extract_title(html: &str) -> Option<String> {
     let title_re = regex::Regex::new(r"(?i)<title[^>]*>([^<]+)</title>").ok()?;
-    title_re.captures(html)
+    title_re
+        .captures(html)
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().trim().to_string())
 }
@@ -432,7 +452,8 @@ mod tests {
 
     #[test]
     fn test_html_to_text() {
-        let html = "<html><head><title>Test</title></head><body><p>Hello <b>World</b>!</p></body></html>";
+        let html =
+            "<html><head><title>Test</title></head><body><p>Hello <b>World</b>!</p></body></html>";
         let text = html_to_text(html, 1000);
         assert!(text.contains("Hello"));
         assert!(text.contains("World"));

@@ -29,7 +29,7 @@ pub mod task;
 
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc::UnboundedSender, RwLock};
 use uuid::Uuid;
 
 pub use resource::{MonitorConfig, ResourceMonitor, ResourceState, TaskType};
@@ -127,9 +127,7 @@ impl TaskExecutor {
         );
 
         match decision {
-            RoutingDecision::ExecuteLocally => {
-                self.execute_local(task_id, task, start).await
-            }
+            RoutingDecision::ExecuteLocally => self.execute_local(task_id, task, start).await,
             RoutingDecision::OffloadToNetwork { requirements } => {
                 self.execute_remote(task_id, task, requirements, start)
                     .await
@@ -160,15 +158,11 @@ impl TaskExecutor {
             ExecutionTask::Inference(inference_task) => {
                 self.execute_inference_local(inference_task).await
             }
-            ExecutionTask::WebFetch(fetch_task) => {
-                self.execute_web_fetch_local(fetch_task).await
-            }
+            ExecutionTask::WebFetch(fetch_task) => self.execute_web_fetch_local(fetch_task).await,
             ExecutionTask::WebSearch(search_task) => {
                 self.execute_web_search_local(search_task).await
             }
-            ExecutionTask::WasmExecution(wasm_task) => {
-                self.execute_wasm_local(wasm_task).await
-            }
+            ExecutionTask::WasmExecution(wasm_task) => self.execute_wasm_local(wasm_task).await,
         };
 
         // Task completed
@@ -218,7 +212,10 @@ impl TaskExecutor {
                 "Offloading task to P2P network"
             );
 
-            match remote.execute(task_id.clone(), task.clone(), peer_filter).await {
+            match remote
+                .execute(task_id.clone(), task.clone(), peer_filter)
+                .await
+            {
                 Ok(result) => return Ok(result),
                 Err(e) => {
                     tracing::warn!(
@@ -249,13 +246,16 @@ impl TaskExecutor {
         task: InferenceTask,
     ) -> Result<TaskData, ExecutorError> {
         // Convert chat messages to prompt string
-        let prompt = task.messages.iter()
+        let prompt = task
+            .messages
+            .iter()
             .map(|msg| match msg.role {
                 MessageRole::System => format!("System: {}\n", msg.content),
                 MessageRole::User => format!("User: {}\n", msg.content),
                 MessageRole::Assistant => format!("Assistant: {}\n", msg.content),
             })
-            .collect::<String>() + "Assistant:";
+            .collect::<String>()
+            + "Assistant:";
 
         tracing::info!(
             model = %task.model,
@@ -311,7 +311,8 @@ impl TaskExecutor {
 
         let engine = self.gguf_engine.read().await;
 
-        let model_handle = engine.load(&actual_path)
+        let model_handle = engine
+            .load(&actual_path)
             .map_err(|e| ExecutorError::InferenceError(format!("Failed to load model: {}", e)))?;
 
         let request = GenerateRequest {
@@ -323,13 +324,249 @@ impl TaskExecutor {
             stop_sequences: task.stop_sequences.clone(),
         };
 
-        let response = engine.generate(&model_handle, &request)
+        let response = engine
+            .generate(&model_handle, &request)
             .map_err(|e| ExecutorError::InferenceError(format!("Generation failed: {}", e)))?;
 
         tracing::info!(
             tokens = response.tokens_generated,
             tps = format!("{:.1}", response.tokens_per_second),
             "Inference complete"
+        );
+
+        let finish_reason = match response.finish_reason {
+            crate::inference::FinishReason::Stop => FinishReason::Stop,
+            crate::inference::FinishReason::Length => FinishReason::Length,
+            crate::inference::FinishReason::ContentFilter => FinishReason::ContentFilter,
+        };
+
+        Ok(TaskData::Inference(InferenceResult {
+            text: response.text,
+            tokens_generated: response.tokens_generated,
+            tokens_per_second: response.tokens_per_second,
+            finish_reason,
+        }))
+    }
+
+    /// Run inference with optional network offload; push UTF-8 chunks to `delta_tx` as they are produced.
+    ///
+    /// Local direct GGUF uses true token streaming; the high-level `InferenceEngine` and remote jobs
+    /// typically emit a single chunk when the full reply is ready.
+    pub async fn execute_inference_streaming(
+        &self,
+        task: InferenceTask,
+        delta_tx: UnboundedSender<String>,
+    ) -> Result<TaskResult, ExecutorError> {
+        let task_id = Uuid::new_v4().to_string();
+        let start = Instant::now();
+        let exec_task = ExecutionTask::Inference(task.clone());
+        let decision = self.router.route(&exec_task).await;
+
+        match decision {
+            RoutingDecision::InsufficientResources { reason } => {
+                Err(ExecutorError::InsufficientResources(reason))
+            }
+            RoutingDecision::ExecuteLocally => {
+                self.resource_monitor
+                    .task_started(TaskType::Inference)
+                    .await;
+                let data = match self
+                    .execute_inference_local_streaming(task, &delta_tx)
+                    .await
+                {
+                    Ok(d) => d,
+                    Err(e) => TaskData::Error(e.to_string()),
+                };
+                self.resource_monitor
+                    .task_completed(TaskType::Inference)
+                    .await;
+                Ok(TaskResult {
+                    task_id,
+                    location: ExecutionLocation::Local,
+                    data,
+                    metrics: TaskMetrics {
+                        ttfb_ms: 0,
+                        total_time_ms: start.elapsed().as_millis() as u64,
+                        queue_time_ms: 0,
+                    },
+                    cost: None,
+                })
+            }
+            RoutingDecision::OffloadToNetwork { requirements } => {
+                self.resource_monitor
+                    .task_started(TaskType::Inference)
+                    .await;
+                let out = if let Some(remote) = &self.remote_executor {
+                    match remote
+                        .execute(task_id.clone(), exec_task.clone(), requirements)
+                        .await
+                    {
+                        Ok(result) => {
+                            match &result.data {
+                                TaskData::Inference(inf) => {
+                                    let _ = delta_tx.send(inf.text.clone());
+                                }
+                                TaskData::Error(e) => {
+                                    let _ = delta_tx.send(e.clone());
+                                }
+                                _ => {
+                                    let _ = delta_tx.send("Unexpected response type".to_string());
+                                }
+                            }
+                            Ok(result)
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                task_id = %task_id,
+                                error = %e,
+                                "Remote execution failed, falling back to local (streaming)"
+                            );
+                            let data = match self
+                                .execute_inference_local_streaming(task, &delta_tx)
+                                .await
+                            {
+                                Ok(d) => d,
+                                Err(e2) => TaskData::Error(e2.to_string()),
+                            };
+                            Ok(TaskResult {
+                                task_id,
+                                location: ExecutionLocation::Local,
+                                data,
+                                metrics: TaskMetrics {
+                                    ttfb_ms: 0,
+                                    total_time_ms: start.elapsed().as_millis() as u64,
+                                    queue_time_ms: 0,
+                                },
+                                cost: None,
+                            })
+                        }
+                    }
+                } else {
+                    let data = match self
+                        .execute_inference_local_streaming(task, &delta_tx)
+                        .await
+                    {
+                        Ok(d) => d,
+                        Err(e) => TaskData::Error(e.to_string()),
+                    };
+                    Ok(TaskResult {
+                        task_id,
+                        location: ExecutionLocation::Local,
+                        data,
+                        metrics: TaskMetrics {
+                            ttfb_ms: 0,
+                            total_time_ms: start.elapsed().as_millis() as u64,
+                            queue_time_ms: 0,
+                        },
+                        cost: None,
+                    })
+                };
+                self.resource_monitor
+                    .task_completed(TaskType::Inference)
+                    .await;
+                out
+            }
+        }
+    }
+
+    async fn execute_inference_local_streaming(
+        &self,
+        task: InferenceTask,
+        delta_tx: &UnboundedSender<String>,
+    ) -> Result<TaskData, ExecutorError> {
+        let prompt = task
+            .messages
+            .iter()
+            .map(|msg| match msg.role {
+                MessageRole::System => format!("System: {}\n", msg.content),
+                MessageRole::User => format!("User: {}\n", msg.content),
+                MessageRole::Assistant => format!("Assistant: {}\n", msg.content),
+            })
+            .collect::<String>()
+            + "Assistant:";
+
+        tracing::info!(
+            model = %task.model,
+            max_tokens = task.max_tokens,
+            prompt_len = prompt.len(),
+            "Executing inference locally (streaming)"
+        );
+
+        if let Some(engine) = &self.inference_engine {
+            let request = GenerateRequest {
+                model: task.model.clone(),
+                prompt,
+                max_tokens: task.max_tokens,
+                temperature: task.temperature,
+                top_p: 0.9,
+                stop_sequences: task.stop_sequences.clone(),
+            };
+
+            let response = engine
+                .generate(&request)
+                .await
+                .map_err(|e| ExecutorError::InferenceError(e.to_string()))?;
+
+            let _ = delta_tx.send(response.text.clone());
+
+            tracing::info!(
+                tokens = response.tokens_generated,
+                tps = format!("{:.1}", response.tokens_per_second),
+                model_id = %response.model_id,
+                "Inference complete (streaming path, batched output)"
+            );
+
+            let finish_reason = match response.finish_reason {
+                crate::inference::FinishReason::Stop => FinishReason::Stop,
+                crate::inference::FinishReason::Length => FinishReason::Length,
+                crate::inference::FinishReason::ContentFilter => FinishReason::ContentFilter,
+            };
+
+            return Ok(TaskData::Inference(InferenceResult {
+                text: response.text,
+                tokens_generated: response.tokens_generated,
+                tokens_per_second: response.tokens_per_second,
+                finish_reason,
+            }));
+        }
+
+        let actual_path = self.find_gguf_model(&task.model)?;
+
+        tracing::info!(
+            model_path = %actual_path.display(),
+            "Loading model for streaming inference (direct GGUF)"
+        );
+
+        let engine = self.gguf_engine.read().await;
+
+        let model_handle = engine
+            .load(&actual_path)
+            .map_err(|e| ExecutorError::InferenceError(format!("Failed to load model: {}", e)))?;
+
+        let request = GenerateRequest {
+            model: task.model.clone(),
+            prompt,
+            max_tokens: task.max_tokens,
+            temperature: task.temperature,
+            top_p: 0.9,
+            stop_sequences: task.stop_sequences.clone(),
+        };
+
+        let stream_tx = delta_tx.clone();
+        let callback: TokenCallback = Box::new(move |token: &str| {
+            let _ = stream_tx.send(token.to_string());
+        });
+
+        let response = engine
+            .generate_streaming(&model_handle, &request, callback)
+            .map_err(|e| {
+                ExecutorError::InferenceError(format!("Streaming generation failed: {}", e))
+            })?;
+
+        tracing::info!(
+            tokens = response.tokens_generated,
+            tps = format!("{:.1}", response.tokens_per_second),
+            "Streaming inference complete"
         );
 
         let finish_reason = match response.finish_reason {
@@ -364,9 +601,7 @@ impl TaskExecutor {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().is_some_and(|e| e == "gguf") {
-                    let filename = path.file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("");
+                    let filename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                     let hay = norm(filename);
                     if hay.contains(&needle) || needle.contains(&hay) {
                         return Ok(path);
@@ -390,10 +625,7 @@ impl TaskExecutor {
     }
 
     /// Execute web fetch locally.
-    async fn execute_web_fetch_local(
-        &self,
-        task: WebFetchTask,
-    ) -> Result<TaskData, ExecutorError> {
+    async fn execute_web_fetch_local(&self, task: WebFetchTask) -> Result<TaskData, ExecutorError> {
         use reqwest::Client;
 
         let client = Client::builder()
@@ -505,16 +737,16 @@ impl TaskExecutor {
         use std::io::Write;
 
         // Build prompt with messages
-        let prompt = task.messages
+        let prompt = task
+            .messages
             .iter()
-            .map(|m| {
-                match m.role {
-                    MessageRole::System => format!("System: {}\n\n", m.content),
-                    MessageRole::User => format!("User: {}\n", m.content),
-                    MessageRole::Assistant => format!("Assistant: {}\n\n", m.content),
-                }
+            .map(|m| match m.role {
+                MessageRole::System => format!("System: {}\n\n", m.content),
+                MessageRole::User => format!("User: {}\n", m.content),
+                MessageRole::Assistant => format!("Assistant: {}\n\n", m.content),
             })
-            .collect::<String>() + "Assistant:";
+            .collect::<String>()
+            + "Assistant:";
 
         tracing::info!(
             model = %task.model,
@@ -560,7 +792,8 @@ impl TaskExecutor {
         let actual_path = self.find_gguf_model(&task.model)?;
 
         let engine = self.gguf_engine.read().await;
-        let model_handle = engine.load(&actual_path)
+        let model_handle = engine
+            .load(&actual_path)
             .map_err(|e| ExecutorError::InferenceError(format!("Failed to load model: {}", e)))?;
 
         let request = GenerateRequest {
@@ -577,8 +810,11 @@ impl TaskExecutor {
             let _ = std::io::stdout().flush();
         });
 
-        let response = engine.generate_streaming(&model_handle, &request, callback)
-            .map_err(|e| ExecutorError::InferenceError(format!("Streaming generation failed: {}", e)))?;
+        let response = engine
+            .generate_streaming(&model_handle, &request, callback)
+            .map_err(|e| {
+                ExecutorError::InferenceError(format!("Streaming generation failed: {}", e))
+            })?;
 
         let finish_reason = match response.finish_reason {
             crate::inference::FinishReason::Stop => FinishReason::Stop,

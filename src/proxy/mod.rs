@@ -66,11 +66,14 @@ impl IntoResponse for ProxyError {
                     from_micro(*provided)
                 ),
             ),
-            ProxyError::EndpointNotFound(path) => {
-                (StatusCode::NOT_FOUND, format!("Endpoint not found: {}", path))
-            }
+            ProxyError::EndpointNotFound(path) => (
+                StatusCode::NOT_FOUND,
+                format!("Endpoint not found: {}", path),
+            ),
             ProxyError::UpstreamError(msg) => (StatusCode::BAD_GATEWAY, msg.clone()),
-            ProxyError::RateLimited => (StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".into()),
+            ProxyError::RateLimited => {
+                (StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".into())
+            }
             ProxyError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };
 
@@ -170,7 +173,9 @@ impl ProxyState {
 
         let mut usage = self.free_tier_usage.write().await;
 
-        let (hour, count) = usage.entry(client_id.to_string()).or_insert((current_hour, 0));
+        let (hour, count) = usage
+            .entry(client_id.to_string())
+            .or_insert((current_hour, 0));
 
         if *hour != current_hour {
             *hour = current_hour;
@@ -202,7 +207,9 @@ impl ProxyState {
 
         let mut limits = self.rate_limits.write().await;
 
-        let (minute, count) = limits.entry(client_id.to_string()).or_insert((current_minute, 0));
+        let (minute, count) = limits
+            .entry(client_id.to_string())
+            .or_insert((current_minute, 0));
 
         if *minute != current_minute {
             *minute = current_minute;
@@ -214,7 +221,8 @@ impl ProxyState {
 
     /// Get price for a request to a given path.
     pub fn get_price(&self, path: &str, method: &str) -> u64 {
-        self.pricing.get_price(path, method)
+        self.pricing
+            .get_price(path, method)
             .unwrap_or(self.config.base_price_per_request)
     }
 }
@@ -357,9 +365,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let db = Database::open(&dir.path().join("test.redb")).unwrap();
         let identity = Arc::new(NodeIdentity::generate());
-        let wallet = Arc::new(
-            Wallet::new(identity, WalletConfig::default(), db).unwrap()
-        );
+        let wallet = Arc::new(Wallet::new(identity, WalletConfig::default(), db).unwrap());
 
         let state = Arc::new(ProxyState::new(wallet, None, ProxyConfig::default()));
         (state, dir)

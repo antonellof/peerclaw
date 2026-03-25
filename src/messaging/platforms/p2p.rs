@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::messaging::{
-    Channel, ChannelConfig, ChannelError, ChannelId, ChannelMessage, ChannelUser,
-    MessageDirection, MessageId, MessageRouting, Platform, UserTrust,
+    Channel, ChannelConfig, ChannelError, ChannelId, ChannelMessage, ChannelUser, MessageDirection,
+    MessageId, MessageRouting, Platform, UserTrust,
 };
 
 /// P2P channel configuration.
@@ -177,12 +177,8 @@ impl P2pChannel {
 
         let sender = ChannelUser::from_peer(sender_peer_id.clone());
 
-        let mut message = ChannelMessage::text(
-            self.id.clone(),
-            sender,
-            content,
-            MessageDirection::Incoming,
-        );
+        let mut message =
+            ChannelMessage::text(self.id.clone(), sender, content, MessageDirection::Incoming);
 
         // Add routing info
         message.routing = routing.or_else(|| Some(MessageRouting::local(sender_peer_id.clone())));
@@ -220,12 +216,8 @@ impl P2pChannel {
             peer_id: Some(self.local_peer_id.clone()),
         };
 
-        let mut message = ChannelMessage::text(
-            self.id.clone(),
-            sender,
-            content,
-            MessageDirection::Outgoing,
-        );
+        let mut message =
+            ChannelMessage::text(self.id.clone(), sender, content, MessageDirection::Outgoing);
 
         // Set routing
         message.routing = Some(MessageRouting::to_peer(

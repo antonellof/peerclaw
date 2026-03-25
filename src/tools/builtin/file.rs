@@ -8,8 +8,8 @@ use tokio::fs;
 use tokio::io::AsyncReadExt;
 
 use crate::tools::tool::{
-    Tool, ToolContext, ToolError, ToolOutput, ToolDomain, ApprovalRequirement,
-    require_str, optional_str, optional_i64, optional_bool,
+    optional_bool, optional_i64, optional_str, require_str, ApprovalRequirement, Tool, ToolContext,
+    ToolDomain, ToolError, ToolOutput,
 };
 
 /// Maximum file size to read (10 MB).
@@ -81,13 +81,17 @@ impl Tool for FileReadTool {
 
         // Security check
         if is_protected_path(path_str) {
-            return Err(ToolError::NotAuthorized(format!("Access to {} is not allowed", path_str)));
+            return Err(ToolError::NotAuthorized(format!(
+                "Access to {} is not allowed",
+                path_str
+            )));
         }
 
         let path = resolve_path(path_str, &ctx.working_dir);
 
         // Check file exists and get metadata
-        let metadata = fs::metadata(&path).await
+        let metadata = fs::metadata(&path)
+            .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Cannot access file: {}", e)))?;
 
         if !metadata.is_file() {
@@ -103,18 +107,22 @@ impl Tool for FileReadTool {
         }
 
         // Read file
-        let mut file = fs::File::open(&path).await
+        let mut file = fs::File::open(&path)
+            .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Cannot open file: {}", e)))?;
 
         // Seek if offset specified
         if offset > 0 {
             use tokio::io::AsyncSeekExt;
-            file.seek(std::io::SeekFrom::Start(offset)).await
+            file.seek(std::io::SeekFrom::Start(offset))
+                .await
                 .map_err(|e| ToolError::ExecutionFailed(format!("Cannot seek: {}", e)))?;
         }
 
         let mut buffer = vec![0u8; limit.min(file_size - offset) as usize];
-        let bytes_read = file.read(&mut buffer).await
+        let bytes_read = file
+            .read(&mut buffer)
+            .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Cannot read file: {}", e)))?;
         buffer.truncate(bytes_read);
 
@@ -128,10 +136,11 @@ impl Tool for FileReadTool {
                 "content": base64::engine::general_purpose::STANDARD.encode(&buffer),
             })
         } else {
-            let content = String::from_utf8(buffer)
-                .map_err(|_| ToolError::ExecutionFailed(
-                    "File is not valid UTF-8. Use encoding: base64 for binary files.".to_string()
-                ))?;
+            let content = String::from_utf8(buffer).map_err(|_| {
+                ToolError::ExecutionFailed(
+                    "File is not valid UTF-8. Use encoding: base64 for binary files.".to_string(),
+                )
+            })?;
 
             serde_json::json!({
                 "path": path.display().to_string(),
@@ -217,7 +226,10 @@ impl Tool for FileWriteTool {
 
         // Security check
         if is_protected_path(path_str) {
-            return Err(ToolError::NotAuthorized(format!("Access to {} is not allowed", path_str)));
+            return Err(ToolError::NotAuthorized(format!(
+                "Access to {} is not allowed",
+                path_str
+            )));
         }
 
         let path = resolve_path(path_str, &ctx.working_dir);
@@ -225,15 +237,17 @@ impl Tool for FileWriteTool {
         // Create parent directories if needed
         if create_dirs {
             if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).await
-                    .map_err(|e| ToolError::ExecutionFailed(format!("Cannot create directory: {}", e)))?;
+                fs::create_dir_all(parent).await.map_err(|e| {
+                    ToolError::ExecutionFailed(format!("Cannot create directory: {}", e))
+                })?;
             }
         }
 
         // Decode content if base64
         let bytes = if encoding == "base64" {
             use base64::Engine;
-            base64::engine::general_purpose::STANDARD.decode(content)
+            base64::engine::general_purpose::STANDARD
+                .decode(content)
                 .map_err(|e| ToolError::InvalidParameters(format!("Invalid base64: {}", e)))?
         } else {
             content.as_bytes().to_vec()
@@ -249,10 +263,12 @@ impl Tool for FileWriteTool {
                 .await
                 .map_err(|e| ToolError::ExecutionFailed(format!("Cannot open file: {}", e)))?;
 
-            file.write_all(&bytes).await
+            file.write_all(&bytes)
+                .await
                 .map_err(|e| ToolError::ExecutionFailed(format!("Cannot write: {}", e)))?;
         } else {
-            fs::write(&path, &bytes).await
+            fs::write(&path, &bytes)
+                .await
                 .map_err(|e| ToolError::ExecutionFailed(format!("Cannot write file: {}", e)))?;
         }
 
@@ -361,12 +377,19 @@ impl Tool for FileListTool {
     }
 }
 
-async fn list_directory(path: &PathBuf, include_hidden: bool, limit: usize) -> Result<Vec<serde_json::Value>, ToolError> {
+async fn list_directory(
+    path: &PathBuf,
+    include_hidden: bool,
+    limit: usize,
+) -> Result<Vec<serde_json::Value>, ToolError> {
     let mut entries = Vec::new();
-    let mut read_dir = fs::read_dir(path).await
+    let mut read_dir = fs::read_dir(path)
+        .await
         .map_err(|e| ToolError::ExecutionFailed(format!("Cannot read directory: {}", e)))?;
 
-    while let Some(entry) = read_dir.next_entry().await
+    while let Some(entry) = read_dir
+        .next_entry()
+        .await
         .map_err(|e| ToolError::ExecutionFailed(format!("Error reading entry: {}", e)))?
     {
         if entries.len() >= limit {
@@ -408,7 +431,11 @@ async fn list_directory(path: &PathBuf, include_hidden: bool, limit: usize) -> R
     Ok(entries)
 }
 
-async fn list_recursive(path: &Path, include_hidden: bool, limit: usize) -> Result<Vec<serde_json::Value>, ToolError> {
+async fn list_recursive(
+    path: &Path,
+    include_hidden: bool,
+    limit: usize,
+) -> Result<Vec<serde_json::Value>, ToolError> {
     let mut entries = Vec::new();
     let mut stack = vec![path.to_path_buf()];
 
@@ -467,22 +494,28 @@ mod tests {
         let ctx = ToolContext::local("test".to_string());
 
         // Write
-        let write_result = FileWriteTool.execute(
-            serde_json::json!({
-                "path": file_path.to_str().unwrap(),
-                "content": "Hello, World!"
-            }),
-            &ctx,
-        ).await.unwrap();
+        let write_result = FileWriteTool
+            .execute(
+                serde_json::json!({
+                    "path": file_path.to_str().unwrap(),
+                    "content": "Hello, World!"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
         assert!(write_result.success);
 
         // Read
-        let read_result = FileReadTool.execute(
-            serde_json::json!({
-                "path": file_path.to_str().unwrap()
-            }),
-            &ctx,
-        ).await.unwrap();
+        let read_result = FileReadTool
+            .execute(
+                serde_json::json!({
+                    "path": file_path.to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
         assert!(read_result.success);
         assert_eq!(read_result.data["content"], "Hello, World!");
     }
@@ -494,12 +527,15 @@ mod tests {
         fs::write(dir.path().join("b.txt"), "b").await.unwrap();
 
         let ctx = ToolContext::local("test".to_string());
-        let result = FileListTool.execute(
-            serde_json::json!({
-                "path": dir.path().to_str().unwrap()
-            }),
-            &ctx,
-        ).await.unwrap();
+        let result = FileListTool
+            .execute(
+                serde_json::json!({
+                    "path": dir.path().to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert_eq!(result.data["count"], 2);

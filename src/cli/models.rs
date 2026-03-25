@@ -41,14 +41,46 @@ pub enum ModelsCommand {
 
 /// Known models with their Hugging Face URLs
 const KNOWN_MODELS: &[(&str, &str, &str)] = &[
-    ("llama-3.2-1b", "bartowski/Llama-3.2-1B-Instruct-GGUF", "Llama-3.2-1B-Instruct"),
-    ("llama-3.2-3b", "bartowski/Llama-3.2-3B-Instruct-GGUF", "Llama-3.2-3B-Instruct"),
-    ("phi-3-mini", "microsoft/Phi-3-mini-4k-instruct-gguf", "Phi-3-mini-4k-instruct"),
-    ("qwen2.5-0.5b", "Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct"),
-    ("qwen2.5-1.5b", "Qwen/Qwen2.5-1.5B-Instruct-GGUF", "qwen2.5-1.5b-instruct"),
-    ("qwen2.5-3b", "Qwen/Qwen2.5-3B-Instruct-GGUF", "qwen2.5-3b-instruct"),
-    ("gemma-2-2b", "bartowski/gemma-2-2b-it-GGUF", "gemma-2-2b-it"),
-    ("tinyllama-1.1b", "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF", "tinyllama-1.1b-chat-v1.0"),
+    (
+        "llama-3.2-1b",
+        "bartowski/Llama-3.2-1B-Instruct-GGUF",
+        "Llama-3.2-1B-Instruct",
+    ),
+    (
+        "llama-3.2-3b",
+        "bartowski/Llama-3.2-3B-Instruct-GGUF",
+        "Llama-3.2-3B-Instruct",
+    ),
+    (
+        "phi-3-mini",
+        "microsoft/Phi-3-mini-4k-instruct-gguf",
+        "Phi-3-mini-4k-instruct",
+    ),
+    (
+        "qwen2.5-0.5b",
+        "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+        "qwen2.5-0.5b-instruct",
+    ),
+    (
+        "qwen2.5-1.5b",
+        "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+        "qwen2.5-1.5b-instruct",
+    ),
+    (
+        "qwen2.5-3b",
+        "Qwen/Qwen2.5-3B-Instruct-GGUF",
+        "qwen2.5-3b-instruct",
+    ),
+    (
+        "gemma-2-2b",
+        "bartowski/gemma-2-2b-it-GGUF",
+        "gemma-2-2b-it",
+    ),
+    (
+        "tinyllama-1.1b",
+        "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+        "tinyllama-1.1b-chat-v1.0",
+    ),
 ];
 
 pub async fn run(args: ModelsArgs) -> anyhow::Result<()> {
@@ -86,7 +118,10 @@ async fn list_models() -> anyhow::Result<()> {
                         }
                     })
                     .unwrap_or_else(|_| "? bytes".to_string());
-                println!("  \x1b[32m✓\x1b[0m \x1b[36m{}\x1b[0m \x1b[90m({})\x1b[0m", name, size);
+                println!(
+                    "  \x1b[32m✓\x1b[0m \x1b[36m{}\x1b[0m \x1b[90m({})\x1b[0m",
+                    name, size
+                );
             }
         }
     }
@@ -142,7 +177,10 @@ async fn download_model(model: &str, quant: &str) -> anyhow::Result<()> {
     let output_path = models_dir.join(format!("{}-{}.gguf", model, quant));
 
     if output_path.exists() {
-        println!("\x1b[33mModel already exists:\x1b[0m {}", output_path.display());
+        println!(
+            "\x1b[33mModel already exists:\x1b[0m {}",
+            output_path.display()
+        );
         return Ok(());
     }
 
@@ -165,7 +203,10 @@ async fn download_model(model: &str, quant: &str) -> anyhow::Result<()> {
         println!("\x1b[31mDownload failed:\x1b[0m HTTP {}", response.status());
         println!();
         println!("The model file may not exist at the expected URL.");
-        println!("Try downloading manually from: \x1b[36mhttps://huggingface.co/{}\x1b[0m", repo);
+        println!(
+            "Try downloading manually from: \x1b[36mhttps://huggingface.co/{}\x1b[0m",
+            repo
+        );
         return Ok(());
     }
 
@@ -192,7 +233,10 @@ async fn download_model(model: &str, quant: &str) -> anyhow::Result<()> {
     println!("\x1b[32m✓ Download complete!\x1b[0m");
     println!("  Model saved to: \x1b[36m{}\x1b[0m", output_path.display());
     println!();
-    println!("  To use in chat: \x1b[36mpeerclaw chat --model {}-{}\x1b[0m", model, quant);
+    println!(
+        "  To use in chat: \x1b[36mpeerclaw chat --model {}-{}\x1b[0m",
+        model, quant
+    );
     println!();
 
     Ok(())

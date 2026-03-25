@@ -329,10 +329,7 @@ pub enum ExecutionLocation {
     /// Executed on this node
     Local,
     /// Executed on a remote peer
-    Remote {
-        peer_id: String,
-        job_id: JobId,
-    },
+    Remote { peer_id: String, job_id: JobId },
 }
 
 /// Result of task execution.

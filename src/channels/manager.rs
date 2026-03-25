@@ -60,7 +60,8 @@ impl ChannelManager {
 
     /// Start all channels
     pub async fn start_all(&self) -> anyhow::Result<()> {
-        self.running.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(true, std::sync::atomic::Ordering::SeqCst);
 
         let channels: Vec<_> = {
             let channels = self.channels.read();
@@ -86,7 +87,8 @@ impl ChannelManager {
 
     /// Stop all channels
     pub async fn stop_all(&self) -> anyhow::Result<()> {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
 
         let channels: Vec<_> = {
             let channels = self.channels.read();
@@ -107,7 +109,8 @@ impl ChannelManager {
 
     /// Send a response to the appropriate channel
     pub async fn send(&self, response: OutgoingResponse) -> anyhow::Result<()> {
-        let channel = self.get(&response.channel)
+        let channel = self
+            .get(&response.channel)
             .ok_or_else(|| anyhow::anyhow!("Channel not found: {}", response.channel))?;
 
         channel.send(response).await
@@ -117,7 +120,10 @@ impl ChannelManager {
     pub async fn health_check(&self) -> HashMap<String, bool> {
         let channels: Vec<_> = {
             let channels = self.channels.read();
-            channels.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            channels
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
         };
 
         let mut results = HashMap::new();

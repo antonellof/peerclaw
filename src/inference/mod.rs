@@ -55,15 +55,17 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 
 pub use batch::{
-    BatchAggregator, BatchConfig, BatchError, BatchInferenceExecutor,
-    BatchProcessor, BatchRequest, BatchResponse, BatchStats,
+    BatchAggregator, BatchConfig, BatchError, BatchInferenceExecutor, BatchProcessor, BatchRequest,
+    BatchResponse, BatchStats,
 };
 pub use cache::{CacheError, LoadedModel, ModelCache, ModelHandle};
 pub use distribution::{
-    DistributionError, DownloadProgress, ModelAnnouncement, ModelDistributor,
-    ModelDistributionMessage, ModelMetadata, CHUNK_SIZE,
+    DistributionError, DownloadProgress, ModelAnnouncement, ModelDistributionMessage,
+    ModelDistributor, ModelMetadata, CHUNK_SIZE,
 };
-pub use gguf::{AsyncGgufEngine, GgufBackend, GgufConfig, GgufEngine, GgufError, GgufModelHandle, GgufModelInfo};
+pub use gguf::{
+    AsyncGgufEngine, GgufBackend, GgufConfig, GgufEngine, GgufError, GgufModelHandle, GgufModelInfo,
+};
 pub use model::{ModelArchitecture, ModelId, ModelInfo, ModelRequirements, Quantization};
 
 /// Inference engine for running LLM models.
@@ -253,13 +255,17 @@ impl InferenceEngine {
                 "Routing to Ollama"
             );
 
-            let result = self.ollama.generate(
-                &request.model,
-                &request.prompt,
-                request.max_tokens,
-                request.temperature,
-                None, // system prompt is baked into the prompt by caller
-            ).await.map_err(|e| InferenceError::GenerationFailed(e))?;
+            let result = self
+                .ollama
+                .generate(
+                    &request.model,
+                    &request.prompt,
+                    request.max_tokens,
+                    request.temperature,
+                    None, // system prompt is baked into the prompt by caller
+                )
+                .await
+                .map_err(|e| InferenceError::GenerationFailed(e))?;
 
             return Ok(GenerateResponse {
                 text: result.text,
@@ -280,7 +286,8 @@ impl InferenceEngine {
                     .filter(|e| e.path().extension().is_some_and(|ext| ext == "gguf"))
                     .count()
             })
-            .unwrap_or(0) == 0;
+            .unwrap_or(0)
+            == 0;
 
         let hint = if no_gguf {
             format!(

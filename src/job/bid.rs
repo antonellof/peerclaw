@@ -14,7 +14,10 @@ pub struct BidId(pub String);
 impl BidId {
     /// Generate a new random bid ID.
     pub fn new() -> Self {
-        Self(format!("bid_{}", Uuid::new_v4().to_string().replace("-", "")))
+        Self(format!(
+            "bid_{}",
+            Uuid::new_v4().to_string().replace("-", "")
+        ))
     }
 }
 
@@ -218,13 +221,7 @@ mod tests {
 
     #[test]
     fn test_bid_creation() {
-        let bid = JobBid::new(
-            JobId::new(),
-            "peer_123".to_string(),
-            to_micro(5.0),
-            100,
-            60,
-        );
+        let bid = JobBid::new(JobId::new(), "peer_123".to_string(), to_micro(5.0), 100, 60);
 
         assert!(bid.is_valid());
         assert_eq!(bid.status, BidStatus::Pending);
@@ -232,13 +229,7 @@ mod tests {
 
     #[test]
     fn test_bid_expiry() {
-        let mut bid = JobBid::new(
-            JobId::new(),
-            "peer_123".to_string(),
-            to_micro(5.0),
-            100,
-            60,
-        );
+        let mut bid = JobBid::new(JobId::new(), "peer_123".to_string(), to_micro(5.0), 100, 60);
 
         assert!(!bid.is_expired());
 

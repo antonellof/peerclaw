@@ -86,23 +86,32 @@ pub enum TestCommand {
 
 pub async fn run(args: TestArgs) -> anyhow::Result<()> {
     match args.cmd {
-        TestCommand::Inference { model, prompt, max_tokens } => {
-            run_inference_test(&model, &prompt, max_tokens).await
-        }
-        TestCommand::Fetch { url } => {
-            run_fetch_test(&url).await
-        }
-        TestCommand::All => {
-            run_all_tests().await
-        }
-        TestCommand::Status => {
-            show_status().await
-        }
+        TestCommand::Inference {
+            model,
+            prompt,
+            max_tokens,
+        } => run_inference_test(&model, &prompt, max_tokens).await,
+        TestCommand::Fetch { url } => run_fetch_test(&url).await,
+        TestCommand::All => run_all_tests().await,
+        TestCommand::Status => show_status().await,
         TestCommand::Distributed { agents, duration } => {
             run_distributed_test(agents, duration).await
         }
-        TestCommand::Cluster { nodes, base_web_port, base_p2p_port, run_test_job, keep_alive } => {
-            run_cluster(nodes, base_web_port, base_p2p_port, run_test_job, keep_alive).await
+        TestCommand::Cluster {
+            nodes,
+            base_web_port,
+            base_p2p_port,
+            run_test_job,
+            keep_alive,
+        } => {
+            run_cluster(
+                nodes,
+                base_web_port,
+                base_p2p_port,
+                run_test_job,
+                keep_alive,
+            )
+            .await
         }
     }
 }
@@ -228,13 +237,26 @@ async fn show_status() -> anyhow::Result<()> {
     println!("Completed jobs: {}", stats.completed_jobs);
     println!();
     println!("Resource State:");
-    println!("  CPU usage: {:.1}%", stats.resource_state.cpu_usage * 100.0);
-    println!("  RAM: {}/{} MB available",
-             stats.resource_state.ram_available_mb,
-             stats.resource_state.ram_total_mb);
-    println!("  Active inference tasks: {}", stats.resource_state.active_inference_tasks);
-    println!("  Active web tasks: {}", stats.resource_state.active_web_tasks);
-    println!("  Active WASM tasks: {}", stats.resource_state.active_wasm_tasks);
+    println!(
+        "  CPU usage: {:.1}%",
+        stats.resource_state.cpu_usage * 100.0
+    );
+    println!(
+        "  RAM: {}/{} MB available",
+        stats.resource_state.ram_available_mb, stats.resource_state.ram_total_mb
+    );
+    println!(
+        "  Active inference tasks: {}",
+        stats.resource_state.active_inference_tasks
+    );
+    println!(
+        "  Active web tasks: {}",
+        stats.resource_state.active_web_tasks
+    );
+    println!(
+        "  Active WASM tasks: {}",
+        stats.resource_state.active_wasm_tasks
+    );
     println!("  Loaded models: {:?}", stats.resource_state.loaded_models);
 
     Ok(())
@@ -242,7 +264,10 @@ async fn show_status() -> anyhow::Result<()> {
 
 async fn run_distributed_test(agent_count: u32, duration_secs: u64) -> anyhow::Result<()> {
     println!("=== Distributed Execution Test ===");
-    println!("Testing with {} simulated agents for {} seconds", agent_count, duration_secs);
+    println!(
+        "Testing with {} simulated agents for {} seconds",
+        agent_count, duration_secs
+    );
     println!();
 
     // Create temporary directory for this test run
@@ -273,7 +298,10 @@ async fn run_distributed_test(agent_count: u32, duration_secs: u64) -> anyhow::R
     println!("\n=== Results Summary ===");
     for (i, stats) in &results {
         println!("Agent {}:", i);
-        println!("  Peer ID: {}...", &stats.peer_id[..16.min(stats.peer_id.len())]);
+        println!(
+            "  Peer ID: {}...",
+            &stats.peer_id[..16.min(stats.peer_id.len())]
+        );
         println!("  Tasks completed: {}", stats.tasks_completed);
         println!("  Tasks received: {}", stats.tasks_received);
         println!("  Final balance: {:.6} PCLAW", stats.final_balance);
@@ -296,7 +324,11 @@ struct AgentStats {
     final_balance: f64,
 }
 
-async fn run_agent(agent_num: u32, base_dir: std::path::PathBuf, duration_secs: u64) -> anyhow::Result<AgentStats> {
+async fn run_agent(
+    agent_num: u32,
+    base_dir: std::path::PathBuf,
+    duration_secs: u64,
+) -> anyhow::Result<AgentStats> {
     // Create identity for this agent
     let identity = Arc::new(NodeIdentity::generate());
     let peer_id = identity.peer_id().to_string();
@@ -340,7 +372,11 @@ async fn run_agent(agent_num: u32, base_dir: std::path::PathBuf, duration_secs: 
         // Each agent periodically executes a task
         if agent_num % 2 == 0 {
             // Even agents do inference tasks
-            if runtime.inference("Test prompt", "test-model", 10).await.is_ok() {
+            if runtime
+                .inference("Test prompt", "test-model", 10)
+                .await
+                .is_ok()
+            {
                 tasks_completed += 1;
             }
         } else {
@@ -475,15 +511,19 @@ async fn run_cluster(
 
     // Display cluster status
     println!("\n\x1b[1m=== Cluster Status ===\x1b[0m\n");
-    println!("{:<6} {:<20} {:<30} {:<10}",
-             "Node", "Web URL", "Peer ID", "Status");
+    println!(
+        "{:<6} {:<20} {:<30} {:<10}",
+        "Node", "Web URL", "Peer ID", "Status"
+    );
     println!("{}", "-".repeat(70));
 
     for node in &cluster_nodes {
-        let peer_id_display = node.peer_id.as_ref()
+        let peer_id_display = node
+            .peer_id
+            .as_ref()
             .map(|id| {
                 if id.len() > 20 {
-                    format!("{}...{}", &id[..8], &id[id.len()-8..])
+                    format!("{}...{}", &id[..8], &id[id.len() - 8..])
                 } else {
                     id.clone()
                 }
@@ -496,8 +536,10 @@ async fn run_cluster(
             "\x1b[33mStarting\x1b[0m"
         };
 
-        println!("{:<6} {:<20} {:<30} {}",
-                 node.index, node.web_addr, peer_id_display, status);
+        println!(
+            "{:<6} {:<20} {:<30} {}",
+            node.index, node.web_addr, peer_id_display, status
+        );
     }
     println!();
 
@@ -514,7 +556,10 @@ async fn run_cluster(
                 }
             }
             _ => {
-                println!("  Node {}: \x1b[33mUnable to check peers\x1b[0m", node.index);
+                println!(
+                    "  Node {}: \x1b[33mUnable to check peers\x1b[0m",
+                    node.index
+                );
             }
         }
     }
@@ -546,9 +591,11 @@ async fn run_cluster(
                         if let Some(tokens) = json.get("tokens").and_then(|v| v.as_u64()) {
                             println!("  Tokens: {}", tokens);
                         }
-                        if let Some(provider) = json.get("provider_peer_id").and_then(|v| v.as_str()) {
+                        if let Some(provider) =
+                            json.get("provider_peer_id").and_then(|v| v.as_str())
+                        {
                             let short = if provider.len() > 16 {
-                                format!("{}...{}", &provider[..8], &provider[provider.len()-8..])
+                                format!("{}...{}", &provider[..8], &provider[provider.len() - 8..])
                             } else {
                                 provider.to_string()
                             };

@@ -5,8 +5,8 @@
 use clap::Parser;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use peerclaw::cli::{Cli, Command};
 use peerclaw::bootstrap;
+use peerclaw::cli::{Cli, Command};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -23,7 +23,9 @@ async fn main() -> anyhow::Result<()> {
 
     // For interactive mode, use minimal logging
     let log_level = match &cli.command {
-        None | Some(Command::Start) | Some(Command::Chat(_)) | Some(Command::Run(_)) => "peerclaw=warn",
+        None | Some(Command::Start) | Some(Command::Chat(_)) | Some(Command::Run(_)) => {
+            "peerclaw=warn"
+        }
         _ => "peerclaw=info",
     };
 

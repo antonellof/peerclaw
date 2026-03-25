@@ -12,6 +12,6 @@ mod manager;
 mod profile;
 
 pub use agent::{SwarmAgent, SwarmAgentState};
-pub use event::{SwarmEvent, AgentAction, ConnectionType};
+pub use event::{AgentAction, ConnectionType, SwarmEvent};
 pub use manager::{SwarmManager, SwarmManagerConfig};
-pub use profile::{AgentProfile, PersonalityTraits, AgentCapability};
+pub use profile::{AgentCapability, AgentProfile, PersonalityTraits};

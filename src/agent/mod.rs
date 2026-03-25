@@ -8,5 +8,5 @@ pub mod runtime;
 pub mod spec;
 
 pub use budget::BudgetTracker;
-pub use runtime::{AgentRuntime, AgentResult, AgentConfig};
+pub use runtime::{extract_answer, parse_tool_calls, AgentConfig, AgentResult, AgentRuntime, ParsedToolCall};
 pub use spec::AgentSpec;

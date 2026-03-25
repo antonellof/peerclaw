@@ -11,7 +11,7 @@ pub mod builtin;
 pub mod registry;
 pub mod tool;
 
-pub use registry::{ToolRegistry, ToolInfo};
+pub use registry::{ToolInfo, ToolRegistry};
 pub use tool::{Tool, ToolContext, ToolError, ToolOutput};
 
 use std::time::Duration;

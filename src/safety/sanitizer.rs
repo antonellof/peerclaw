@@ -82,7 +82,8 @@ static INJECTION_PATTERNS: LazyLock<Vec<InjectionPattern>> = LazyLock::new(|| {
         // Instruction override attempts
         InjectionPattern {
             name: "ignore_instructions",
-            regex: Regex::new(r"(?i)ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions?").unwrap(),
+            regex: Regex::new(r"(?i)ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions?")
+                .unwrap(),
             action: InjectionAction::Warn,
             description: "Instruction override attempt",
         },
@@ -96,7 +97,10 @@ static INJECTION_PATTERNS: LazyLock<Vec<InjectionPattern>> = LazyLock::new(|| {
         // Hidden instructions
         InjectionPattern {
             name: "hidden_instruction",
-            regex: Regex::new(r"(?i)\[\s*(?:hidden|secret|admin)\s*(?:instruction|prompt|command)\s*\]").unwrap(),
+            regex: Regex::new(
+                r"(?i)\[\s*(?:hidden|secret|admin)\s*(?:instruction|prompt|command)\s*\]",
+            )
+            .unwrap(),
             action: InjectionAction::Remove,
             description: "Hidden instruction marker",
         },
@@ -110,7 +114,8 @@ static INJECTION_PATTERNS: LazyLock<Vec<InjectionPattern>> = LazyLock::new(|| {
         // Base64 encoded instructions (might be trying to hide commands)
         InjectionPattern {
             name: "suspicious_base64",
-            regex: Regex::new(r"(?:aW5zdHJ1Y3Rpb24|c3lzdGVtIHByb21wdA|aWdub3JlIHByZXZpb3Vz)").unwrap(),
+            regex: Regex::new(r"(?:aW5zdHJ1Y3Rpb24|c3lzdGVtIHByb21wdA|aWdub3JlIHByZXZpb3Vz)")
+                .unwrap(),
             action: InjectionAction::Warn,
             description: "Base64-encoded suspicious content",
         },
@@ -142,7 +147,12 @@ impl Sanitizer {
     }
 
     /// Add a custom pattern
-    pub fn add_pattern(&mut self, name: &str, pattern: &str, action: &str) -> Result<(), regex::Error> {
+    pub fn add_pattern(
+        &mut self,
+        name: &str,
+        pattern: &str,
+        action: &str,
+    ) -> Result<(), regex::Error> {
         let regex = Regex::new(pattern)?;
         let action = match action {
             "warn" => InjectionAction::Warn,
@@ -180,9 +190,12 @@ impl Sanitizer {
                             action = SanitizeAction::Modified;
                         }
                         InjectionAction::Escape => {
-                            result = pattern.regex.replace_all(&result, |caps: &regex::Captures| {
-                                format!("\\{}", &caps[0])
-                            }).to_string();
+                            result = pattern
+                                .regex
+                                .replace_all(&result, |caps: &regex::Captures| {
+                                    format!("\\{}", &caps[0])
+                                })
+                                .to_string();
                             action = SanitizeAction::Modified;
                         }
                         InjectionAction::Warn => {
@@ -212,9 +225,11 @@ impl Sanitizer {
                             action = SanitizeAction::Modified;
                         }
                         InjectionAction::Escape => {
-                            result = regex.replace_all(&result, |caps: &regex::Captures| {
-                                format!("\\{}", &caps[0])
-                            }).to_string();
+                            result = regex
+                                .replace_all(&result, |caps: &regex::Captures| {
+                                    format!("\\{}", &caps[0])
+                                })
+                                .to_string();
                             action = SanitizeAction::Modified;
                         }
                         InjectionAction::Warn => {}
@@ -332,7 +347,10 @@ mod tests {
         let result = sanitizer.sanitize(content);
 
         assert!(!result.warnings.is_empty());
-        assert!(result.warnings.iter().any(|w| w.contains("ignore_instructions")));
+        assert!(result
+            .warnings
+            .iter()
+            .any(|w| w.contains("ignore_instructions")));
     }
 
     #[test]
@@ -382,7 +400,9 @@ mod tests {
     #[test]
     fn test_custom_pattern() {
         let mut sanitizer = Sanitizer::new(true);
-        sanitizer.add_pattern("custom", r"EVIL_COMMAND", "block").unwrap();
+        sanitizer
+            .add_pattern("custom", r"EVIL_COMMAND", "block")
+            .unwrap();
 
         let content = "Execute EVIL_COMMAND now";
         let result = sanitizer.sanitize(content);

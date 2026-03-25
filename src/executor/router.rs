@@ -273,9 +273,8 @@ mod tests {
     async fn test_route_lightweight_task_locally() {
         let router = create_router();
 
-        let task = ExecutionTask::WebFetch(super::super::task::WebFetchTask::get(
-            "https://example.com",
-        ));
+        let task =
+            ExecutionTask::WebFetch(super::super::task::WebFetchTask::get("https://example.com"));
         let decision = router.route(&task).await;
 
         matches!(decision, RoutingDecision::ExecuteLocally);

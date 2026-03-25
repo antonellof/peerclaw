@@ -12,16 +12,16 @@
 pub mod channel;
 pub mod manager;
 pub mod repl;
-pub mod webhook;
 pub mod sse;
+pub mod webhook;
 
 use serde::{Deserialize, Serialize};
 
 pub use channel::{Channel, ChannelCapabilities, ChannelConfig};
 pub use manager::ChannelManager;
 pub use repl::ReplChannel;
+pub use sse::{SseEvent, SseManager};
 pub use webhook::WebhookChannel;
-pub use sse::{SseManager, SseEvent};
 
 /// Incoming message from any channel
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -2,9 +2,7 @@
 
 use clap::{Args, Subcommand};
 
-use crate::vector::{
-    get_embedder, VectorStore, VectorStoreConfig,
-};
+use crate::vector::{get_embedder, VectorStore, VectorStoreConfig};
 
 #[derive(Args)]
 pub struct VectorArgs {
@@ -103,7 +101,10 @@ pub async fn run(args: VectorArgs) -> anyhow::Result<()> {
 
             match store.create_collection_with_dim(&name, dim) {
                 Ok(()) => {
-                    println!("\x1b[32m✓\x1b[0m Created collection '{}' (dim={})", name, dim);
+                    println!(
+                        "\x1b[32m✓\x1b[0m Created collection '{}' (dim={})",
+                        name, dim
+                    );
                 }
                 Err(e) => {
                     println!("\x1b[31m✗\x1b[0m Failed to create collection: {}", e);
@@ -120,16 +121,10 @@ pub async fn run(args: VectorArgs) -> anyhow::Result<()> {
             } else {
                 println!("\n\x1b[1mVector Collections\x1b[0m");
                 println!("{}", "─".repeat(50));
-                println!(
-                    "{:<20} {:>10} {:>10}",
-                    "NAME", "VECTORS", "DIMENSION"
-                );
+                println!("{:<20} {:>10} {:>10}", "NAME", "VECTORS", "DIMENSION");
                 println!("{}", "─".repeat(50));
                 for col in collections {
-                    println!(
-                        "{:<20} {:>10} {:>10}",
-                        col.name, col.count, col.dimension
-                    );
+                    println!("{:<20} {:>10} {:>10}", col.name, col.count, col.dimension);
                 }
                 println!("{}", "─".repeat(50));
             }
@@ -151,10 +146,7 @@ pub async fn run(args: VectorArgs) -> anyhow::Result<()> {
 
         VectorCommand::Delete { name, force } => {
             if !force {
-                print!(
-                    "\x1b[33m!\x1b[0m Delete collection '{}'? [y/N] ",
-                    name
-                );
+                print!("\x1b[33m!\x1b[0m Delete collection '{}'? [y/N] ", name);
                 use std::io::{self, Write};
                 io::stdout().flush()?;
 
@@ -279,7 +271,10 @@ pub async fn run(args: VectorArgs) -> anyhow::Result<()> {
                     }
                 }
                 None => {
-                    println!("\x1b[33m!\x1b[0m Point '{}' not found in '{}'", id, collection);
+                    println!(
+                        "\x1b[33m!\x1b[0m Point '{}' not found in '{}'",
+                        id, collection
+                    );
                 }
             }
         }

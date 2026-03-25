@@ -16,7 +16,10 @@ pub struct EscrowId(pub String);
 impl EscrowId {
     /// Generate a new random escrow ID.
     pub fn new() -> Self {
-        Self(format!("escrow_{}", Uuid::new_v4().to_string().replace("-", "")))
+        Self(format!(
+            "escrow_{}",
+            Uuid::new_v4().to_string().replace("-", "")
+        ))
     }
 }
 

@@ -7,10 +7,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use super::{
-    Channel, ChannelConfig, ChannelError, ChannelId, ChannelMessage,
-    MessageId, Platform,
-};
+use super::{Channel, ChannelConfig, ChannelError, ChannelId, ChannelMessage, MessageId, Platform};
 
 /// Handle to a registered channel.
 pub struct ChannelHandle {
@@ -127,10 +124,7 @@ impl ChannelRegistry {
     }
 
     /// Register a channel instance.
-    pub async fn register(
-        &self,
-        channel: Box<dyn Channel>,
-    ) -> Result<ChannelId, ChannelError> {
+    pub async fn register(&self, channel: Box<dyn Channel>) -> Result<ChannelId, ChannelError> {
         let id = channel.id().clone();
         let config = channel.config().clone();
 
@@ -207,7 +201,10 @@ impl ChannelRegistry {
     }
 
     /// Broadcast a message to all channels.
-    pub async fn broadcast(&self, content: String) -> Vec<(ChannelId, Result<MessageId, ChannelError>)> {
+    pub async fn broadcast(
+        &self,
+        content: String,
+    ) -> Vec<(ChannelId, Result<MessageId, ChannelError>)> {
         let channels = self.channels.read().await;
         let mut results = Vec::new();
 

@@ -52,7 +52,8 @@ impl Channel for ReplChannel {
     }
 
     async fn start(&self, tx: mpsc::Sender<IncomingMessage>) -> anyhow::Result<()> {
-        self.running.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(true, std::sync::atomic::Ordering::SeqCst);
 
         let running = self.running.clone();
         let prompt = self.prompt.clone();
@@ -76,7 +77,10 @@ impl Channel for ReplChannel {
                         }
 
                         // Handle exit commands
-                        if matches!(input.to_lowercase().as_str(), "exit" | "quit" | "/quit" | "/exit") {
+                        if matches!(
+                            input.to_lowercase().as_str(),
+                            "exit" | "quit" | "/quit" | "/exit"
+                        ) {
                             running.store(false, std::sync::atomic::Ordering::SeqCst);
                             break;
                         }
@@ -122,7 +126,8 @@ impl Channel for ReplChannel {
     }
 
     async fn stop(&self) -> anyhow::Result<()> {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 

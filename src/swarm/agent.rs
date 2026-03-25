@@ -160,19 +160,13 @@ pub enum SwarmAgentState {
     Thinking,
 
     /// Actively executing a task
-    Working {
-        task: String,
-    },
+    Working { task: String },
 
     /// Blocked on external resource
-    Waiting {
-        reason: String,
-    },
+    Waiting { reason: String },
 
     /// In error state
-    Error {
-        message: String,
-    },
+    Error { message: String },
 
     /// Agent went offline (for remote peers)
     Offline,

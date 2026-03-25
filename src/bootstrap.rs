@@ -70,6 +70,7 @@ pub fn ensure_dirs() -> std::io::Result<()> {
     std::fs::create_dir_all(agents_dir())?;
     std::fs::create_dir_all(data_dir())?;
     std::fs::create_dir_all(models_dir())?;
+    std::fs::create_dir_all(base_dir().join("skills"))?;
     Ok(())
 }
 

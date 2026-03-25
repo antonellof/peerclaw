@@ -77,7 +77,8 @@ fn load_wallet() -> anyhow::Result<(Wallet, NodeIdentity)> {
         Arc::new(identity.clone()),
         WalletConfig::default(),
         database,
-    ).map_err(|e| anyhow::anyhow!("{}", e))?;
+    )
+    .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     Ok((wallet, identity))
 }
@@ -88,7 +89,10 @@ pub async fn run(cmd: WalletCommand) -> anyhow::Result<()> {
             let path = output.unwrap_or_else(|| bootstrap::base_dir().join("identity.key"));
 
             if path.exists() {
-                anyhow::bail!("Wallet already exists at {:?}. Use --output to specify a different path.", path);
+                anyhow::bail!(
+                    "Wallet already exists at {:?}. Use --output to specify a different path.",
+                    path
+                );
             }
 
             // Generate new identity
@@ -109,7 +113,8 @@ pub async fn run(cmd: WalletCommand) -> anyhow::Result<()> {
                 Arc::new(identity.clone()),
                 WalletConfig::default(),
                 database,
-            ).map_err(|e| anyhow::anyhow!("{}", e))?;
+            )
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             println!("✓ Wallet created successfully!");
             println!("  Address: {}", identity.peer_id());
@@ -123,8 +128,14 @@ pub async fn run(cmd: WalletCommand) -> anyhow::Result<()> {
 
             println!("Wallet Balance");
             println!("--------------");
-            println!("  Available:  {:>12.6} PCLAW", from_micro(balance.available));
-            println!("  In escrow:  {:>12.6} PCLAW", from_micro(balance.in_escrow));
+            println!(
+                "  Available:  {:>12.6} PCLAW",
+                from_micro(balance.available)
+            );
+            println!(
+                "  In escrow:  {:>12.6} PCLAW",
+                from_micro(balance.in_escrow)
+            );
             println!("  Staked:     {:>12.6} PCLAW", from_micro(balance.staked));
             println!("  ─────────────────────────");
             println!("  Total:      {:>12.6} PCLAW", from_micro(balance.total));
@@ -135,12 +146,15 @@ pub async fn run(cmd: WalletCommand) -> anyhow::Result<()> {
             let amount_micro = to_micro(amount);
 
             // Create escrow for the transfer (transfers are implemented as escrows)
-            let escrow = wallet.create_escrow(
-                amount_micro,
-                to.clone(),
-                format!("transfer_{}", chrono::Utc::now().timestamp()),
-                86400, // 24 hour timeout
-            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            let escrow = wallet
+                .create_escrow(
+                    amount_micro,
+                    to.clone(),
+                    format!("transfer_{}", chrono::Utc::now().timestamp()),
+                    86400, // 24 hour timeout
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             println!("✓ Transfer initiated");
             println!("  To:     {}", to);
@@ -191,22 +205,34 @@ pub async fn run(cmd: WalletCommand) -> anyhow::Result<()> {
             let (wallet, _identity) = load_wallet()?;
             let amount_micro = to_micro(amount);
 
-            wallet.stake(amount_micro).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            wallet
+                .stake(amount_micro)
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             let balance = wallet.balance().await;
             println!("✓ Staked {:.6} PCLAW", amount);
-            println!("  New staked balance: {:.6} PCLAW", from_micro(balance.staked));
+            println!(
+                "  New staked balance: {:.6} PCLAW",
+                from_micro(balance.staked)
+            );
         }
 
         WalletCommand::Unstake { amount } => {
             let (wallet, _identity) = load_wallet()?;
             let amount_micro = to_micro(amount);
 
-            wallet.unstake(amount_micro).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            wallet
+                .unstake(amount_micro)
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             let balance = wallet.balance().await;
             println!("✓ Unstaked {:.6} PCLAW", amount);
-            println!("  New staked balance: {:.6} PCLAW", from_micro(balance.staked));
+            println!(
+                "  New staked balance: {:.6} PCLAW",
+                from_micro(balance.staked)
+            );
         }
 
         WalletCommand::Escrows => {
@@ -222,7 +248,11 @@ pub async fn run(cmd: WalletCommand) -> anyhow::Result<()> {
                 for escrow in &escrows {
                     let remaining = escrow.time_remaining();
                     let remaining_str = if remaining.num_hours() > 0 {
-                        format!("{}h {}m", remaining.num_hours(), remaining.num_minutes() % 60)
+                        format!(
+                            "{}h {}m",
+                            remaining.num_hours(),
+                            remaining.num_minutes() % 60
+                        )
                     } else {
                         format!("{}m", remaining.num_minutes())
                     };
@@ -236,8 +266,10 @@ pub async fn run(cmd: WalletCommand) -> anyhow::Result<()> {
                     );
                 }
                 println!();
-                println!("Total in escrow: {:.6} PCLAW",
-                    escrows.iter().map(|e| e.amount_pclaw()).sum::<f64>());
+                println!(
+                    "Total in escrow: {:.6} PCLAW",
+                    escrows.iter().map(|e| e.amount_pclaw()).sum::<f64>()
+                );
             }
         }
     }

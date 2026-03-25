@@ -166,8 +166,12 @@ mod tests {
     async fn test_provider_tracking() {
         let tracker = ProviderTracker::new(crate::config::ProviderSharingConfig::default());
 
-        tracker.update_provider(test_manifest("peer-1", "llama3.2:3b")).await;
-        tracker.update_provider(test_manifest("peer-2", "mistral:7b")).await;
+        tracker
+            .update_provider(test_manifest("peer-1", "llama3.2:3b"))
+            .await;
+        tracker
+            .update_provider(test_manifest("peer-2", "mistral:7b"))
+            .await;
 
         assert_eq!(tracker.provider_count().await, 2);
 
@@ -179,7 +183,9 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limiting() {
         let tracker = ProviderTracker::new(crate::config::ProviderSharingConfig::default());
-        tracker.update_provider(test_manifest("peer-1", "llama3.2:3b")).await;
+        tracker
+            .update_provider(test_manifest("peer-1", "llama3.2:3b"))
+            .await;
 
         assert!(tracker.can_request("peer-1").await);
         tracker.record_usage("peer-1", 100).await;

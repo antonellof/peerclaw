@@ -14,7 +14,10 @@ pub struct TransactionId(pub String);
 impl TransactionId {
     /// Generate a new random transaction ID.
     pub fn new() -> Self {
-        Self(format!("tx_{}", Uuid::new_v4().to_string().replace("-", "")))
+        Self(format!(
+            "tx_{}",
+            Uuid::new_v4().to_string().replace("-", "")
+        ))
     }
 }
 

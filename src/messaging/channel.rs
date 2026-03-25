@@ -369,7 +369,9 @@ pub trait Channel: Send + Sync {
     /// React to a message.
     async fn react(&self, message_id: &MessageId, reaction: &str) -> Result<(), ChannelError> {
         let _ = (message_id, reaction);
-        Err(ChannelError::PlatformError("Reactions not supported".into()))
+        Err(ChannelError::PlatformError(
+            "Reactions not supported".into(),
+        ))
     }
 
     /// Get conversation history.

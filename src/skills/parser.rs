@@ -89,15 +89,14 @@ fn split_frontmatter(content: &str) -> Result<(SkillManifest, String), ParseErro
 
     // Find end of frontmatter
     let rest = &content[3..];
-    let end_pos = rest.find("\n---")
-        .ok_or(ParseError::MissingFrontmatter)?;
+    let end_pos = rest.find("\n---").ok_or(ParseError::MissingFrontmatter)?;
 
     let yaml_content = &rest[..end_pos].trim();
     let markdown_content = &rest[end_pos + 4..].trim();
 
     // Parse YAML
-    let manifest: SkillManifest = serde_yaml::from_str(yaml_content)
-        .map_err(|e| ParseError::InvalidYaml(e.to_string()))?;
+    let manifest: SkillManifest =
+        serde_yaml::from_str(yaml_content).map_err(|e| ParseError::InvalidYaml(e.to_string()))?;
 
     Ok((manifest, markdown_content.to_string()))
 }
@@ -172,7 +171,11 @@ Be constructive and helpful in your feedback.
         assert_eq!(skill.manifest.name, "code-review");
         assert_eq!(skill.manifest.version, "1.0.0");
         assert!(skill.prompt_content.contains("code review assistant"));
-        assert!(skill.manifest.activation.keywords.contains(&"review".to_string()));
+        assert!(skill
+            .manifest
+            .activation
+            .keywords
+            .contains(&"review".to_string()));
     }
 
     #[test]

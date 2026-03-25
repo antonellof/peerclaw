@@ -7,8 +7,8 @@
 //! - Outbound: Validate responses before returning to user
 
 pub mod leak_detector;
-pub mod sanitizer;
 pub mod policy;
+pub mod sanitizer;
 pub mod validator;
 
 use std::time::Duration;
@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use leak_detector::{LeakDetector, LeakMatch, SecretPattern};
-pub use sanitizer::{Sanitizer, SanitizedOutput, SanitizeAction};
-pub use policy::{Policy, PolicyRule, PolicyAction, PolicyViolation};
+pub use policy::{Policy, PolicyAction, PolicyRule, PolicyViolation};
+pub use sanitizer::{SanitizeAction, SanitizedOutput, Sanitizer};
 pub use validator::{InputValidator, ValidationResult};
 
 /// Safety layer configuration
@@ -135,7 +135,10 @@ impl SafetyLayer {
 
         // 2. Leak detection and redaction
         if self.config.leak_detection_enabled {
-            match self.leak_detector.scan_and_clean(&content, &self.config.redaction_string) {
+            match self
+                .leak_detector
+                .scan_and_clean(&content, &self.config.redaction_string)
+            {
                 Ok((cleaned, redacted_count)) => {
                     if redacted_count > 0 {
                         content = cleaned;
@@ -273,10 +276,8 @@ mod tests {
         assert_eq!(result.action, SanitizeAction::Allowed);
 
         // Output with secret
-        let result = layer.sanitize_tool_output(
-            "test",
-            "API key: sk-proj-abcdefghijklmnopqrstuvwxyz123456"
-        );
+        let result =
+            layer.sanitize_tool_output("test", "API key: sk-proj-abcdefghijklmnopqrstuvwxyz123456");
         assert!(result.content.contains("[REDACTED]"));
     }
 

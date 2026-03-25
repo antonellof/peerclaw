@@ -106,8 +106,13 @@ impl Embedder {
                 // TODO: Use candle for local embedding model
                 self.embed_simple(text)
             }
-            EmbeddingProvider::Remote { url, model, api_key } => {
-                self.embed_remote(text, url, model, api_key.as_deref()).await
+            EmbeddingProvider::Remote {
+                url,
+                model,
+                api_key,
+            } => {
+                self.embed_remote(text, url, model, api_key.as_deref())
+                    .await
             }
         }
     }
@@ -166,9 +171,21 @@ impl Embedder {
             let idx3 = hash3 % self.config.dimension;
 
             // Sign determined by hash
-            let sign1 = if (hash1 / self.config.dimension) % 2 == 0 { 1.0 } else { -1.0 };
-            let sign2 = if (hash2 / self.config.dimension) % 2 == 0 { 1.0 } else { -1.0 };
-            let sign3 = if (hash3 / self.config.dimension) % 2 == 0 { 1.0 } else { -1.0 };
+            let sign1 = if (hash1 / self.config.dimension) % 2 == 0 {
+                1.0
+            } else {
+                -1.0
+            };
+            let sign2 = if (hash2 / self.config.dimension) % 2 == 0 {
+                1.0
+            } else {
+                -1.0
+            };
+            let sign3 = if (hash3 / self.config.dimension) % 2 == 0 {
+                1.0
+            } else {
+                -1.0
+            };
 
             embedding[idx1] += sign1 * freq;
             embedding[idx2] += sign2 * freq * 0.5;

@@ -18,8 +18,8 @@ mod registry;
 mod selector;
 
 pub use parser::{parse_skill, ParseError};
-pub use registry::{SkillRegistry, SkillInfo};
-pub use selector::{select_skills, score_skill, SkillScore};
+pub use registry::{SkillInfo, SkillRegistry};
+pub use selector::{score_skill, select_skills, SkillScore};
 
 use std::path::PathBuf;
 

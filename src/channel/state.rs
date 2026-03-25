@@ -24,12 +24,7 @@ pub struct ChannelUpdate {
 
 impl ChannelUpdate {
     /// Create a new channel update.
-    pub fn new(
-        channel_id: ChannelId,
-        nonce: u64,
-        local_balance: u64,
-        remote_balance: u64,
-    ) -> Self {
+    pub fn new(channel_id: ChannelId, nonce: u64, local_balance: u64, remote_balance: u64) -> Self {
         Self {
             channel_id,
             nonce,
@@ -171,12 +166,7 @@ mod tests {
     fn test_channel_update_signing() {
         let identity = NodeIdentity::generate();
 
-        let update = ChannelUpdate::new(
-            ChannelId::new(),
-            1,
-            90_000_000,
-            10_000_000,
-        );
+        let update = ChannelUpdate::new(ChannelId::new(), 1, 90_000_000, 10_000_000);
 
         let signed = update.sign(&identity);
 
@@ -188,12 +178,7 @@ mod tests {
     fn test_channel_update_tamper_detection() {
         let identity = NodeIdentity::generate();
 
-        let update = ChannelUpdate::new(
-            ChannelId::new(),
-            1,
-            90_000_000,
-            10_000_000,
-        );
+        let update = ChannelUpdate::new(ChannelId::new(), 1, 90_000_000, 10_000_000);
 
         let mut signed = update.sign(&identity);
 

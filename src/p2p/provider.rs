@@ -25,7 +25,11 @@ pub struct ProviderManifest {
 
 impl ProviderManifest {
     /// Create a new unsigned provider manifest.
-    pub fn new(peer_id: String, models: Vec<ModelOffering>, rate_limits: ProviderRateLimits) -> Self {
+    pub fn new(
+        peer_id: String,
+        models: Vec<ModelOffering>,
+        rate_limits: ProviderRateLimits,
+    ) -> Self {
         Self {
             peer_id,
             models,

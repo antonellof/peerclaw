@@ -17,14 +17,14 @@
 //! - WASM channels: Sandboxed with explicit capabilities
 
 mod channel;
-mod registry;
 pub mod platforms;
+mod registry;
 
 pub use channel::{
-    Channel, ChannelMessage, ChannelConfig, MessageDirection,
-    MessageType, Attachment, ChannelError, MessageRouting,
+    Attachment, Channel, ChannelConfig, ChannelError, ChannelMessage, MessageDirection,
+    MessageRouting, MessageType,
 };
-pub use registry::{ChannelRegistry, ChannelHandle};
+pub use registry::{ChannelHandle, ChannelRegistry};
 
 use serde::{Deserialize, Serialize};
 
@@ -41,7 +41,10 @@ pub struct MessageId(pub String);
 impl MessageId {
     /// Generate a new message ID.
     pub fn new() -> Self {
-        Self(format!("msg_{}", uuid::Uuid::new_v4().to_string().replace("-", "")))
+        Self(format!(
+            "msg_{}",
+            uuid::Uuid::new_v4().to_string().replace("-", "")
+        ))
     }
 
     /// Create from an external platform ID.
@@ -69,7 +72,11 @@ pub struct ChannelId(pub String);
 impl ChannelId {
     /// Generate a new channel ID.
     pub fn new(platform: &str) -> Self {
-        Self(format!("{}_{}", platform, &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]))
+        Self(format!(
+            "{}_{}",
+            platform,
+            &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]
+        ))
     }
 
     /// Create from platform and instance identifier.
@@ -179,7 +186,8 @@ impl Conversation {
         self.recent_messages.push(message);
         // Keep only last 50 messages
         if self.recent_messages.len() > 50 {
-            self.recent_messages.drain(0..self.recent_messages.len() - 50);
+            self.recent_messages
+                .drain(0..self.recent_messages.len() - 50);
         }
     }
 }

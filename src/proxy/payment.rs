@@ -131,7 +131,11 @@ impl PaymentProof {
     /// Verify the payment proof against the required amount.
     pub fn verify(&self, required_amount: u64) -> Result<bool, String> {
         match &self.method {
-            PaymentMethod::Direct { amount, signature, proof_id } => {
+            PaymentMethod::Direct {
+                amount,
+                signature,
+                proof_id,
+            } => {
                 // Check amount
                 if *amount < required_amount {
                     return Ok(false);
@@ -151,7 +155,12 @@ impl PaymentProof {
                 Ok(true)
             }
 
-            PaymentMethod::Channel { amount, signature, channel_id, nonce: _ } => {
+            PaymentMethod::Channel {
+                amount,
+                signature,
+                channel_id,
+                nonce: _,
+            } => {
                 // Check amount
                 if *amount < required_amount {
                     return Ok(false);
@@ -225,7 +234,8 @@ impl PaymentInfo {
             instructions: "Include payment proof in request headers:\n\
                  - X-Payment-Proof: direct:<proof_id>:<amount>:<signature>\n\
                  - X-Channel-Payment: <channel_id>:<nonce>:<amount>:<signature>\n\
-                 - Authorization: Bearer <api_key>".to_string(),
+                 - Authorization: Bearer <api_key>"
+                .to_string(),
         }
     }
 }
@@ -246,7 +256,11 @@ mod tests {
         let proof = PaymentProof::from_headers(&headers).unwrap();
 
         match proof.method {
-            PaymentMethod::Direct { proof_id, amount, signature } => {
+            PaymentMethod::Direct {
+                proof_id,
+                amount,
+                signature,
+            } => {
                 assert_eq!(proof_id, "proof123");
                 assert_eq!(amount, 1000000);
                 assert_eq!(signature, "sig456");
@@ -266,7 +280,12 @@ mod tests {
         let proof = PaymentProof::from_headers(&headers).unwrap();
 
         match proof.method {
-            PaymentMethod::Channel { channel_id, nonce, amount, signature } => {
+            PaymentMethod::Channel {
+                channel_id,
+                nonce,
+                amount,
+                signature,
+            } => {
                 assert_eq!(channel_id, "chan_123");
                 assert_eq!(nonce, 5);
                 assert_eq!(amount, 500000);

@@ -7,8 +7,8 @@ use std::io::{self, Write};
 use tokio::sync::mpsc;
 
 use crate::messaging::{
-    Channel, ChannelConfig, ChannelError, ChannelId, ChannelMessage, ChannelUser,
-    MessageDirection, MessageId, Platform, UserTrust,
+    Channel, ChannelConfig, ChannelError, ChannelId, ChannelMessage, ChannelUser, MessageDirection,
+    MessageId, Platform, UserTrust,
 };
 
 /// REPL channel for CLI interaction.
@@ -184,9 +184,7 @@ impl Channel for ReplChannel {
         }
 
         match &mut self.rx {
-            Some(rx) => {
-                rx.recv().await.ok_or(ChannelError::Closed)
-            }
+            Some(rx) => rx.recv().await.ok_or(ChannelError::Closed),
             None => Err(ChannelError::NotConnected),
         }
     }
@@ -197,13 +195,11 @@ impl Channel for ReplChannel {
         }
 
         match &mut self.rx {
-            Some(rx) => {
-                match rx.try_recv() {
-                    Ok(msg) => Ok(Some(msg)),
-                    Err(mpsc::error::TryRecvError::Empty) => Ok(None),
-                    Err(mpsc::error::TryRecvError::Disconnected) => Err(ChannelError::Closed),
-                }
-            }
+            Some(rx) => match rx.try_recv() {
+                Ok(msg) => Ok(Some(msg)),
+                Err(mpsc::error::TryRecvError::Empty) => Ok(None),
+                Err(mpsc::error::TryRecvError::Disconnected) => Err(ChannelError::Closed),
+            },
             None => Err(ChannelError::NotConnected),
         }
     }

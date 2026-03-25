@@ -171,10 +171,7 @@ pub enum ModelDistributionMessage {
     /// Response with model metadata
     MetadataResponse { metadata: ModelMetadata },
     /// Request a chunk of a model
-    ChunkRequest {
-        model_id: String,
-        chunk_index: u32,
-    },
+    ChunkRequest { model_id: String, chunk_index: u32 },
     /// Response with chunk data
     ChunkResponse {
         model_id: String,
@@ -344,10 +341,7 @@ impl ModelDistributor {
         file.set_len(state.metadata.size_bytes)
             .map_err(|e| DistributionError::IoError(e.to_string()))?;
 
-        self.pending_downloads
-            .write()
-            .await
-            .insert(model_id, state);
+        self.pending_downloads.write().await.insert(model_id, state);
 
         Ok(())
     }
@@ -399,7 +393,10 @@ impl ModelDistributor {
     }
 
     /// Complete a download by moving the file to final location.
-    pub async fn complete_download(&self, model_id: &ModelId) -> Result<PathBuf, DistributionError> {
+    pub async fn complete_download(
+        &self,
+        model_id: &ModelId,
+    ) -> Result<PathBuf, DistributionError> {
         let state = self
             .pending_downloads
             .write()
@@ -595,11 +592,8 @@ mod tests {
             filename: "test.gguf".to_string(),
         };
 
-        let mut state = DownloadState::new(
-            metadata,
-            std::path::Path::new("/tmp"),
-            "peer1".to_string(),
-        );
+        let mut state =
+            DownloadState::new(metadata, std::path::Path::new("/tmp"), "peer1".to_string());
 
         assert_eq!(state.progress(), 0.0);
         assert!(!state.is_complete());

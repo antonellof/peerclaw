@@ -18,7 +18,7 @@ pub use vectx::{
 };
 
 // Re-export embeddings
-pub use embeddings::{Embedder, EmbeddingConfig, EmbeddingProvider, get_embedder, init_embedder};
+pub use embeddings::{get_embedder, init_embedder, Embedder, EmbeddingConfig, EmbeddingProvider};
 
 /// Default embedding dimension (compatible with most sentence transformers)
 pub const DEFAULT_EMBEDDING_DIM: usize = 384;
@@ -144,8 +144,7 @@ impl VectorStore {
     pub fn with_storage(config: VectorStoreConfig, path: &Path) -> Result<Self> {
         // Create storage directory if it doesn't exist
         if !path.exists() {
-            std::fs::create_dir_all(path)
-                .map_err(|e| VectorError::StorageError(e.to_string()))?;
+            std::fs::create_dir_all(path).map_err(|e| VectorError::StorageError(e.to_string()))?;
         }
 
         let store = Self {
@@ -270,9 +269,7 @@ impl VectorStore {
         });
 
         if let Some(extra) = extra_payload {
-            if let (Some(obj), Some(extra_obj)) =
-                (payload.as_object_mut(), extra.as_object())
-            {
+            if let (Some(obj), Some(extra_obj)) = (payload.as_object_mut(), extra.as_object()) {
                 for (k, v) in extra_obj {
                     obj.insert(k.clone(), v.clone());
                 }
@@ -333,7 +330,8 @@ impl VectorStore {
         Ok(results
             .into_iter()
             .filter_map(|(id, score)| {
-                col.get(&id).map(|point| SearchResult::from_point(&point, score))
+                col.get(&id)
+                    .map(|point| SearchResult::from_point(&point, score))
             })
             .collect())
     }
@@ -357,8 +355,7 @@ impl VectorStore {
         let text_results = col.search_text(query_text, limit * 2);
 
         // Combine results with weighted scoring
-        let mut combined: std::collections::HashMap<String, f32> =
-            std::collections::HashMap::new();
+        let mut combined: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
 
         let text_weight = 1.0 - vector_weight;
 
@@ -380,7 +377,8 @@ impl VectorStore {
             .into_iter()
             .take(limit)
             .filter_map(|(id, score)| {
-                col.get(&id).map(|point| SearchResult::from_point(&point, score))
+                col.get(&id)
+                    .map(|point| SearchResult::from_point(&point, score))
             })
             .collect())
     }
@@ -435,10 +433,7 @@ pub fn init_vector_store(config: VectorStoreConfig) {
 }
 
 /// Initialize the global vector store with persistence
-pub fn init_vector_store_with_storage(
-    config: VectorStoreConfig,
-    path: &Path,
-) -> Result<()> {
+pub fn init_vector_store_with_storage(config: VectorStoreConfig, path: &Path) -> Result<()> {
     let vector_store = VectorStore::with_storage(config, path)?;
     let mut store = VECTOR_STORE.write();
     *store = Some(Arc::new(vector_store));

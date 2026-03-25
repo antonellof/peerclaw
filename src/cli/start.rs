@@ -6,15 +6,15 @@
 //! - Drops into chat mode for immediate AI interaction
 
 use std::io::{self, BufRead, Write};
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::bootstrap;
+use crate::cli::chat::{ChatArgs, ChatSettings};
 use crate::config::Config;
 use crate::db::Database;
 use crate::identity::NodeIdentity;
 use crate::runtime::Runtime;
-use crate::cli::chat::{ChatSettings, ChatArgs};
 
 /// Check if this is the first run (no identity exists)
 pub fn is_first_run() -> bool {
@@ -38,7 +38,10 @@ pub async fn run_first_time_setup() -> anyhow::Result<()> {
     println!("\x1b[33m1. Generating your node identity...\x1b[0m");
     let identity = NodeIdentity::generate();
     identity.save(&bootstrap::identity_path())?;
-    println!("   \x1b[32m✓\x1b[0m Node ID: \x1b[36m{}\x1b[0m\n", identity.peer_id());
+    println!(
+        "   \x1b[32m✓\x1b[0m Node ID: \x1b[36m{}\x1b[0m\n",
+        identity.peer_id()
+    );
 
     // Check for models
     println!("\x1b[33m2. Checking for AI models...\x1b[0m");
@@ -47,7 +50,10 @@ pub async fn run_first_time_setup() -> anyhow::Result<()> {
 
     let models = list_local_models(&models_dir);
     if models.is_empty() {
-        println!("   \x1b[33m!\x1b[0m No models found in {}", models_dir.display());
+        println!(
+            "   \x1b[33m!\x1b[0m No models found in {}",
+            models_dir.display()
+        );
         println!();
         println!("   To download a model, run:");
         println!("   \x1b[36m  peerclaw models download llama-3.2-1b\x1b[0m");
@@ -66,7 +72,10 @@ pub async fn run_first_time_setup() -> anyhow::Result<()> {
     println!("\x1b[33m3. Initializing configuration...\x1b[0m");
     let config = Config::default();
     config.save()?;
-    println!("   \x1b[32m✓\x1b[0m Config saved to {}\n", bootstrap::config_path().display());
+    println!(
+        "   \x1b[32m✓\x1b[0m Config saved to {}\n",
+        bootstrap::config_path().display()
+    );
 
     // Create initial chat settings
     let chat_settings = ChatSettings::default();
@@ -115,7 +124,10 @@ pub async fn run_interactive() -> anyhow::Result<()> {
 
     // Start web server in background
     let web_port = 8080u16;
-    println!("\x1b[90mStarting web dashboard on http://127.0.0.1:{}...\x1b[0m", web_port);
+    println!(
+        "\x1b[90mStarting web dashboard on http://127.0.0.1:{}...\x1b[0m",
+        web_port
+    );
 
     // Start P2P network
     println!("\x1b[90mStarting P2P network...\x1b[0m");
@@ -133,11 +145,16 @@ pub async fn run_interactive() -> anyhow::Result<()> {
     // Show status
     println!();
     println!("\x1b[1m═══════════════════════════════════════════════════════════\x1b[0m");
-    println!("  \x1b[36mNode ID:\x1b[0m    {}...{}",
+    println!(
+        "  \x1b[36mNode ID:\x1b[0m    {}...{}",
         &identity.peer_id().to_string()[..8],
-        &identity.peer_id().to_string()[identity.peer_id().to_string().len()-8..]);
+        &identity.peer_id().to_string()[identity.peer_id().to_string().len() - 8..]
+    );
     println!("  \x1b[36mWeb UI:\x1b[0m     http://127.0.0.1:{}", web_port);
-    println!("  \x1b[36mBalance:\x1b[0m    {:.2} PCLAW", crate::wallet::from_micro(runtime.balance().await));
+    println!(
+        "  \x1b[36mBalance:\x1b[0m    {:.2} PCLAW",
+        crate::wallet::from_micro(runtime.balance().await)
+    );
     let peer_count: usize = runtime.connected_peers_count().await;
     println!("  \x1b[36mPeers:\x1b[0m      {} connected", peer_count);
     println!("\x1b[1m═══════════════════════════════════════════════════════════\x1b[0m");
@@ -147,7 +164,9 @@ pub async fn run_interactive() -> anyhow::Result<()> {
     let models_dir = bootstrap::base_dir().join("models");
     let models = list_local_models(&models_dir);
     if models.is_empty() {
-        println!("\x1b[33m⚠ No AI models found. Run 'peerclaw models download' to get started.\x1b[0m");
+        println!(
+            "\x1b[33m⚠ No AI models found. Run 'peerclaw models download' to get started.\x1b[0m"
+        );
         println!();
     }
 
@@ -190,7 +209,10 @@ pub async fn run_interactive() -> anyhow::Result<()> {
                 show_peers(&runtime).await;
             }
             "5" | "web" | "w" => {
-                println!("\n\x1b[36mWeb dashboard:\x1b[0m http://127.0.0.1:{}\n", web_port);
+                println!(
+                    "\n\x1b[36mWeb dashboard:\x1b[0m http://127.0.0.1:{}\n",
+                    web_port
+                );
             }
             "6" | "settings" => {
                 show_settings();
@@ -219,7 +241,10 @@ fn print_banner() {
     println!("\x1b[1;36m|  __/  __/  __/ |   | |___| | (_| |\\ V  V / (_| |   |_|\x1b[0m");
     println!("\x1b[1;36m|_|   \\___|\\___|_|    \\____|_|\\__,_| \\_/\\_/ \\__,_|   (_)\x1b[0m");
     println!();
-    println!("\x1b[90m  Decentralized P2P AI Agent Network - v{}\x1b[0m", env!("CARGO_PKG_VERSION"));
+    println!(
+        "\x1b[90m  Decentralized P2P AI Agent Network - v{}\x1b[0m",
+        env!("CARGO_PKG_VERSION")
+    );
     println!();
 }
 
@@ -244,15 +269,34 @@ async fn show_status(runtime: &Runtime) {
     println!();
     println!("\x1b[1m═══ Node Status ═══\x1b[0m");
     println!("  Peer ID:         \x1b[36m{}\x1b[0m", stats.peer_id);
-    println!("  Connected Peers: \x1b[32m{}\x1b[0m", stats.connected_peers);
-    println!("  Balance:         \x1b[33m{:.6} PCLAW\x1b[0m", stats.balance);
+    println!(
+        "  Connected Peers: \x1b[32m{}\x1b[0m",
+        stats.connected_peers
+    );
+    println!(
+        "  Balance:         \x1b[33m{:.6} PCLAW\x1b[0m",
+        stats.balance
+    );
     println!("  Active Jobs:     {}", stats.active_jobs);
     println!("  Completed Jobs:  {}", stats.completed_jobs);
     println!();
     println!("\x1b[1m═══ Resources ═══\x1b[0m");
-    println!("  CPU Usage:       {:.1}%", stats.resource_state.cpu_usage * 100.0);
-    println!("  RAM:             {} / {} MB", stats.resource_state.ram_available_mb, stats.resource_state.ram_total_mb);
-    println!("  GPU:             {}", if stats.resource_state.gpu_usage.is_some() { "\x1b[32mAvailable\x1b[0m" } else { "\x1b[90mNot available\x1b[0m" });
+    println!(
+        "  CPU Usage:       {:.1}%",
+        stats.resource_state.cpu_usage * 100.0
+    );
+    println!(
+        "  RAM:             {} / {} MB",
+        stats.resource_state.ram_available_mb, stats.resource_state.ram_total_mb
+    );
+    println!(
+        "  GPU:             {}",
+        if stats.resource_state.gpu_usage.is_some() {
+            "\x1b[32mAvailable\x1b[0m"
+        } else {
+            "\x1b[90mNot available\x1b[0m"
+        }
+    );
     println!();
 }
 
@@ -296,7 +340,11 @@ async fn show_peers(runtime: &Runtime) {
     } else {
         for peer in peers {
             let short_id = if peer.to_string().len() > 16 {
-                format!("{}...{}", &peer.to_string()[..8], &peer.to_string()[peer.to_string().len()-8..])
+                format!(
+                    "{}...{}",
+                    &peer.to_string()[..8],
+                    &peer.to_string()[peer.to_string().len() - 8..]
+                )
             } else {
                 peer.to_string()
             };
@@ -313,8 +361,14 @@ fn show_settings() {
     println!();
     println!("\x1b[1m═══ Settings ═══\x1b[0m");
     println!("  Config file:    \x1b[90m{}\x1b[0m", config_path.display());
-    println!("  Chat settings:  \x1b[90m{}\x1b[0m", chat_settings_path.display());
-    println!("  Data directory: \x1b[90m{}\x1b[0m", bootstrap::base_dir().display());
+    println!(
+        "  Chat settings:  \x1b[90m{}\x1b[0m",
+        chat_settings_path.display()
+    );
+    println!(
+        "  Data directory: \x1b[90m{}\x1b[0m",
+        bootstrap::base_dir().display()
+    );
     println!();
     println!("  Edit these files to customize your settings.");
     println!();

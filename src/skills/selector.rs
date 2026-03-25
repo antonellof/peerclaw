@@ -124,7 +124,11 @@ pub fn select_skills(
         .collect();
 
     // Sort by score descending
-    scores.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scores.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Limit to max_skills
     scores.truncate(max_skills);
@@ -161,10 +165,10 @@ pub fn build_skill_prompt(skills: &[SkillScore], max_tokens: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::{
         ActivationCriteria, SkillManifest, SkillRequirements, SkillSharing, SkillSource,
     };
+    use super::*;
 
     fn create_test_skill(name: &str, keywords: Vec<&str>, tags: Vec<&str>) -> Arc<LoadedSkill> {
         Arc::new(LoadedSkill {

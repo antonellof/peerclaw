@@ -184,6 +184,12 @@ impl McpManager {
         tools.values().cloned().collect()
     }
 
+    /// Tools with fully-qualified ids (`server:tool_name`) for LLM prompts and UI.
+    pub fn list_tools_with_ids(&self) -> Vec<(String, McpTool)> {
+        let tools = self.tools.read();
+        tools.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+
     /// Get a tool by name
     pub fn get_tool(&self, name: &str) -> Option<McpTool> {
         let tools = self.tools.read();
@@ -191,7 +197,11 @@ impl McpManager {
     }
 
     /// Call a tool
-    pub async fn call_tool(&self, name: &str, params: serde_json::Value) -> anyhow::Result<McpToolResult> {
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        params: serde_json::Value,
+    ) -> anyhow::Result<McpToolResult> {
         // Parse server:tool name
         let (server_name, tool_name) = name
             .split_once(':')
@@ -202,7 +212,8 @@ impl McpManager {
             clients.get(server_name).cloned()
         };
 
-        let client = client.ok_or_else(|| anyhow::anyhow!("Server not connected: {}", server_name))?;
+        let client =
+            client.ok_or_else(|| anyhow::anyhow!("Server not connected: {}", server_name))?;
 
         client.call_tool(tool_name, params).await
     }
@@ -225,7 +236,8 @@ impl McpManager {
             clients.get(server_name).cloned()
         };
 
-        let client = client.ok_or_else(|| anyhow::anyhow!("Server not connected: {}", server_name))?;
+        let client =
+            client.ok_or_else(|| anyhow::anyhow!("Server not connected: {}", server_name))?;
 
         client.read_resource(resource_name).await
     }

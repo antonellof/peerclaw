@@ -9,48 +9,26 @@ use crate::wallet::to_micro;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResourceType {
     /// LLM inference
-    Inference {
-        model: String,
-        tokens: u32,
-    },
+    Inference { model: String, tokens: u32 },
     /// Text embedding generation
-    Embedding {
-        model: String,
-        tokens: u32,
-    },
+    Embedding { model: String, tokens: u32 },
     /// Image generation
-    ImageGeneration {
-        model: String,
-        count: u32,
-    },
+    ImageGeneration { model: String, count: u32 },
     /// CPU compute time
-    Cpu {
-        cores: u16,
-        duration_secs: u64,
-    },
+    Cpu { cores: u16, duration_secs: u64 },
     /// GPU compute time
-    Gpu {
-        vram_mb: u32,
-        duration_secs: u64,
-    },
+    Gpu { vram_mb: u32, duration_secs: u64 },
     /// Storage (read/write)
     Storage {
         operation: StorageOperation,
         bytes: u64,
     },
     /// Web fetch
-    WebFetch {
-        url_count: u32,
-    },
+    WebFetch { url_count: u32 },
     /// Vector search
-    VectorSearch {
-        query_count: u32,
-    },
+    VectorSearch { query_count: u32 },
     /// WASM tool execution
-    WasmTool {
-        tool_name: String,
-        invocations: u32,
-    },
+    WasmTool { tool_name: String, invocations: u32 },
 }
 
 /// Storage operation type.
@@ -72,10 +50,16 @@ impl fmt::Display for ResourceType {
             ResourceType::ImageGeneration { model, count } => {
                 write!(f, "ImageGen: {} ({} images)", model, count)
             }
-            ResourceType::Cpu { cores, duration_secs } => {
+            ResourceType::Cpu {
+                cores,
+                duration_secs,
+            } => {
                 write!(f, "CPU: {} cores for {}s", cores, duration_secs)
             }
-            ResourceType::Gpu { vram_mb, duration_secs } => {
+            ResourceType::Gpu {
+                vram_mb,
+                duration_secs,
+            } => {
                 write!(f, "GPU: {}MB VRAM for {}s", vram_mb, duration_secs)
             }
             ResourceType::Storage { operation, bytes } => {
@@ -87,7 +71,10 @@ impl fmt::Display for ResourceType {
             ResourceType::VectorSearch { query_count } => {
                 write!(f, "VectorSearch: {} queries", query_count)
             }
-            ResourceType::WasmTool { tool_name, invocations } => {
+            ResourceType::WasmTool {
+                tool_name,
+                invocations,
+            } => {
                 write!(f, "WASM {}: {} invocations", tool_name, invocations)
             }
         }
@@ -129,19 +116,19 @@ impl Default for ResourcePricing {
     fn default() -> Self {
         Self {
             // From PEERCLAWD-TOKEN-ECONOMY.md indicative rates
-            inference_small_per_1k: to_micro(0.5),      // 0.5 PCLAW per 1K tokens
-            inference_medium_per_1k: to_micro(2.0),     // 2.0 PCLAW per 1K tokens
-            inference_large_per_1k: to_micro(5.0),      // 5.0 PCLAW per 1K tokens
-            embedding_per_1k: to_micro(0.2),            // 0.2 PCLAW per 1K tokens
-            image_per_image: to_micro(3.0),             // 3.0 PCLAW per image
-            cpu_per_core_hour: to_micro(2.0),           // 2.0 PCLAW per core-hour
-            gpu_consumer_per_hour: to_micro(15.0),      // 15.0 PCLAW per GPU-hour
-            gpu_datacenter_per_hour: to_micro(40.0),    // 40.0 PCLAW per GPU-hour
-            storage_read_per_mb: to_micro(0.005),       // 0.005 PCLAW per MB
-            storage_write_per_mb: to_micro(0.01),       // 0.01 PCLAW per MB
-            web_fetch_per_request: to_micro(0.1),       // 0.1 PCLAW per request
-            vector_search_per_query: to_micro(0.05),    // 0.05 PCLAW per query
-            wasm_per_invocation: to_micro(0.02),        // 0.02 PCLAW per invocation
+            inference_small_per_1k: to_micro(0.5), // 0.5 PCLAW per 1K tokens
+            inference_medium_per_1k: to_micro(2.0), // 2.0 PCLAW per 1K tokens
+            inference_large_per_1k: to_micro(5.0), // 5.0 PCLAW per 1K tokens
+            embedding_per_1k: to_micro(0.2),       // 0.2 PCLAW per 1K tokens
+            image_per_image: to_micro(3.0),        // 3.0 PCLAW per image
+            cpu_per_core_hour: to_micro(2.0),      // 2.0 PCLAW per core-hour
+            gpu_consumer_per_hour: to_micro(15.0), // 15.0 PCLAW per GPU-hour
+            gpu_datacenter_per_hour: to_micro(40.0), // 40.0 PCLAW per GPU-hour
+            storage_read_per_mb: to_micro(0.005),  // 0.005 PCLAW per MB
+            storage_write_per_mb: to_micro(0.01),  // 0.01 PCLAW per MB
+            web_fetch_per_request: to_micro(0.1),  // 0.1 PCLAW per request
+            vector_search_per_query: to_micro(0.05), // 0.05 PCLAW per query
+            wasm_per_invocation: to_micro(0.02),   // 0.02 PCLAW per invocation
         }
     }
 }
@@ -157,10 +144,11 @@ impl ResourcePricing {
             ResourceType::Embedding { tokens, .. } => {
                 (self.embedding_per_1k * *tokens as u64) / 1000
             }
-            ResourceType::ImageGeneration { count, .. } => {
-                self.image_per_image * *count as u64
-            }
-            ResourceType::Cpu { cores, duration_secs } => {
+            ResourceType::ImageGeneration { count, .. } => self.image_per_image * *count as u64,
+            ResourceType::Cpu {
+                cores,
+                duration_secs,
+            } => {
                 // Convert seconds to hours
                 let hours = (*duration_secs as f64) / 3600.0;
                 (self.cpu_per_core_hour as f64 * *cores as f64 * hours) as u64
@@ -177,9 +165,7 @@ impl ResourcePricing {
                 };
                 (rate as f64 * mb) as u64
             }
-            ResourceType::WebFetch { url_count } => {
-                self.web_fetch_per_request * *url_count as u64
-            }
+            ResourceType::WebFetch { url_count } => self.web_fetch_per_request * *url_count as u64,
             ResourceType::VectorSearch { query_count } => {
                 self.vector_search_per_query * *query_count as u64
             }
@@ -194,9 +180,15 @@ impl ResourcePricing {
         let model_lower = model.to_lowercase();
 
         // Simple heuristic based on model name
-        if model_lower.contains("70b") || model_lower.contains("72b") || model_lower.contains("mixtral") {
+        if model_lower.contains("70b")
+            || model_lower.contains("72b")
+            || model_lower.contains("mixtral")
+        {
             self.inference_large_per_1k
-        } else if model_lower.contains("30b") || model_lower.contains("34b") || model_lower.contains("33b") {
+        } else if model_lower.contains("30b")
+            || model_lower.contains("34b")
+            || model_lower.contains("33b")
+        {
             self.inference_medium_per_1k
         } else {
             self.inference_small_per_1k

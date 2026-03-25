@@ -1,1 +1,0 @@
-Rust is a systems programming language that prioritizes safety, speed, and concurrency.

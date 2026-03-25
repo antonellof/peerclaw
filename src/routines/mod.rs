@@ -98,13 +98,19 @@ pub enum RoutineAction {
     /// Execute a prompt
     Prompt { prompt: String },
     /// Execute a tool
-    Tool { name: String, params: serde_json::Value },
+    Tool {
+        name: String,
+        params: serde_json::Value,
+    },
     /// Execute a command
     Command { command: String },
     /// Read and process a file
     ReadFile { path: String },
     /// Custom action
-    Custom { handler: String, data: serde_json::Value },
+    Custom {
+        handler: String,
+        data: serde_json::Value,
+    },
 }
 
 /// Routine execution result
@@ -228,14 +234,19 @@ impl RoutineEngine {
     /// Start the routine engine
     pub async fn start<F>(&self, executor: F)
     where
-        F: Fn(Routine) -> futures::future::BoxFuture<'static, RoutineResult> + Send + Sync + Clone + 'static,
+        F: Fn(Routine) -> futures::future::BoxFuture<'static, RoutineResult>
+            + Send
+            + Sync
+            + Clone
+            + 'static,
     {
         if !self.config.enabled {
             tracing::info!("Routine engine disabled");
             return;
         }
 
-        self.running.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         tracing::info!("Starting routine engine");
 
         // Run startup routines
@@ -256,7 +267,8 @@ impl RoutineEngine {
 
     /// Stop the routine engine
     pub async fn stop(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         self.heartbeat.stop().await;
         tracing::info!("Stopped routine engine");
     }
@@ -264,15 +276,17 @@ impl RoutineEngine {
     /// Run startup routines
     async fn run_startup_routines<F>(&self, executor: F)
     where
-        F: Fn(Routine) -> futures::future::BoxFuture<'static, RoutineResult> + Send + Sync + Clone + 'static,
+        F: Fn(Routine) -> futures::future::BoxFuture<'static, RoutineResult>
+            + Send
+            + Sync
+            + Clone
+            + 'static,
     {
         let routines: Vec<_> = {
             let routines = self.routines.read();
             routines
                 .values()
-                .filter(|r| {
-                    r.enabled && matches!(r.trigger, RoutineTrigger::Startup)
-                })
+                .filter(|r| r.enabled && matches!(r.trigger, RoutineTrigger::Startup))
                 .cloned()
                 .collect()
         };
@@ -293,15 +307,17 @@ impl RoutineEngine {
     /// Start interval-based routines
     fn start_interval_routines<F>(&self, executor: F)
     where
-        F: Fn(Routine) -> futures::future::BoxFuture<'static, RoutineResult> + Send + Sync + Clone + 'static,
+        F: Fn(Routine) -> futures::future::BoxFuture<'static, RoutineResult>
+            + Send
+            + Sync
+            + Clone
+            + 'static,
     {
         let routines: Vec<_> = {
             let routines = self.routines.read();
             routines
                 .values()
-                .filter(|r| {
-                    r.enabled && matches!(r.trigger, RoutineTrigger::Interval { .. })
-                })
+                .filter(|r| r.enabled && matches!(r.trigger, RoutineTrigger::Interval { .. }))
                 .cloned()
                 .collect()
         };
@@ -354,7 +370,11 @@ impl RoutineEngine {
     /// Start event listener
     fn start_event_listener<F>(&self, executor: F)
     where
-        F: Fn(Routine) -> futures::future::BoxFuture<'static, RoutineResult> + Send + Sync + Clone + 'static,
+        F: Fn(Routine) -> futures::future::BoxFuture<'static, RoutineResult>
+            + Send
+            + Sync
+            + Clone
+            + 'static,
     {
         let running = self.running.clone();
         let routines = self.routines.clone();
@@ -418,15 +438,17 @@ impl RoutineEngine {
     /// Start cron-based routines
     fn start_cron_routines<F>(&self, executor: F)
     where
-        F: Fn(Routine) -> futures::future::BoxFuture<'static, RoutineResult> + Send + Sync + Clone + 'static,
+        F: Fn(Routine) -> futures::future::BoxFuture<'static, RoutineResult>
+            + Send
+            + Sync
+            + Clone
+            + 'static,
     {
         let routines: Vec<_> = {
             let routines = self.routines.read();
             routines
                 .values()
-                .filter(|r| {
-                    r.enabled && matches!(r.trigger, RoutineTrigger::Cron { .. })
-                })
+                .filter(|r| r.enabled && matches!(r.trigger, RoutineTrigger::Cron { .. }))
                 .cloned()
                 .collect()
         };
@@ -462,7 +484,8 @@ impl RoutineEngine {
                             break;
                         };
 
-                        let wait_duration = (next - now).to_std().unwrap_or(Duration::from_secs(60));
+                        let wait_duration =
+                            (next - now).to_std().unwrap_or(Duration::from_secs(60));
 
                         tokio::time::sleep(wait_duration).await;
 

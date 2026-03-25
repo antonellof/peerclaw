@@ -156,31 +156,11 @@ impl Default for ProxyPricing {
                     "Image generation",
                 ),
                 // Model info (free)
-                EndpointPricing::new(
-                    "/api/v1/models",
-                    "GET",
-                    0,
-                    "List available models",
-                ),
-                EndpointPricing::new(
-                    "/v1/models",
-                    "GET",
-                    0,
-                    "OpenAI-compatible model list",
-                ),
+                EndpointPricing::new("/api/v1/models", "GET", 0, "List available models"),
+                EndpointPricing::new("/v1/models", "GET", 0, "OpenAI-compatible model list"),
                 // Health/status (free)
-                EndpointPricing::new(
-                    "/health",
-                    "*",
-                    0,
-                    "Health check",
-                ),
-                EndpointPricing::new(
-                    "/",
-                    "GET",
-                    0,
-                    "Index page",
-                ),
+                EndpointPricing::new("/health", "*", 0, "Health check"),
+                EndpointPricing::new("/", "GET", 0, "Index page"),
             ],
             hourly_multipliers: HashMap::new(),
         }

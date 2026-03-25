@@ -84,21 +84,15 @@ pub async fn run(args: JobArgs) -> anyhow::Result<()> {
             max_tokens,
             budget,
             timeout,
-        } => {
-            run_inference_job(&model, &prompt, max_tokens, budget, timeout).await
-        }
-        JobCommand::Fetch { url, budget, timeout } => {
-            run_fetch_job(&url, budget, timeout).await
-        }
-        JobCommand::List => {
-            list_jobs().await
-        }
-        JobCommand::History { limit } => {
-            show_history(limit).await
-        }
-        JobCommand::Cancel { job_id } => {
-            cancel_job(&job_id).await
-        }
+        } => run_inference_job(&model, &prompt, max_tokens, budget, timeout).await,
+        JobCommand::Fetch {
+            url,
+            budget,
+            timeout,
+        } => run_fetch_job(&url, budget, timeout).await,
+        JobCommand::List => list_jobs().await,
+        JobCommand::History { limit } => show_history(limit).await,
+        JobCommand::Cancel { job_id } => cancel_job(&job_id).await,
     }
 }
 
@@ -171,11 +165,16 @@ async fn run_inference_job(
     println!("\nJob ID: {}", job_id);
 
     // Store the request
-    runtime.job_manager.write().await.create_request(request.clone()).await?;
+    runtime
+        .job_manager
+        .write()
+        .await
+        .create_request(request.clone())
+        .await?;
 
     // Broadcast to network
     let msg = crate::job::network::JobMessage::Request(
-        crate::job::network::JobRequestMessage::new(request, runtime.identity.peer_id())
+        crate::job::network::JobRequestMessage::new(request, runtime.identity.peer_id()),
     );
     let data = crate::job::network::serialize_message(&msg)?;
 
@@ -224,14 +223,21 @@ async fn run_inference_job(
         }
 
         // Select best bid
-        let best_bid = bids.iter()
-            .min_by_key(|b| b.price)
-            .unwrap();
+        let best_bid = bids.iter().min_by_key(|b| b.price).unwrap();
 
-        println!("\nAccepting best bid from {}...", &best_bid.bidder_id[..16.min(best_bid.bidder_id.len())]);
+        println!(
+            "\nAccepting best bid from {}...",
+            &best_bid.bidder_id[..16.min(best_bid.bidder_id.len())]
+        );
 
         // Accept the bid
-        match runtime.job_manager.write().await.accept_bid(&job_id, &best_bid.id).await {
+        match runtime
+            .job_manager
+            .write()
+            .await
+            .accept_bid(&job_id, &best_bid.id)
+            .await
+        {
             Ok(job) => {
                 println!("Job accepted! Escrow: {}", job.escrow_id);
                 println!("Waiting for result...");
@@ -327,7 +333,8 @@ async fn show_history(limit: usize) -> anyhow::Result<()> {
         println!("No completed jobs.");
     } else {
         for job in &jobs {
-            let duration = job.execution_duration()
+            let duration = job
+                .execution_duration()
                 .map(|d| format!("{}s", d.num_seconds()))
                 .unwrap_or_else(|| "N/A".to_string());
 
@@ -351,7 +358,13 @@ async fn cancel_job(job_id: &str) -> anyhow::Result<()> {
     let job_id = crate::job::JobId(job_id.to_string());
 
     // Try to settle with failure (refund)
-    match runtime.job_manager.write().await.settle_job(&job_id, false).await {
+    match runtime
+        .job_manager
+        .write()
+        .await
+        .settle_job(&job_id, false)
+        .await
+    {
         Ok(()) => {
             println!("Job cancelled and refunded.");
         }

@@ -9,12 +9,14 @@ use tokio::sync::mpsc;
 use crate::bootstrap;
 use crate::config::Config;
 use crate::db::Database;
-use crate::executor::task::{ExecutionTask, ExecutionLocation, InferenceTask, TaskData};
+use crate::executor::task::{ExecutionLocation, ExecutionTask, InferenceTask, TaskData};
 use crate::identity::NodeIdentity;
 use crate::job::PricingStrategy;
 use crate::p2p::NetworkEvent;
 use crate::runtime::Runtime;
-use crate::web::{InferenceRequest, InferenceResponse, JobSubmitRequest, JobSubmitResponse, WebJobInfo};
+use crate::web::{
+    InferenceRequest, InferenceResponse, JobSubmitRequest, JobSubmitResponse, WebJobInfo,
+};
 
 #[derive(Args)]
 pub struct ServeArgs {
@@ -154,7 +156,10 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         let mut pricing = PricingStrategy::default();
         pricing.base_rates.inference_small_per_1k = args.price_per_token;
         runtime.set_pricing(pricing).await;
-        tracing::info!("Acting as job provider (price: {} μPCLAW/1k tokens)", args.price_per_token);
+        tracing::info!(
+            "Acting as job provider (price: {} μPCLAW/1k tokens)",
+            args.price_per_token
+        );
     }
 
     // Subscribe to job marketplace topics
@@ -187,78 +192,85 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         "node-{}",
         &runtime.local_peer_id.to_string()[..8.min(runtime.local_peer_id.to_string().len())]
     );
-    let _local_agent_id = swarm_manager.register_local_agent(
-        local_agent_name,
-        Default::default(),
-    );
+    let _local_agent_id = swarm_manager.register_local_agent(local_agent_name, Default::default());
 
     // Load agent if specified - creates a real AgentRuntime (before web state so we can pass it)
-    let agent_runtime: Option<Arc<tokio::sync::RwLock<crate::agent::AgentRuntime>>> = if let Some(agent_path) = &args.agent {
-        if !agent_path.exists() {
-            tracing::error!("Agent spec not found: {}", agent_path.display());
-            None
-        } else {
-            match crate::agent::AgentSpec::from_file(agent_path) {
-                Ok(spec) => {
-                    let agent_name = spec.agent.name.clone();
-                    let model = spec.model.name.clone();
+    let agent_runtime: Option<Arc<tokio::sync::RwLock<crate::agent::AgentRuntime>>> =
+        if let Some(agent_path) = &args.agent {
+            if !agent_path.exists() {
+                tracing::error!("Agent spec not found: {}", agent_path.display());
+                None
+            } else {
+                match crate::agent::AgentSpec::from_file(agent_path) {
+                    Ok(spec) => {
+                        let agent_name = spec.agent.name.clone();
+                        let model = spec.model.name.clone();
 
-                    // Create the agent runtime with real executor and tools
-                    let agent_rt = crate::agent::AgentRuntime::from_spec(
-                        &spec,
-                        runtime.executor.clone(),
-                        runtime.tools.clone(),
-                        runtime.local_peer_id.to_string(),
-                    );
+                        // Create the agent runtime with real executor and tools
+                        let agent_rt = crate::agent::AgentRuntime::from_spec(
+                            &spec,
+                            runtime.executor.clone(),
+                            runtime.tools.clone(),
+                            runtime.local_peer_id.to_string(),
+                        );
 
-                    let agent_id = agent_rt.config.id.clone();
+                        let agent_id = agent_rt.config.id.clone();
 
-                    // Store agent state in database
-                    let agent_state = serde_json::json!({
-                        "id": agent_id,
-                        "name": agent_name,
-                        "model": model,
-                        "status": "running",
-                        "spec_path": agent_path.display().to_string(),
-                        "started_at": chrono::Utc::now().to_rfc3339(),
-                    });
+                        // Store agent state in database
+                        let agent_state = serde_json::json!({
+                            "id": agent_id,
+                            "name": agent_name,
+                            "model": model,
+                            "status": "running",
+                            "spec_path": agent_path.display().to_string(),
+                            "started_at": chrono::Utc::now().to_rfc3339(),
+                        });
 
-                    if let Err(err) = runtime.database.store_agent(&agent_id, &agent_state) {
-                        tracing::warn!(%err, "Failed to persist agent state to database");
+                        if let Err(err) = runtime.database.store_agent(&agent_id, &agent_state) {
+                            tracing::warn!(%err, "Failed to persist agent state to database");
+                        }
+
+                        // Register agent in swarm manager for visualization
+                        let profile =
+                            crate::swarm::AgentProfile::new(&agent_name).with_model(&model);
+                        let swarm_agent_id =
+                            swarm_manager.register_local_agent(agent_name.clone(), profile);
+                        swarm_manager.update_agent_state(
+                            swarm_agent_id,
+                            crate::swarm::SwarmAgentState::Idle,
+                        );
+
+                        tracing::info!(
+                            "Agent '{}' loaded with runtime (model: {}, id: {})",
+                            agent_name,
+                            model,
+                            agent_id
+                        );
+
+                        Some(Arc::new(tokio::sync::RwLock::new(agent_rt)))
                     }
-
-                    // Register agent in swarm manager for visualization
-                    let profile = crate::swarm::AgentProfile::new(&agent_name)
-                        .with_model(&model);
-                    let swarm_agent_id = swarm_manager.register_local_agent(
-                        agent_name.clone(),
-                        profile,
-                    );
-                    swarm_manager.update_agent_state(
-                        swarm_agent_id,
-                        crate::swarm::SwarmAgentState::Idle,
-                    );
-
-                    tracing::info!(
-                        "Agent '{}' loaded with runtime (model: {}, id: {})",
-                        agent_name, model, agent_id
-                    );
-
-                    Some(Arc::new(tokio::sync::RwLock::new(agent_rt)))
-                }
-                Err(e) => {
-                    tracing::error!("Failed to load agent spec: {}", e);
-                    None
+                    Err(e) => {
+                        tracing::error!("Failed to load agent spec: {}", e);
+                        None
+                    }
                 }
             }
-        }
+        } else {
+            None
+        };
+
+    // Create agent task channel if agent runtime is available
+    let (agent_task_tx, mut agent_task_rx) = mpsc::channel::<crate::web::AgentTaskRequest>(32);
+    let agent_task_tx_opt = if agent_runtime.is_some() {
+        Some(agent_task_tx)
     } else {
         None
     };
 
-    // Create agent task channel if agent runtime is available
-    let (agent_task_tx, mut agent_task_rx) = mpsc::channel::<crate::web::AgentTaskRequest>(32);
-    let agent_task_tx_opt = if agent_runtime.is_some() { Some(agent_task_tx) } else { None };
+    let ws_control_tx = {
+        let (tx, _) = tokio::sync::broadcast::channel(256);
+        tx
+    };
 
     // Create web state with all features: inference, jobs, swarm, tasks, providers, agent
     let web_state = if config.web.enabled {
@@ -276,6 +288,16 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             task_store: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             provider_tracker: Some(runtime.provider_tracker.clone()),
             agent_task_tx: agent_task_tx_opt,
+            ws_control_tx,
+            skills: Some(runtime.skills.clone()),
+            chat_sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            mcp_config: config.mcp.clone(),
+            skills_dir: config
+                .skills
+                .directory
+                .clone()
+                .unwrap_or_else(|| crate::bootstrap::base_dir().join("skills")),
+            config_path: crate::bootstrap::base_dir().join("config.toml"),
         }))
     } else {
         None
@@ -316,7 +338,8 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     let mut bid_accept_interval = tokio::time::interval(std::time::Duration::from_secs(3));
 
     // Track when each job was created for bid collection timeout
-    let mut job_creation_times: std::collections::HashMap<crate::job::JobId, std::time::Instant> = std::collections::HashMap::new();
+    let mut job_creation_times: std::collections::HashMap<crate::job::JobId, std::time::Instant> =
+        std::collections::HashMap::new();
 
     // Run event loop until shutdown - poll swarm directly
     loop {
@@ -353,58 +376,116 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             }
         }
 
-        // Handle inference requests from web UI (process inline - one at a time)
+        // Handle inference requests from web UI (process inline - one at a time).
+        // Streaming uses the same inline await as non-streaming: `TaskExecutor` is not `Send`, so we
+        // cannot `tokio::spawn` it; deltas still reach the SSE bridge concurrently while this awaits.
         if let Ok(request) = inference_rx.try_recv() {
-            let task = InferenceTask::new(&request.model, &request.prompt)
-                .with_max_tokens(request.max_tokens)
-                .with_temperature(request.temperature);
-
-            let local_peer_id = runtime.local_peer_id.to_string();
-            let response = match runtime.execute_task(ExecutionTask::Inference(task)).await {
-                Ok(result) => {
-                    let provider_peer_id = match &result.location {
-                        ExecutionLocation::Local => Some(local_peer_id.clone()),
-                        ExecutionLocation::Remote { peer_id, .. } => Some(peer_id.clone()),
-                    };
-                    match &result.data {
-                        TaskData::Inference(r) => InferenceResponse {
-                            text: r.text.clone(),
-                            tokens_generated: r.tokens_generated,
-                            tokens_per_second: r.tokens_per_second as f32,
-                            location: format!("{:?}", result.location),
-                            provider_peer_id,
-                        },
-                        TaskData::Error(e) => InferenceResponse {
+            match request.stream_delta_tx {
+                Some(delta_tx) => {
+                    let task = InferenceTask::new(&request.model, &request.prompt)
+                        .with_max_tokens(request.max_tokens)
+                        .with_temperature(request.temperature);
+                    let local_peer_id = runtime.local_peer_id.to_string();
+                    let stream_result = runtime
+                        .executor
+                        .execute_inference_streaming(task, delta_tx)
+                        .await;
+                    let response = match stream_result {
+                        Ok(result) => {
+                            let provider_peer_id = match &result.location {
+                                ExecutionLocation::Local => Some(local_peer_id.clone()),
+                                ExecutionLocation::Remote { peer_id, .. } => Some(peer_id.clone()),
+                            };
+                            match &result.data {
+                                TaskData::Inference(r) => InferenceResponse {
+                                    text: r.text.clone(),
+                                    tokens_generated: r.tokens_generated,
+                                    tokens_per_second: r.tokens_per_second as f32,
+                                    location: format!("{:?}", result.location),
+                                    provider_peer_id,
+                                },
+                                TaskData::Error(e) => InferenceResponse {
+                                    text: format!("Error: {}", e),
+                                    tokens_generated: 0,
+                                    tokens_per_second: 0.0,
+                                    location: "error".to_string(),
+                                    provider_peer_id: None,
+                                },
+                                _ => InferenceResponse {
+                                    text: "Unexpected response type".to_string(),
+                                    tokens_generated: 0,
+                                    tokens_per_second: 0.0,
+                                    location: "error".to_string(),
+                                    provider_peer_id: None,
+                                },
+                            }
+                        }
+                        Err(e) => InferenceResponse {
                             text: format!("Error: {}", e),
                             tokens_generated: 0,
                             tokens_per_second: 0.0,
                             location: "error".to_string(),
                             provider_peer_id: None,
                         },
-                        _ => InferenceResponse {
-                            text: "Unexpected response type".to_string(),
+                    };
+                    let _ = request.response_tx.send(response);
+                }
+                None => {
+                    let task = InferenceTask::new(&request.model, &request.prompt)
+                        .with_max_tokens(request.max_tokens)
+                        .with_temperature(request.temperature);
+
+                    let local_peer_id = runtime.local_peer_id.to_string();
+                    let response = match runtime.execute_task(ExecutionTask::Inference(task)).await
+                    {
+                        Ok(result) => {
+                            let provider_peer_id = match &result.location {
+                                ExecutionLocation::Local => Some(local_peer_id.clone()),
+                                ExecutionLocation::Remote { peer_id, .. } => Some(peer_id.clone()),
+                            };
+                            match &result.data {
+                                TaskData::Inference(r) => InferenceResponse {
+                                    text: r.text.clone(),
+                                    tokens_generated: r.tokens_generated,
+                                    tokens_per_second: r.tokens_per_second as f32,
+                                    location: format!("{:?}", result.location),
+                                    provider_peer_id,
+                                },
+                                TaskData::Error(e) => InferenceResponse {
+                                    text: format!("Error: {}", e),
+                                    tokens_generated: 0,
+                                    tokens_per_second: 0.0,
+                                    location: "error".to_string(),
+                                    provider_peer_id: None,
+                                },
+                                _ => InferenceResponse {
+                                    text: "Unexpected response type".to_string(),
+                                    tokens_generated: 0,
+                                    tokens_per_second: 0.0,
+                                    location: "error".to_string(),
+                                    provider_peer_id: None,
+                                },
+                            }
+                        }
+                        Err(e) => InferenceResponse {
+                            text: format!("Error: {}", e),
                             tokens_generated: 0,
                             tokens_per_second: 0.0,
                             location: "error".to_string(),
                             provider_peer_id: None,
                         },
-                    }
-                }
-                Err(e) => InferenceResponse {
-                    text: format!("Error: {}", e),
-                    tokens_generated: 0,
-                    tokens_per_second: 0.0,
-                    location: "error".to_string(),
-                    provider_peer_id: None,
-                },
-            };
+                    };
 
-            let _ = request.response_tx.send(response);
+                    let _ = request.response_tx.send(response);
+                }
+            }
         }
 
         // Handle job submission requests from web UI
         if let Ok(request) = job_submit_rx.try_recv() {
-            let response = handle_job_submit(&runtime, request.job_type, request.budget, request.payload).await;
+            let response =
+                handle_job_submit(&runtime, request.job_type, request.budget, request.payload)
+                    .await;
             let _ = request.response_tx.send(response);
         }
 
@@ -419,6 +500,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                 let log_ref = agent.task_log.clone();
                 let store_ref = request.task_store.clone();
                 let tid = request.task_id.clone();
+                let ws_tx = request.ws_control_tx.clone();
                 let log_syncer = tokio::spawn(async move {
                     let mut last_count = 0usize;
                     loop {
@@ -432,6 +514,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                             if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
                                 t.logs.extend(new_logs);
                             }
+                            crate::web::broadcast_tasks_changed(&ws_tx);
                         }
                     }
                 });
@@ -449,6 +532,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         t.logs = logs.clone();
                     }
                 }
+                crate::web::broadcast_tasks_changed(&request.ws_control_tx);
 
                 tracing::info!(
                     task_id = %request.task_id,
@@ -493,7 +577,10 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         status: format!("Pending ({} bids)", bids),
                         provider: None,
                         requester: if requester_id.len() > 8 {
-                            format!("...{}", &requester_id[requester_id.len().saturating_sub(8)..])
+                            format!(
+                                "...{}",
+                                &requester_id[requester_id.len().saturating_sub(8)..]
+                            )
                         } else {
                             requester_id.clone()
                         },
@@ -511,8 +598,14 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         id: job.id.to_string(),
                         job_type: format!("{}", job.request.resource_type),
                         status: format!("{}", job.status),
-                        provider: Some(format!("...{}", &provider_id[provider_id.len().saturating_sub(8)..])),
-                        requester: format!("...{}", &requester_id[requester_id.len().saturating_sub(8)..]),
+                        provider: Some(format!(
+                            "...{}",
+                            &provider_id[provider_id.len().saturating_sub(8)..]
+                        )),
+                        requester: format!(
+                            "...{}",
+                            &requester_id[requester_id.len().saturating_sub(8)..]
+                        ),
                         price_micro: job.bid.price,
                         created_at: job.created_at.timestamp() as u64,
                         location: Some("Network".to_string()),
@@ -527,8 +620,14 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         id: job.id.to_string(),
                         job_type: format!("{}", job.request.resource_type),
                         status: format!("{}", job.status),
-                        provider: Some(format!("...{}", &provider_id[provider_id.len().saturating_sub(8)..])),
-                        requester: format!("...{}", &requester_id[requester_id.len().saturating_sub(8)..]),
+                        provider: Some(format!(
+                            "...{}",
+                            &provider_id[provider_id.len().saturating_sub(8)..]
+                        )),
+                        requester: format!(
+                            "...{}",
+                            &requester_id[requester_id.len().saturating_sub(8)..]
+                        ),
                         price_micro: job.bid.price,
                         created_at: job.created_at.timestamp() as u64,
                         location: Some("Network".to_string()),
@@ -579,7 +678,11 @@ async fn handle_network_event(runtime: &Runtime, event: NetworkEvent) {
                 addresses.len()
             );
         }
-        NetworkEvent::GossipMessage { topic, data, source } => {
+        NetworkEvent::GossipMessage {
+            topic,
+            data,
+            source,
+        } => {
             tracing::debug!(
                 "Gossip message on topic '{}' ({} bytes) from {:?}",
                 topic,
@@ -590,7 +693,11 @@ async fn handle_network_event(runtime: &Runtime, event: NetworkEvent) {
             // Handle job-related messages
             runtime.handle_gossip_message(&topic, data, source).await;
         }
-        NetworkEvent::RequestReceived { request_id, from, payload } => {
+        NetworkEvent::RequestReceived {
+            request_id,
+            from,
+            payload,
+        } => {
             tracing::debug!(
                 "Request {} received from {} ({} bytes)",
                 request_id,
@@ -599,11 +706,7 @@ async fn handle_network_event(runtime: &Runtime, event: NetworkEvent) {
             );
         }
         NetworkEvent::ResourceAdvertised { peer_id, manifest } => {
-            tracing::debug!(
-                "Resources advertised by {}: {:?}",
-                peer_id,
-                manifest
-            );
+            tracing::debug!("Resources advertised by {}: {:?}", peer_id, manifest);
         }
     }
 }
@@ -615,11 +718,15 @@ async fn handle_job_submit(
     budget: f64,
     payload: String,
 ) -> JobSubmitResponse {
-    use crate::job::{ResourceType, JobRequest};
-    use crate::job::network::{JobMessage, JobRequestMessage, serialize_message, topics};
+    use crate::job::network::{serialize_message, topics, JobMessage, JobRequestMessage};
+    use crate::job::{JobRequest, ResourceType};
     use crate::wallet::to_micro;
 
-    tracing::info!("Web UI job submission: type={}, budget={}", job_type, budget);
+    tracing::info!(
+        "Web UI job submission: type={}, budget={}",
+        job_type,
+        budget
+    );
 
     // Create resource type based on job type
     let resource_type = match job_type.as_str() {
@@ -627,9 +734,7 @@ async fn handle_job_submit(
             model: "llama-3.2-3b".to_string(),
             tokens: 500,
         },
-        "web_fetch" => ResourceType::WebFetch {
-            url_count: 1,
-        },
+        "web_fetch" => ResourceType::WebFetch { url_count: 1 },
         "wasm" => ResourceType::WasmTool {
             tool_name: payload.clone(),
             invocations: 1,
@@ -655,7 +760,13 @@ async fn handle_job_submit(
     let job_id = request.id.clone();
 
     // Store request locally
-    if let Err(e) = runtime.job_manager.write().await.create_request(request.clone()).await {
+    if let Err(e) = runtime
+        .job_manager
+        .write()
+        .await
+        .create_request(request.clone())
+        .await
+    {
         tracing::error!("Job creation failed: {}", e);
         return JobSubmitResponse {
             success: false,
@@ -693,8 +804,8 @@ async fn auto_accept_bids(
     runtime: &Runtime,
     job_creation_times: &mut std::collections::HashMap<crate::job::JobId, std::time::Instant>,
 ) {
+    use crate::job::network::{serialize_message, topics, BidAcceptedMessage, JobMessage};
     use crate::job::select_best_bid;
-    use crate::job::network::{JobMessage, BidAcceptedMessage, serialize_message, topics};
 
     // Get pending requests that might need bid acceptance
     let pending = runtime.job_manager.read().await.pending_requests().await;
@@ -740,7 +851,13 @@ async fn auto_accept_bids(
             );
 
             // Accept the bid
-            match runtime.job_manager.write().await.accept_bid(&req.id, &best_bid.id).await {
+            match runtime
+                .job_manager
+                .write()
+                .await
+                .accept_bid(&req.id, &best_bid.id)
+                .await
+            {
                 Ok(job) => {
                     // Remove from tracking
                     job_creation_times.remove(&req.id);
@@ -778,7 +895,8 @@ async fn auto_accept_bids(
                             runtime.executor.clone(),
                             runtime.network.clone(),
                             *runtime.identity.peer_id(),
-                        ).await;
+                        )
+                        .await;
                     }
                 }
                 Err(e) => {
@@ -799,9 +917,11 @@ async fn execute_job_locally(
     network: std::sync::Arc<tokio::sync::RwLock<crate::p2p::Network>>,
     local_peer_id: libp2p::PeerId,
 ) {
-    use crate::job::network::{JobMessage, JobResultMessage, JobStatusMessage, JobStatusUpdate, serialize_message, topics};
-    use crate::job::{JobResult, ActualUsage, ExecutionMetrics};
     use crate::executor::task::{ExecutionTask, InferenceTask, TaskData, WebFetchTask};
+    use crate::job::network::{
+        serialize_message, topics, JobMessage, JobResultMessage, JobStatusMessage, JobStatusUpdate,
+    };
+    use crate::job::{ActualUsage, ExecutionMetrics, JobResult};
 
     tracing::info!(job_id = %job_id, "Starting local job execution");
 
@@ -827,33 +947,30 @@ async fn execute_job_locally(
         crate::job::ResourceType::Inference { model, tokens } => {
             // Try to parse prompt from payload
             let prompt_cow = String::from_utf8_lossy(&payload);
-            let prompt: &str = if prompt_cow.is_empty() { "Hello, how are you?" } else { prompt_cow.as_ref() };
+            let prompt: &str = if prompt_cow.is_empty() {
+                "Hello, how are you?"
+            } else {
+                prompt_cow.as_ref()
+            };
 
-            let task = InferenceTask::new(&model, prompt)
-                .with_max_tokens(tokens);
+            let task = InferenceTask::new(&model, prompt).with_max_tokens(tokens);
 
             match executor.execute(ExecutionTask::Inference(task)).await {
-                Ok(task_result) => {
-                    match &task_result.data {
-                        TaskData::Inference(r) => {
-                            JobResult::new(r.text.as_bytes().to_vec())
-                                .with_usage(ActualUsage {
-                                    tokens: Some(r.tokens_generated),
-                                    compute_time_ms: Some(task_result.metrics.total_time_ms),
-                                    bytes: None,
-                                })
-                                .with_metrics(ExecutionMetrics {
-                                    ttfb_ms: task_result.metrics.ttfb_ms,
-                                    total_time_ms: task_result.metrics.total_time_ms,
-                                    tokens_per_sec: Some(r.tokens_per_second),
-                                })
-                        }
-                        _ => JobResult::new(b"Unexpected task result type".to_vec()),
-                    }
-                }
-                Err(e) => {
-                    JobResult::new(format!("Execution error: {}", e).into_bytes())
-                }
+                Ok(task_result) => match &task_result.data {
+                    TaskData::Inference(r) => JobResult::new(r.text.as_bytes().to_vec())
+                        .with_usage(ActualUsage {
+                            tokens: Some(r.tokens_generated),
+                            compute_time_ms: Some(task_result.metrics.total_time_ms),
+                            bytes: None,
+                        })
+                        .with_metrics(ExecutionMetrics {
+                            ttfb_ms: task_result.metrics.ttfb_ms,
+                            total_time_ms: task_result.metrics.total_time_ms,
+                            tokens_per_sec: Some(r.tokens_per_second),
+                        }),
+                    _ => JobResult::new(b"Unexpected task result type".to_vec()),
+                },
+                Err(e) => JobResult::new(format!("Execution error: {}", e).into_bytes()),
             }
         }
         crate::job::ResourceType::WebFetch { url_count: _ } => {
@@ -862,33 +979,31 @@ async fn execute_job_locally(
             let task = WebFetchTask::get(url.as_ref());
 
             match executor.execute(ExecutionTask::WebFetch(task)).await {
-                Ok(task_result) => {
-                    match &task_result.data {
-                        TaskData::WebFetch(r) => {
-                            JobResult::new(r.body.clone())
-                                .with_usage(ActualUsage {
-                                    tokens: None,
-                                    compute_time_ms: Some(task_result.metrics.total_time_ms),
-                                    bytes: Some(r.body.len() as u64),
-                                })
-                        }
-                        _ => JobResult::new(b"Unexpected task result type".to_vec()),
+                Ok(task_result) => match &task_result.data {
+                    TaskData::WebFetch(r) => {
+                        JobResult::new(r.body.clone()).with_usage(ActualUsage {
+                            tokens: None,
+                            compute_time_ms: Some(task_result.metrics.total_time_ms),
+                            bytes: Some(r.body.len() as u64),
+                        })
                     }
-                }
-                Err(e) => {
-                    JobResult::new(format!("Execution error: {}", e).into_bytes())
-                }
+                    _ => JobResult::new(b"Unexpected task result type".to_vec()),
+                },
+                Err(e) => JobResult::new(format!("Execution error: {}", e).into_bytes()),
             }
         }
-        _ => {
-            JobResult::new(b"Unsupported resource type for local execution".to_vec())
-        }
+        _ => JobResult::new(b"Unsupported resource type for local execution".to_vec()),
     };
 
     tracing::info!(job_id = %job_id, "Job execution complete, submitting result");
 
     // Submit result
-    if let Err(e) = job_manager.write().await.submit_result(&job_id, result.clone()).await {
+    if let Err(e) = job_manager
+        .write()
+        .await
+        .submit_result(&job_id, result.clone())
+        .await
+    {
         tracing::error!(job_id = %job_id, error = %e, "Failed to submit job result");
         return;
     }

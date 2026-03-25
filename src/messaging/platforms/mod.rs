@@ -3,24 +3,21 @@
 //! Each platform module provides a Channel implementation for a specific
 //! messaging platform (Telegram, Discord, Slack, etc.).
 
+mod p2p;
 mod repl;
 mod webhook;
-mod p2p;
 
 // Re-export platform implementations
+pub use p2p::P2pChannel;
 pub use repl::ReplChannel;
 pub use webhook::WebhookChannel;
-pub use p2p::P2pChannel;
 
 // Platform channel stubs (would be WASM modules in production)
 // These are placeholders showing the expected interface
 
 use serde::{Deserialize, Serialize};
 
-use super::{
-    Channel, ChannelConfig, ChannelError,
-    Platform,
-};
+use super::{Channel, ChannelConfig, ChannelError, Platform};
 
 /// Telegram bot channel configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,32 +108,24 @@ pub fn create_channel(config: ChannelConfig) -> Result<Box<dyn Channel>, Channel
                 "Telegram channel requires WASM module or native implementation".into(),
             ))
         }
-        Platform::Discord => {
-            Err(ChannelError::PlatformError(
-                "Discord channel requires WASM module or native implementation".into(),
-            ))
-        }
-        Platform::Slack => {
-            Err(ChannelError::PlatformError(
-                "Slack channel requires WASM module or native implementation".into(),
-            ))
-        }
-        Platform::Matrix => {
-            Err(ChannelError::PlatformError(
-                "Matrix channel requires WASM module or native implementation".into(),
-            ))
-        }
+        Platform::Discord => Err(ChannelError::PlatformError(
+            "Discord channel requires WASM module or native implementation".into(),
+        )),
+        Platform::Slack => Err(ChannelError::PlatformError(
+            "Slack channel requires WASM module or native implementation".into(),
+        )),
+        Platform::Matrix => Err(ChannelError::PlatformError(
+            "Matrix channel requires WASM module or native implementation".into(),
+        )),
         Platform::WebSocket => {
             // WebSocket is handled by the web module
             Err(ChannelError::PlatformError(
                 "WebSocket channels are created through the web server".into(),
             ))
         }
-        Platform::Wasm => {
-            Err(ChannelError::PlatformError(
-                "WASM channels require a module path in settings".into(),
-            ))
-        }
+        Platform::Wasm => Err(ChannelError::PlatformError(
+            "WASM channels require a module path in settings".into(),
+        )),
     }
 }
 

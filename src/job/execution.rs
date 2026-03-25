@@ -147,21 +147,22 @@ impl Job {
 
     /// Check if the job has timed out.
     pub fn is_timed_out(&self) -> bool {
-        let deadline = self.created_at + chrono::Duration::seconds(self.request.timeout_secs as i64);
+        let deadline =
+            self.created_at + chrono::Duration::seconds(self.request.timeout_secs as i64);
         Utc::now() > deadline
     }
 
     /// Get remaining time until timeout.
     pub fn time_remaining(&self) -> chrono::Duration {
-        let deadline = self.created_at + chrono::Duration::seconds(self.request.timeout_secs as i64);
+        let deadline =
+            self.created_at + chrono::Duration::seconds(self.request.timeout_secs as i64);
         deadline - Utc::now()
     }
 
     /// Get execution duration (if started).
     pub fn execution_duration(&self) -> Option<chrono::Duration> {
-        self.started_at.map(|start| {
-            self.completed_at.unwrap_or_else(Utc::now) - start
-        })
+        self.started_at
+            .map(|start| self.completed_at.unwrap_or_else(Utc::now) - start)
     }
 
     /// Check if job is in a terminal state.
@@ -301,10 +302,8 @@ mod tests {
         let pass = VerificationResult::pass(VerificationMethod::Hash);
         assert!(pass.passed);
 
-        let fail = VerificationResult::fail(
-            VerificationMethod::Redundant,
-            "Results mismatch".into(),
-        );
+        let fail =
+            VerificationResult::fail(VerificationMethod::Redundant, "Results mismatch".into());
         assert!(!fail.passed);
     }
 }

@@ -47,9 +47,8 @@ impl WebhookChannel {
 
         // HMAC-SHA256 validation
         use std::io::Write;
-        let mut mac = blake3::Hasher::new_keyed(
-            &blake3::derive_key("webhook-signature", secret.as_bytes())
-        );
+        let mut mac =
+            blake3::Hasher::new_keyed(&blake3::derive_key("webhook-signature", secret.as_bytes()));
         mac.write_all(payload).ok();
         let expected = mac.finalize().to_hex();
 
@@ -67,19 +66,22 @@ impl WebhookChannel {
         let json: serde_json::Value = serde_json::from_str(body)?;
 
         // Extract message content
-        let content = json.get("text")
+        let content = json
+            .get("text")
             .or(json.get("content"))
             .or(json.get("message"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let user_id = json.get("user_id")
+        let user_id = json
+            .get("user_id")
             .or(json.get("user"))
             .or(json.get("from"))
             .and_then(|v| v.as_str())
             .unwrap_or("webhook-user");
 
-        let thread_id = json.get("thread_id")
+        let thread_id = json
+            .get("thread_id")
             .or(json.get("thread"))
             .and_then(|v| v.as_str());
 

@@ -8,14 +8,14 @@ use tokio::sync::RwLock;
 use tokio::time::timeout;
 
 use crate::job::{
-    network::{self, JobMessage, JobRequestMessage, JobBidMessage, BidAcceptedMessage},
+    network::{self, BidAcceptedMessage, JobBidMessage, JobMessage, JobRequestMessage},
     JobBid, JobId, JobManager, JobRequest, JobResult, ResourceType,
 };
 use crate::p2p::Network;
 use crate::wallet::to_micro;
 
 use super::router::PeerFilter;
-use super::task::{ExecutionTask, TaskData, TaskMetrics, TaskResult, ExecutionLocation, TaskId};
+use super::task::{ExecutionLocation, ExecutionTask, TaskData, TaskId, TaskMetrics, TaskResult};
 use super::ExecutorError;
 
 /// Handles remote task execution via the P2P network.
@@ -125,8 +125,8 @@ impl RemoteExecutor {
         let mut request = JobRequest::new(resource_type, max_budget, timeout_secs);
 
         // Add task payload
-        let payload = rmp_serde::to_vec(&task)
-            .map_err(|e| ExecutorError::InferenceError(e.to_string()))?;
+        let payload =
+            rmp_serde::to_vec(&task).map_err(|e| ExecutorError::InferenceError(e.to_string()))?;
         request = request.with_payload(payload);
 
         Ok(request)
@@ -134,10 +134,8 @@ impl RemoteExecutor {
 
     /// Broadcast a job request to the network.
     async fn broadcast_request(&self, request: &JobRequest) -> Result<(), ExecutorError> {
-        let message = JobMessage::Request(JobRequestMessage::new(
-            request.clone(),
-            &self.local_peer_id,
-        ));
+        let message =
+            JobMessage::Request(JobRequestMessage::new(request.clone(), &self.local_peer_id));
 
         let data = network::serialize_message(&message)
             .map_err(|e| ExecutorError::InferenceError(e.to_string()))?;
@@ -192,7 +190,9 @@ impl RemoteExecutor {
             .max_by(|a, b| {
                 let score_a = a.score(Some(100)); // 100ms target latency
                 let score_b = b.score(Some(100));
-                score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+                score_a
+                    .partial_cmp(&score_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .cloned()
             .expect("bids should not be empty")
@@ -278,24 +278,18 @@ impl RemoteExecutor {
                     finish_reason: super::task::FinishReason::Stop,
                 })
             }
-            ExecutionTask::WebFetch(_) => {
-                TaskData::WebFetch(super::task::WebFetchResult {
-                    status: 200,
-                    headers: vec![],
-                    body: result.data.clone(),
-                })
-            }
+            ExecutionTask::WebFetch(_) => TaskData::WebFetch(super::task::WebFetchResult {
+                status: 200,
+                headers: vec![],
+                body: result.data.clone(),
+            }),
             ExecutionTask::WebSearch(_) => {
-                TaskData::WebSearch(super::task::WebSearchResult {
-                    results: vec![],
-                })
+                TaskData::WebSearch(super::task::WebSearchResult { results: vec![] })
             }
-            ExecutionTask::WasmExecution(_) => {
-                TaskData::Wasm(super::task::WasmResult {
-                    value: serde_json::from_slice(&result.data).unwrap_or_default(),
-                    fuel_consumed: 0,
-                })
-            }
+            ExecutionTask::WasmExecution(_) => TaskData::Wasm(super::task::WasmResult {
+                value: serde_json::from_slice(&result.data).unwrap_or_default(),
+                fuel_consumed: 0,
+            }),
         }
     }
 }
@@ -364,12 +358,14 @@ impl JobProvider {
             bid.bidder_id = self.local_peer_id.to_string();
 
             // Store the request so we can execute it later if our bid is accepted
-            self.pending_requests.write().await.insert(msg.request.id.clone(), msg.request.clone());
+            self.pending_requests
+                .write()
+                .await
+                .insert(msg.request.id.clone(), msg.request.clone());
 
             // Send bid
             let bid_msg = JobMessage::Bid(JobBidMessage::new(bid.clone(), &self.local_peer_id));
-            let data = network::serialize_message(&bid_msg)
-                .map_err(|e| e.to_string())?;
+            let data = network::serialize_message(&bid_msg).map_err(|e| e.to_string())?;
 
             self.network
                 .write()

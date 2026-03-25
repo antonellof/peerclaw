@@ -257,15 +257,30 @@ mod tests {
 
     #[test]
     fn test_quantization_from_name() {
-        assert_eq!(Quantization::from_name("model-q4_k_m.gguf"), Quantization::Q4_K_M);
-        assert_eq!(Quantization::from_name("model-q8_0.gguf"), Quantization::Q8_0);
+        assert_eq!(
+            Quantization::from_name("model-q4_k_m.gguf"),
+            Quantization::Q4_K_M
+        );
+        assert_eq!(
+            Quantization::from_name("model-q8_0.gguf"),
+            Quantization::Q8_0
+        );
         assert_eq!(Quantization::from_name("model-f16.gguf"), Quantization::F16);
     }
 
     #[test]
     fn test_architecture_from_name() {
-        assert_eq!(ModelArchitecture::from_name("llama-7b"), ModelArchitecture::Llama);
-        assert_eq!(ModelArchitecture::from_name("mistral-7b"), ModelArchitecture::Mistral);
-        assert_eq!(ModelArchitecture::from_name("phi-2"), ModelArchitecture::Phi);
+        assert_eq!(
+            ModelArchitecture::from_name("llama-7b"),
+            ModelArchitecture::Llama
+        );
+        assert_eq!(
+            ModelArchitecture::from_name("mistral-7b"),
+            ModelArchitecture::Mistral
+        );
+        assert_eq!(
+            ModelArchitecture::from_name("phi-2"),
+            ModelArchitecture::Phi
+        );
     }
 }

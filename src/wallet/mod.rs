@@ -81,10 +81,10 @@ pub struct WalletConfig {
 impl Default for WalletConfig {
     fn default() -> Self {
         Self {
-            max_spend_per_tx: to_micro(100.0),      // 100 PCLAW per tx
-            max_spend_per_hour: to_micro(500.0),    // 500 PCLAW per hour
-            max_spend_per_day: to_micro(2000.0),    // 2000 PCLAW per day
-            reserve_balance: to_micro(100.0),       // Keep 100 PCLAW reserve
+            max_spend_per_tx: to_micro(100.0),   // 100 PCLAW per tx
+            max_spend_per_hour: to_micro(500.0), // 500 PCLAW per hour
+            max_spend_per_day: to_micro(2000.0), // 2000 PCLAW per day
+            reserve_balance: to_micro(100.0),    // Keep 100 PCLAW reserve
         }
     }
 }
@@ -475,7 +475,10 @@ mod tests {
         let (wallet, _dir) = setup_test_wallet();
 
         let result = wallet.debit(to_micro(100.0), "test debit").await;
-        assert!(matches!(result, Err(WalletError::InsufficientBalance { .. })));
+        assert!(matches!(
+            result,
+            Err(WalletError::InsufficientBalance { .. })
+        ));
     }
 
     #[tokio::test]

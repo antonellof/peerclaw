@@ -16,8 +16,8 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use crate::tools::tool::{
-    Tool, ToolContext, ToolError, ToolOutput, ToolDomain, ApprovalRequirement,
-    require_str, optional_str, optional_i64,
+    optional_i64, optional_str, require_str, ApprovalRequirement, Tool, ToolContext, ToolDomain,
+    ToolError, ToolOutput,
 };
 
 /// Maximum output size before truncation (64KB).
@@ -256,7 +256,8 @@ impl Tool for ShellTool {
         }
 
         // Spawn process
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to spawn: {}", e)))?;
 
         // Write stdin if provided
@@ -282,13 +283,12 @@ impl Tool for ShellTool {
 
             let status = child.wait().await;
             (stdout_buf, stderr_buf, status)
-        }).await;
+        })
+        .await;
 
         match output {
             Ok((stdout_buf, stderr_buf, status)) => {
-                let exit_code = status
-                    .map(|s| s.code().unwrap_or(-1))
-                    .unwrap_or(-1);
+                let exit_code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
 
                 let stdout = truncate_output(&stdout_buf, MAX_OUTPUT_SIZE);
                 let stderr = truncate_output(&stderr_buf, MAX_OUTPUT_SIZE);
@@ -310,7 +310,8 @@ impl Tool for ShellTool {
                     Ok(ToolOutput::failure(
                         format!("Command exited with code {}", exit_code),
                         start.elapsed(),
-                    ).with_warning(format!("Exit code: {}", exit_code)))
+                    )
+                    .with_warning(format!("Exit code: {}", exit_code)))
                 }
             }
             Err(_) => {
@@ -340,12 +341,16 @@ impl Tool for ShellTool {
 
 fn is_blocked(command: &str) -> bool {
     let lower = command.to_lowercase();
-    BLOCKED_COMMANDS.iter().any(|blocked| lower.contains(*blocked))
+    BLOCKED_COMMANDS
+        .iter()
+        .any(|blocked| lower.contains(*blocked))
 }
 
 fn has_dangerous_pattern(command: &str) -> bool {
     let lower = command.to_lowercase();
-    DANGEROUS_PATTERNS.iter().any(|pattern| lower.contains(*pattern))
+    DANGEROUS_PATTERNS
+        .iter()
+        .any(|pattern| lower.contains(*pattern))
 }
 
 fn truncate_output(bytes: &[u8], max_size: usize) -> String {
@@ -354,7 +359,11 @@ fn truncate_output(bytes: &[u8], max_size: usize) -> String {
         let truncated = &s[..max_size];
         // Find last newline for clean truncation
         if let Some(pos) = truncated.rfind('\n') {
-            format!("{}...\n[truncated, {} bytes total]", &truncated[..pos], bytes.len())
+            format!(
+                "{}...\n[truncated, {} bytes total]",
+                &truncated[..pos],
+                bytes.len()
+            )
         } else {
             format!("{}...\n[truncated, {} bytes total]", truncated, bytes.len())
         }
@@ -367,7 +376,9 @@ fn truncate_output(bytes: &[u8], max_size: usize) -> String {
 #[allow(dead_code)]
 pub fn requires_explicit_approval(command: &str) -> bool {
     let lower = command.to_lowercase();
-    NEVER_AUTO_APPROVE_PATTERNS.iter().any(|pattern| lower.contains(*pattern))
+    NEVER_AUTO_APPROVE_PATTERNS
+        .iter()
+        .any(|pattern| lower.contains(*pattern))
 }
 
 #[cfg(test)]
@@ -400,10 +411,10 @@ mod tests {
         let tool = ShellTool::new();
         let ctx = ToolContext::local("test".to_string());
 
-        let result = tool.execute(
-            serde_json::json!({"command": "echo hello"}),
-            &ctx,
-        ).await.unwrap();
+        let result = tool
+            .execute(serde_json::json!({"command": "echo hello"}), &ctx)
+            .await
+            .unwrap();
 
         assert!(result.success);
         assert!(result.data["stdout"].as_str().unwrap().contains("hello"));

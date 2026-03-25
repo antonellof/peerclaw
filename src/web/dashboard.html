@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PeerClaw Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         :root {
@@ -27,7 +30,7 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
             height: 100vh;
@@ -356,6 +359,113 @@
         .task-row:hover { background: var(--bg-tertiary); }
         .task-row.selected { background: var(--bg-tertiary); }
         .task-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+        .task-row-desc {
+            font-size: 0.8125rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        /* Full agent output in list: scroll inside row (no character truncation) */
+        .task-row-result {
+            margin-top: 0.5rem;
+            max-height: min(45vh, 20rem);
+            overflow-y: auto;
+            overflow-x: auto;
+            padding: 0.65rem 0.75rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.8125rem;
+            line-height: 1.55;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            color: var(--text-primary);
+        }
+        .task-row-result-hint {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            margin-top: 0.35rem;
+            user-select: none;
+        }
+
+        .task-detail-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 1.25rem;
+            line-height: 1;
+            padding: 0.15rem 0.45rem;
+            border-radius: 6px;
+            transition: color 0.15s, background 0.15s;
+        }
+        .task-detail-close:hover {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+        .task-detail-section-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 0.4rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+        }
+        .task-detail-result-box {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.25rem;
+            font-size: 0.8125rem;
+            line-height: 1.55;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: min(75vh, 42rem);
+            min-height: 4rem;
+            overflow: auto;
+            color: var(--text-primary);
+        }
+        .task-detail-logs-box {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.85rem;
+            font-size: 0.6875rem;
+            font-family: 'IBM Plex Mono', 'SF Mono', SFMono-Regular, ui-monospace, monospace;
+            line-height: 1.6;
+            max-height: min(50vh, 36rem);
+            overflow: auto;
+        }
+        .btn-copy-quiet {
+            font-size: 0.6875rem;
+            font-weight: 500;
+            padding: 0.2rem 0.5rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .btn-copy-quiet:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .btn-copy-quiet.copied {
+            border-color: var(--success);
+            color: var(--success);
+        }
 
         /* ---- Cards / Panels ---- */
         .panel {
@@ -1090,6 +1200,131 @@
         ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
 
         /* ---- Responsive ---- */
+        /* ---- Onboarding (live from API) ---- */
+        .onboarding-live { margin-top: 1.25rem; }
+        .onboarding-row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-start;
+            padding: 0.65rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .onboarding-row:last-child { border-bottom: none; }
+        .onboarding-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-top: 0.35rem;
+            flex-shrink: 0;
+        }
+        .onboarding-dot.ok { background: var(--success); box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.2); }
+        .onboarding-dot.no { background: var(--text-muted); }
+        .onboarding-title { font-size: 0.8125rem; font-weight: 600; color: var(--text-primary); }
+        .onboarding-detail { font-size: 0.75rem; color: var(--text-secondary); line-height: 1.5; margin-top: 0.2rem; max-width: 65ch; }
+
+        /* ---- Skills & MCP page ---- */
+        .skills-intro {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            max-width: 62ch;
+            margin-bottom: 1rem;
+        }
+        .skills-layout {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        @media (max-width: 900px) {
+            .skills-layout { grid-template-columns: 1fr; }
+        }
+        .skill-row {
+            padding: 0.65rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .skill-row:last-child { border-bottom: none; }
+        .skill-row-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 0.35rem 0.65rem;
+            margin-bottom: 0.25rem;
+        }
+        .skill-row-head strong { font-size: 0.8125rem; color: var(--text-primary); }
+        .skill-trust {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 0.12rem 0.45rem;
+            border-radius: 999px;
+            background: var(--bg-tertiary);
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .skill-ver { font-size: 0.7rem; color: var(--text-muted); font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+        .skill-desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.45; margin: 0.25rem 0; }
+        .skill-meta { font-size: 0.68rem; color: var(--text-muted); font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+        .skills-empty { font-size: 0.8125rem; color: var(--text-secondary); padding: 0.5rem 0; }
+        .skills-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-start;
+            gap: 0.75rem 1rem;
+            margin-bottom: 1rem;
+        }
+        .skills-path-block {
+            flex: 1;
+            min-width: 200px;
+            font-size: 0.8125rem;
+            line-height: 1.55;
+            color: var(--text-secondary);
+        }
+        .skills-path-block code {
+            display: block;
+            margin-top: 0.35rem;
+            padding: 0.5rem 0.65rem;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            font-size: 0.72rem;
+            color: var(--accent);
+            word-break: break-all;
+        }
+        .skills-snippet {
+            margin-top: 0.65rem;
+            font-size: 0.72rem;
+            line-height: 1.45;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.65rem 0.85rem;
+            overflow-x: auto;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+        }
+        .skills-scan-msg {
+            font-size: 0.8125rem;
+            margin-top: 0.5rem;
+            color: var(--text-secondary);
+        }
+        .skills-scan-msg.ok { color: var(--success); }
+        .skills-scan-msg.err { color: var(--danger); }
+        .mcp-hint {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            line-height: 1.55;
+            margin-top: 0.75rem;
+        }
+        .mcp-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 1rem;
+            font-size: 0.75rem;
+            font-family: 'IBM Plex Mono', ui-monospace, monospace;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
         @media (max-width: 768px) {
             .header { gap: 0.5rem; padding: 0 0.75rem; }
             .header-status { gap: 0.5rem; }
@@ -1124,6 +1359,7 @@
             <button type="button" class="nav-tab" data-page="agents">Swarm</button>
             <button type="button" class="nav-tab" data-page="jobs">Jobs</button>
             <button type="button" class="nav-tab" data-page="providers">Providers</button>
+            <button type="button" class="nav-tab" data-page="skills">Skills</button>
             <button type="button" class="nav-tab" data-page="network">Network</button>
         </nav>
 
@@ -1166,6 +1402,12 @@
                     <button type="button" class="btn btn-secondary" onclick="switchPage('overview')">View node status</button>
                 </div>
             </div>
+            <div class="panel onboarding-live">
+                <div class="panel-header">Node readiness</div>
+                <div class="panel-body" id="home-onboarding-body">
+                    <p class="skills-empty" style="margin:0">Loading checklist…</p>
+                </div>
+            </div>
             <h2 style="font-size:0.8125rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.75rem">Real-life starters</h2>
             <p style="font-size:0.8rem;color:var(--text-secondary);margin:-0.35rem 0 0.85rem;max-width:62ch">Pick a scenario to pre-fill the Agent tab. Edit details, set budget, then run.</p>
             <div class="scenario-grid">
@@ -1200,6 +1442,40 @@
                     <p style="margin-bottom:0.65rem"><strong style="color:var(--text-primary)">Agent tab</strong> needs a running node with an agent spec, for example:</p>
                     <code style="display:block;background:var(--bg-primary);padding:0.65rem 0.85rem;border-radius:6px;font-size:0.72rem;color:var(--accent);word-break:break-all">peerclaw serve --web 127.0.0.1:8080 --agent examples/agents/assistant.toml</code>
                     <p style="margin-top:0.65rem">Without <code style="color:var(--accent)">--agent</code>, tasks are created but fail with a clear message. Chat needs local or network inference enabled.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ---- Skills & MCP ---- -->
+        <div class="page" id="page-skills">
+            <p class="skills-intro">
+                Add <code>SKILL.md</code> files under your skills directory (or set <code>[skills].directory</code> in <code>config.toml</code>).
+                Peers can advertise skills over the P2P mesh. MCP servers are listed in <code>[mcp]</code> and run as separate processes.
+            </p>
+            <div class="panel" style="margin-bottom:1rem">
+                <div class="panel-header">Paths &amp; rescan</div>
+                <div class="panel-body" id="skills-setup-body">
+                    <p class="skills-empty">Loading…</p>
+                </div>
+            </div>
+            <div class="skills-layout">
+                <div class="panel">
+                    <div class="panel-header">Local &amp; installed</div>
+                    <div class="panel-body" id="skills-local-list">
+                        <p class="skills-empty">Open this tab to load skills.</p>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header">From the network</div>
+                    <div class="panel-body" id="skills-network-list">
+                        <p class="skills-empty">Open this tab to load skills.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">MCP bridge (sidecar)</div>
+                <div class="panel-body" id="mcp-status-body">
+                    <p class="skills-empty">Loading…</p>
                 </div>
             </div>
         </div>
@@ -1431,14 +1707,17 @@
             <div id="task-detail-panel" style="display:none;margin-top:1rem" class="panel">
                 <div class="panel-header">
                     <span id="task-detail-title">Task Detail</span>
-                    <button onclick="closeTaskDetail()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:1rem">&times;</button>
+                    <button type="button" class="task-detail-close" onclick="closeTaskDetail()" aria-label="Close task detail">&times;</button>
                 </div>
                 <div class="panel-body">
-                    <div id="task-detail-status" style="margin-bottom:0.75rem"></div>
-                    <div style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:0.375rem">Result</div>
-                    <div id="task-detail-result" style="background:var(--bg-tertiary);border-radius:6px;padding:1rem;margin-bottom:1rem;font-size:0.8125rem;white-space:pre-wrap;line-height:1.5;max-height:500px;overflow-y:auto;word-wrap:break-word"></div>
-                    <div style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:0.375rem">Execution Log</div>
-                    <div id="task-detail-logs" style="background:var(--bg-primary);border-radius:6px;padding:0.75rem;font-size:0.6875rem;font-family:'SF Mono',SFMono-Regular,monospace;max-height:300px;overflow-y:auto;line-height:1.6"></div>
+                    <div id="task-detail-status" style="margin-bottom:1rem"></div>
+                    <div class="task-detail-section-label">
+                        <span>Result</span>
+                        <button type="button" class="btn-copy-quiet" id="task-copy-result-btn" onclick="copyTaskResultToClipboard()">Copy</button>
+                    </div>
+                    <div id="task-detail-result" class="task-detail-result-box"></div>
+                    <div class="task-detail-section-label" style="margin-bottom:0.4rem">Execution Log</div>
+                    <div id="task-detail-logs" class="task-detail-logs-box"></div>
                 </div>
             </div>
         </div>
@@ -1505,6 +1784,7 @@
         let peers = [];
         let jobs = [];
         let ws = null;
+        let tasksWsDebounce = null;
         let currentPage = 'home';
 
         const SCENARIO_PRESETS = {
@@ -1572,7 +1852,9 @@
             if (page === 'overview') {
                 renderOverviewGraph();
             } else if (page === 'home') {
-                /* static */
+                fetchOnboardingHome();
+            } else if (page === 'skills') {
+                fetchSkillsPage();
             } else if (page === 'agents') {
                 fetchSwarmData();
             } else if (page === 'network') {
@@ -1592,6 +1874,13 @@
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 if (data.type === 'status') updateLiveStatus(data.data);
+                if (data.type === 'tasks_changed') {
+                    if (tasksWsDebounce) clearTimeout(tasksWsDebounce);
+                    tasksWsDebounce = setTimeout(() => {
+                        tasksWsDebounce = null;
+                        if (currentPage === 'tasks') loadTasks();
+                    }, 350);
+                }
             };
 
             ws.onclose = () => {
@@ -2042,9 +2331,158 @@
             return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
         }
 
+        function onboardingStepTitle(id) {
+            const m = {
+                inference: 'Inference & chat',
+                agent_tasks: 'Agent runtime',
+                p2p_peers: 'P2P peers',
+                job_marketplace: 'Job marketplace',
+                skills_registry: 'Skills registry',
+            };
+            return m[id] || id;
+        }
+
+        async function fetchOnboardingHome() {
+            const body = document.getElementById('home-onboarding-body');
+            if (!body) return;
+            try {
+                const r = await fetch('/api/onboarding');
+                const d = await r.json();
+                if (!d.steps || !d.steps.length) {
+                    body.innerHTML = '<p class="skills-empty">No onboarding data.</p>';
+                    return;
+                }
+                body.innerHTML = d.steps.map((s) => `
+                    <div class="onboarding-row">
+                        <span class="onboarding-dot ${s.ok ? 'ok' : 'no'}" title="${s.ok ? 'OK' : 'Needs attention'}"></span>
+                        <div>
+                            <div class="onboarding-title">${escHtml(onboardingStepTitle(s.id))}</div>
+                            <div class="onboarding-detail">${escHtml(s.detail)}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                body.innerHTML = '<p class="skills-empty">Could not load <code>/api/onboarding</code>.</p>';
+            }
+        }
+
+        function renderSkillRows(el, items, emptyMsg) {
+            if (!el) return;
+            if (!items || !items.length) {
+                el.innerHTML = `<p class="skills-empty">${escHtml(emptyMsg)}</p>`;
+                return;
+            }
+            el.innerHTML = items.map((s) => `
+                <div class="skill-row">
+                    <div class="skill-row-head">
+                        <strong>${escHtml(s.name)}</strong>
+                        <span class="skill-trust">${escHtml(s.trust)}</span>
+                        <span class="skill-ver">${escHtml(s.version || '')}</span>
+                    </div>
+                    <p class="skill-desc">${escHtml(s.description || '')}</p>
+                    <div class="skill-meta">${s.available ? 'Available' : 'Unavailable'} · ${escHtml((s.provider || '').slice(0, 24))}${s.price != null ? ' · price ' + s.price : ''}</div>
+                </div>
+            `).join('');
+        }
+
+        async function fetchSkillsPage() {
+            const locEl = document.getElementById('skills-local-list');
+            const netEl = document.getElementById('skills-network-list');
+            const mcpEl = document.getElementById('mcp-status-body');
+            const setupEl = document.getElementById('skills-setup-body');
+            try {
+                const [metaR, lr, nr, mr] = await Promise.all([
+                    fetch('/api/skills/meta'),
+                    fetch('/api/skills/local'),
+                    fetch('/api/skills/network'),
+                    fetch('/api/mcp/status'),
+                ]);
+                const meta = await metaR.json();
+                const local = await lr.json();
+                const network = await nr.json();
+                const mcp = await mr.json();
+                if (setupEl) {
+                    const regOk = meta.registry_attached;
+                    const stub = '---\nname: my-skill\nversion: 0.1.0\ndescription: Short summary for the model\n---\n\n## When to use\n…\n';
+                    setupEl.innerHTML = `
+                        <div class="skills-toolbar">
+                            <div class="skills-path-block">
+                                <strong style="color:var(--text-primary)">Skills directory</strong>
+                                <code>${escHtml(meta.skills_dir || '')}</code>
+                                <div style="margin-top:0.5rem"><strong style="color:var(--text-primary)">Config file</strong>
+                                <code>${escHtml(meta.config_path || '')}</code></div>
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:0.5rem;align-items:flex-start">
+                                <button type="button" class="btn btn-secondary" id="skills-rescan-btn" ${regOk ? '' : 'disabled'} title="${regOk ? '' : 'Registry only on full serve with web'}">Rescan disk</button>
+                                <span style="font-size:0.75rem;color:var(--text-secondary)">CLI: <code style="color:var(--accent)">${escHtml(meta.scan_cli || '')}</code></span>
+                            </div>
+                        </div>
+                        ${!regOk ? '<p class="skills-empty" style="margin:0">Skill registry is not attached on this server (e.g. dashboard-only stub). Use <code>peerclaw serve --web …</code> for a full node.</p>' : ''}
+                        <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0.5rem 0 0.35rem"><strong style="color:var(--text-primary)">Optional <code>config.toml</code></strong></p>
+                        <pre class="skills-snippet">${escHtml(meta.directory_toml_snippet || '')}</pre>
+                        <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0.85rem 0 0.35rem"><strong style="color:var(--text-primary)">Minimal <code>SKILL.md</code> front matter</strong></p>
+                        <pre class="skills-snippet">${escHtml(stub)}</pre>
+                        <div id="skills-scan-feedback" class="skills-scan-msg" aria-live="polite"></div>
+                    `;
+                    const btn = document.getElementById('skills-rescan-btn');
+                    const fb = document.getElementById('skills-scan-feedback');
+                    if (btn && regOk) {
+                        btn.onclick = async () => {
+                            if (fb) { fb.textContent = 'Scanning…'; fb.className = 'skills-scan-msg'; }
+                            try {
+                                const sr = await fetch('/api/skills/scan', { method: 'POST' });
+                                const j = await sr.json();
+                                if (j.ok) {
+                                    if (fb) { fb.textContent = 'Loaded ' + j.loaded + ' skill(s).'; fb.className = 'skills-scan-msg ok'; }
+                                    try {
+                                        const [lr2, nr2] = await Promise.all([
+                                            fetch('/api/skills/local'),
+                                            fetch('/api/skills/network'),
+                                        ]);
+                                        renderSkillRows(locEl, await lr2.json(), 'No local or installed skills. Add SKILL.md files under your skills directory.');
+                                        renderSkillRows(netEl, await nr2.json(), 'No peer-advertised skills yet. When peers gossip skill announcements, they appear here.');
+                                    } catch (_) { /* lists best-effort */ }
+                                } else {
+                                    if (fb) { fb.textContent = j.error || 'Scan failed'; fb.className = 'skills-scan-msg err'; }
+                                }
+                            } catch (err) {
+                                if (fb) { fb.textContent = 'Request failed: ' + err.message; fb.className = 'skills-scan-msg err'; }
+                            }
+                        };
+                    }
+                }
+                renderSkillRows(locEl, local, 'No local or installed skills. Add SKILL.md files under your skills directory.');
+                renderSkillRows(netEl, network, 'No peer-advertised skills yet. When peers gossip skill announcements, they appear here.');
+                if (mcpEl) {
+                    const srv = (mcp.config && mcp.config.servers) ? mcp.config.servers.length : 0;
+                    const cfgPath = mcp.config_path ? escHtml(mcp.config_path) : '';
+                    const snippet = mcp.mcp_toml_snippet ? escHtml(mcp.mcp_toml_snippet) : '';
+                    mcpEl.innerHTML = `
+                        <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0 0 0.5rem">Edit <strong style="color:var(--text-primary)">${cfgPath || 'config.toml'}</strong> and restart the node to apply MCP changes.</p>
+                        <div class="mcp-meta">
+                            <span>mode: ${escHtml(mcp.mode || '')}</span>
+                            <span>in-process core: ${mcp.in_core ? 'yes' : 'no'}</span>
+                            <span>servers in config: ${srv}</span>
+                            <span>timeout: ${mcp.config && mcp.config.timeout_secs != null ? mcp.config.timeout_secs + 's' : '—'}</span>
+                        </div>
+                        <p class="mcp-hint">${escHtml(mcp.hint || '')}</p>
+                        <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0.65rem 0 0.35rem"><strong style="color:var(--text-primary)">Example <code>[mcp]</code></strong></p>
+                        <pre class="skills-snippet">${snippet}</pre>
+                        <p class="mcp-hint" style="margin-top:0.5rem"><a href="${String(mcp.spec_url || 'https://modelcontextprotocol.io').replace(/"/g, '')}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">MCP specification →</a></p>
+                    `;
+                }
+            } catch (e) {
+                if (setupEl) setupEl.innerHTML = '<p class="skills-empty">Failed to load skills setup.</p>';
+                if (locEl) locEl.innerHTML = '<p class="skills-empty">Failed to load skills.</p>';
+                if (netEl) netEl.innerHTML = '<p class="skills-empty">Failed to load skills.</p>';
+                if (mcpEl) mcpEl.innerHTML = '<p class="skills-empty">Failed to load MCP status.</p>';
+            }
+        }
+
         // ---- Init ----
         function init() {
             fetchStatus();
+            fetchOnboardingHome();
             connectWebSocket();
             fetchJobs();
             fetchSwarmData();
@@ -2052,6 +2490,7 @@
             setInterval(fetchStatus, 10000);
             setInterval(fetchPeers, 15000);
             setInterval(fetchJobs, 20000);
+            setInterval(fetchOnboardingHome, 60000);
             setInterval(() => {
                 if (currentPage === 'agents') fetchSwarmData();
             }, 8000);
@@ -2124,6 +2563,38 @@
             return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
+        function escapeAttr(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function setTaskCopyButtonEnabled(on) {
+            const b = document.getElementById('task-copy-result-btn');
+            if (!b) return;
+            b.disabled = !on;
+            b.style.opacity = on ? '1' : '0.4';
+            b.style.cursor = on ? 'pointer' : 'not-allowed';
+        }
+
+        async function copyTaskResultToClipboard() {
+            const el = document.getElementById('task-detail-result');
+            const btn = document.getElementById('task-copy-result-btn');
+            if (!el || !btn || btn.disabled) return;
+            const text = el.textContent || '';
+            if (!text.trim()) return;
+            try {
+                await navigator.clipboard.writeText(text);
+                btn.classList.add('copied');
+                btn.textContent = 'Copied';
+                setTimeout(() => {
+                    btn.classList.remove('copied');
+                    btn.textContent = 'Copy';
+                }, 2000);
+            } catch (_) {
+                btn.textContent = 'Failed';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+            }
+        }
+
         function renderTasks() {
             const el = document.getElementById('task-list');
             document.getElementById('task-count').textContent = tasks.length + ' tasks';
@@ -2137,34 +2608,39 @@
                 const color = statusColors[t.status] || 'var(--text-secondary)';
                 const isSelected = t.id === selectedTaskId;
                 const selClass = isSelected ? ' selected' : '';
-                const hasResult = t.result && t.result.length > 0;
-                const resultPreview = hasResult ? escapeHtml(t.result.substring(0, 400)) + (t.result.length > 400 ? '...' : '') : '';
-                const showResult = (t.status === 'completed' || t.status === 'failed') && hasResult;
+                const hasResult = t.result != null && String(t.result).length > 0;
+                const fullResultEsc = hasResult ? escapeHtml(String(t.result)) : '';
+                const showResultBlock = hasResult;
                 const logCount = (t.logs || []).length;
-                const safeId = escapeHtml(t.id);
+                const idAttr = String(t.id).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                const descTitle = escapeAttr(t.description || '');
 
-                return `<div class="task-row${selClass}" data-task-id="${safeId}" tabindex="0" role="button">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.375rem">
-                        <span style="font-size:0.8125rem;font-weight:500">${escapeHtml(t.description.substring(0,100))}${t.description.length>100?'...':''}</span>
-                        <span style="font-size:0.6875rem;padding:0.125rem 0.5rem;border-radius:10px;background:${color}22;color:${color};white-space:nowrap;margin-left:0.5rem">${t.status}${t.status==='running'?' ...':''}</span>
+                return `<div class="task-row${selClass}" data-task-id="${idAttr}" tabindex="0" role="button">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem;margin-bottom:0.35rem">
+                        <div class="task-row-desc" title="${descTitle}">${escapeHtml(t.description || '')}</div>
+                        <span style="font-size:0.6875rem;padding:0.125rem 0.5rem;border-radius:10px;background:${color}22;color:${color};white-space:nowrap;flex-shrink:0;margin-top:0.1rem">${t.status}${t.status==='running'?' …':''}</span>
                     </div>
-                    <div style="font-size:0.6875rem;color:var(--text-secondary)">${t.task_type} | ${t.iterations} iters | ${t.tokens_used} tokens${t.status==='running'?' | '+logCount+' logs':''}</div>
-                    ${showResult ? `<div style="font-size:0.8125rem;color:var(--text-primary);background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:0.75rem;margin-top:0.5rem;white-space:pre-wrap;line-height:1.5;max-height:200px;overflow-y:auto">${resultPreview}</div>` : ''}
-                    ${t.status==='running' ? `<div class="task-live-hint" style="font-size:0.75rem;color:var(--accent);margin-top:0.375rem;display:flex;align-items:center;gap:0.375rem;pointer-events:none"><span class="status-dot" style="width:6px;height:6px;background:var(--accent)"></span> Open execution log below (${logCount} entries)</div>` : ''}
+                    <div style="font-size:0.6875rem;color:var(--text-secondary)">${escapeHtml(t.task_type || '')} · ${t.iterations} iters · ${t.tokens_used} tokens${t.status==='running'?' · '+logCount+' log lines':''}</div>
+                    ${showResultBlock ? `<div class="task-row-result">${fullResultEsc}</div><div class="task-row-result-hint">Scroll for full output · Click row for detail panel</div>` : ''}
+                    ${t.status==='running' ? `<div class="task-live-hint" style="font-size:0.75rem;color:var(--accent);margin-top:0.375rem;display:flex;align-items:center;gap:0.375rem;pointer-events:none"><span class="status-dot" style="width:6px;height:6px;background:var(--accent)"></span> Live logs in detail panel (${logCount} lines)</div>` : ''}
                 </div>`;
             }).join('');
 
             el.onclick = (e) => {
                 const row = e.target.closest('.task-row');
-                if (!row || !row.dataset.taskId) return;
-                showTaskDetail(row.dataset.taskId);
+                if (!row) return;
+                const tid = row.getAttribute('data-task-id');
+                if (!tid) return;
+                showTaskDetail(tid);
             };
             el.onkeydown = (e) => {
                 if (e.key !== 'Enter' && e.key !== ' ') return;
                 const row = e.target.closest('.task-row');
-                if (!row || !row.dataset.taskId) return;
+                if (!row) return;
+                const tid = row.getAttribute('data-task-id');
+                if (!tid) return;
                 e.preventDefault();
-                showTaskDetail(row.dataset.taskId);
+                showTaskDetail(tid);
             };
 
             // Auto-open detail for the latest task
@@ -2175,21 +2651,50 @@
         }
 
         async function showTaskDetail(id) {
+            if (id == null || String(id).trim() === '') {
+                console.warn('showTaskDetail: missing task id');
+                return;
+            }
             selectedTaskId = id;
             renderTasks();
             const panel = document.getElementById('task-detail-panel');
             const logsEl = document.getElementById('task-detail-logs');
             const resultEl = document.getElementById('task-detail-result');
+            if (!panel || !logsEl || !resultEl) return;
             try {
                 const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`);
-                const t = await res.json();
-                if (t.error) {
+                const raw = await res.text();
+                let t;
+                try {
+                    t = raw ? JSON.parse(raw) : null;
+                } catch (pe) {
+                    throw new Error('Server returned non-JSON (' + res.status + ')');
+                }
+                if (t == null || typeof t !== 'object' || Array.isArray(t)) {
                     panel.style.display = 'block';
                     document.getElementById('task-detail-title').textContent = 'Task';
                     document.getElementById('task-detail-status').innerHTML =
-                        '<span style="color:var(--danger)">Could not load task. It may have been cleared or the id is invalid.</span>';
+                        '<span style="color:var(--danger)">Invalid response from <code>/api/tasks/…</code> (empty or null). Try refreshing the task list.</span>';
                     resultEl.textContent = '';
                     logsEl.textContent = '';
+                    setTaskCopyButtonEnabled(false);
+                    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    return;
+                }
+                if (t.error) {
+                    panel.style.display = 'block';
+                    document.getElementById('task-detail-title').textContent = 'Task';
+                    const extra = t.message ? escapeHtml(String(t.message)) : '';
+                    document.getElementById('task-detail-status').innerHTML =
+                        '<span style="color:var(--danger)">' +
+                        (t.error === 'task_serialize_failed'
+                            ? 'Task data could not be encoded for display.'
+                            : 'Could not load task. It may have been cleared or the id is invalid.') +
+                        '</span>' +
+                        (extra ? '<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-secondary)">' + extra + '</div>' : '');
+                    resultEl.textContent = '';
+                    logsEl.textContent = '';
+                    setTaskCopyButtonEnabled(false);
                     panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                     return;
                 }
@@ -2206,32 +2711,33 @@
                     ${t.completed_at ? `<span style="font-size:0.6875rem;color:var(--text-secondary);margin-left:0.5rem">completed ${new Date(t.completed_at).toLocaleTimeString()}</span>` : ''}
                 `;
 
-                // Show full result (not truncated)
-                if (t.result) {
-                    resultEl.textContent = t.result;
-                    resultEl.style.display = 'block';
+                // Full result — scroll inside .task-detail-result-box (no truncation)
+                if (t.result != null && String(t.result).length > 0) {
+                    resultEl.textContent = typeof t.result === 'string' ? t.result : String(t.result);
+                    setTaskCopyButtonEnabled(true);
                 } else if (t.status === 'running') {
-                    resultEl.innerHTML = '<span style="color:var(--accent)">Agent is working on this task...</span>';
-                    resultEl.style.display = 'block';
+                    resultEl.innerHTML = '<span style="color:var(--accent)">Agent is working on this task…</span>';
+                    setTaskCopyButtonEnabled(false);
                 } else {
                     resultEl.textContent = 'No result yet';
-                    resultEl.style.display = 'block';
+                    setTaskCopyButtonEnabled(false);
                 }
 
                 // Logs: use text nodes so arbitrary log text cannot break HTML / clicks
-                const logs = t.logs || [];
+                const logs = Array.isArray(t.logs) ? t.logs : [];
                 logsEl.textContent = '';
                 if (logs.length) {
                     logs.forEach((l) => {
                         const line = document.createElement('div');
                         line.style.marginBottom = '0.25rem';
                         let logColor = 'var(--text-secondary)';
-                        if (l.includes('[tool]')) logColor = 'var(--purple)';
-                        else if (l.includes('Error')) logColor = 'var(--danger)';
-                        else if (l.includes('Completed')) logColor = 'var(--success)';
-                        else if (l.includes('started') || l.includes('iteration')) logColor = 'var(--accent)';
+                        const text = typeof l === 'string' ? l : String(l);
+                        if (text.includes('[tool]')) logColor = 'var(--purple)';
+                        else if (text.includes('Error')) logColor = 'var(--danger)';
+                        else if (text.includes('Completed')) logColor = 'var(--success)';
+                        else if (text.includes('started') || text.includes('iteration')) logColor = 'var(--accent)';
                         line.style.color = logColor;
-                        line.textContent = l;
+                        line.textContent = text;
                         logsEl.appendChild(line);
                     });
                     if (t.status === 'running') {
@@ -2248,8 +2754,15 @@
             } catch(e) {
                 console.error('showTaskDetail error:', e);
                 panel.style.display = 'block';
+                document.getElementById('task-detail-title').textContent = 'Task Detail';
                 document.getElementById('task-detail-status').innerHTML =
-                    '<span style="color:var(--danger)">Failed to load task detail.</span>';
+                    '<span style="color:var(--danger)">Failed to load task detail.</span>' +
+                    '<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-secondary)">' +
+                    escapeHtml(e.message || String(e)) +
+                    '</div>';
+                resultEl.textContent = '';
+                logsEl.textContent = '';
+                setTaskCopyButtonEnabled(false);
                 panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
         }
@@ -2339,10 +2852,13 @@
                 const tasksEl = document.getElementById('node-detail-tasks');
                 if (n.tasks && n.tasks.length) {
                     tasksEl.innerHTML = '<div style="font-size:0.75rem;font-weight:600;margin-bottom:0.5rem">Tasks</div>' +
-                        n.tasks.slice(0,5).map(t => `<div style="padding:0.375rem 0;border-bottom:1px solid var(--border);font-size:0.75rem">
-                            <span>${t.description.substring(0,40)}...</span>
-                            <span style="color:${t.status==='completed'?'var(--success)':'var(--warning)'};float:right">${t.status}</span>
-                        </div>`).join('');
+                        n.tasks.slice(0, 8).map(t => {
+                            const st = t.status === 'completed' ? 'var(--success)' : t.status === 'failed' ? 'var(--danger)' : 'var(--warning)';
+                            return `<div style="padding:0.45rem 0;border-bottom:1px solid var(--border);font-size:0.75rem;display:flex;justify-content:space-between;gap:0.5rem;align-items:flex-start">
+                                <span style="flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;line-height:1.45;word-break:break-word">${escapeHtml(t.description || '')}</span>
+                                <span style="color:${st};flex-shrink:0;font-size:0.6875rem">${escapeHtml(t.status || '')}</span>
+                            </div>`;
+                        }).join('');
                 } else {
                     tasksEl.innerHTML = '';
                 }
@@ -2359,6 +2875,7 @@
             origSwitchPage(page);
             if (page === 'tasks') { loadTasks(); }
             if (page === 'providers') { loadProviders(); }
+            if (page === 'skills') { fetchSkillsPage(); }
         };
 
         // Auto-refresh tasks - faster when tasks are running
