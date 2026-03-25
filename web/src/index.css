@@ -8,9 +8,8 @@
     --foreground: 0 0% 98%;
     --card: 240 5% 12%;
     --card-foreground: 0 0% 98%;
-    --popover: 240 5% 10%;
-    --popover-foreground: 0 0% 98%;
-    --popover: 240 5% 12%;
+    /* Solid panel for menus / popovers (opaque HSL components) */
+    --popover: 240 6% 8%;
     --popover-foreground: 0 0% 98%;
     --primary: 142 76% 42%;
     --primary-foreground: 144 100% 6%;

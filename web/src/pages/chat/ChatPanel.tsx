@@ -650,34 +650,10 @@ export function ChatPanel({ onRegisterControls }: Props) {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-card/20 px-3 md:px-4">
+      <header className="flex h-12 shrink-0 items-center border-b border-border/70 bg-card/20 px-3 md:px-4">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-foreground">Assistant</p>
           <p className="truncate text-[11px] text-muted-foreground">Streaming chat &amp; quick agent runs</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 max-w-[10rem] gap-1 border-border/80 px-2 font-normal">
-                <span className="truncate text-xs">{model}</span>
-                <ChevronDown className="size-3.5 shrink-0 opacity-50" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel className="text-xs">Model</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
-                {modelList.map((m) => (
-                  <DropdownMenuRadioItem key={m} value={m} className="text-xs">
-                    {m}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={openHelp}>
-            Help
-          </Button>
         </div>
       </header>
 
@@ -855,6 +831,30 @@ export function ChatPanel({ onRegisterControls }: Props) {
             >
               MCP
             </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 max-w-[11rem] gap-1 border-border/80 px-2 font-normal"
+                  title="Model for this chat"
+                >
+                  <span className="truncate text-xs">{model}</span>
+                  <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuLabel className="text-xs">Model</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
+                  {modelList.map((m) => (
+                    <DropdownMenuRadioItem key={m} value={m} className="text-xs">
+                      {m}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {composerMode === "agent" && (
               <>
                 <select

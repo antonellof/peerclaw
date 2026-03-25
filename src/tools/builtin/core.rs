@@ -171,7 +171,7 @@ impl Tool for JsonTool {
                 },
                 "input": {
                     "type": "string",
-                    "description": "JSON string to process"
+                    "description": "JSON to process: a JSON string, or an object/array (accepted as structured input). Markdown ```json … ``` fences are stripped automatically."
                 },
                 "query": {
                     "type": "string",
@@ -194,34 +194,38 @@ impl Tool for JsonTool {
         let start = Instant::now();
 
         let action = require_str(&params, "action")?;
-        let input = require_str(&params, "input")?;
+        let input_raw = json_tool_input_raw(&params)?;
 
         match action {
-            "parse" | "validate" => match serde_json::from_str::<serde_json::Value>(input) {
-                Ok(parsed) => {
-                    if action == "validate" {
-                        Ok(ToolOutput::success(
-                            serde_json::json!({ "valid": true, "type": value_type(&parsed) }),
-                            start.elapsed(),
-                        ))
-                    } else {
-                        Ok(ToolOutput::success(parsed, start.elapsed()))
+            "parse" | "validate" => {
+                let prepared = prepare_json_text(&input_raw);
+                match serde_json::from_str::<serde_json::Value>(&prepared) {
+                    Ok(parsed) => {
+                        if action == "validate" {
+                            Ok(ToolOutput::success(
+                                serde_json::json!({ "valid": true, "type": value_type(&parsed) }),
+                                start.elapsed(),
+                            ))
+                        } else {
+                            Ok(ToolOutput::success(parsed, start.elapsed()))
+                        }
+                    }
+                    Err(e) => {
+                        if action == "validate" {
+                            Ok(ToolOutput::success(
+                                serde_json::json!({ "valid": false, "error": e.to_string() }),
+                                start.elapsed(),
+                            ))
+                        } else {
+                            Err(invalid_json_tool_error(e, &prepared))
+                        }
                     }
                 }
-                Err(e) => {
-                    if action == "validate" {
-                        Ok(ToolOutput::success(
-                            serde_json::json!({ "valid": false, "error": e.to_string() }),
-                            start.elapsed(),
-                        ))
-                    } else {
-                        Err(ToolError::ExecutionFailed(format!("Invalid JSON: {}", e)))
-                    }
-                }
-            },
+            }
             "format" => {
-                let parsed: serde_json::Value = serde_json::from_str(input)
-                    .map_err(|e| ToolError::ExecutionFailed(format!("Invalid JSON: {}", e)))?;
+                let prepared = prepare_json_text(&input_raw);
+                let parsed: serde_json::Value = serde_json::from_str(&prepared)
+                    .map_err(|e| invalid_json_tool_error(e, &prepared))?;
 
                 let indent = params.get("indent").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
 
@@ -239,8 +243,9 @@ impl Tool for JsonTool {
                     ToolError::InvalidParameters("query required for query action".to_string())
                 })?;
 
-                let parsed: serde_json::Value = serde_json::from_str(input)
-                    .map_err(|e| ToolError::ExecutionFailed(format!("Invalid JSON: {}", e)))?;
+                let prepared = prepare_json_text(&input_raw);
+                let parsed: serde_json::Value = serde_json::from_str(&prepared)
+                    .map_err(|e| invalid_json_tool_error(e, &prepared))?;
 
                 // Simple dot-notation query (e.g., "user.name" or "items[0].id")
                 let result = json_query(&parsed, query)?;
@@ -264,6 +269,62 @@ impl Tool for JsonTool {
     fn requires_sanitization(&self) -> bool {
         false
     }
+}
+
+/// Models often pass `input` as a JSON object instead of a quoted string — accept both.
+fn json_tool_input_raw(params: &serde_json::Value) -> Result<String, ToolError> {
+    match params.get("input") {
+        Some(serde_json::Value::String(s)) => Ok(s.clone()),
+        Some(v) => Ok(v.to_string()),
+        None => Err(ToolError::InvalidParameters(
+            "input required for json tool".to_string(),
+        )),
+    }
+}
+
+/// Strip BOM, trim, and unwrap common ``` / ```json markdown fences from LLM output.
+fn prepare_json_text(raw: &str) -> String {
+    let mut s = raw.trim().to_string();
+    if s.starts_with('\u{feff}') {
+        s.remove(0);
+    }
+    let t = s.trim();
+    if !t.starts_with("```") {
+        return t.to_string();
+    }
+    let after_open = &t[3..];
+    let body = if let Some(nl) = after_open.find('\n') {
+        &after_open[nl + 1..]
+    } else {
+        after_open
+    };
+    let body = if let Some(end) = body.rfind("```") {
+        body[..end].trim()
+    } else {
+        body.trim()
+    };
+    body.to_string()
+}
+
+fn json_input_preview(prepared: &str, max: usize) -> String {
+    let collapsed: String = prepared
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let t = collapsed.trim();
+    if t.chars().count() <= max {
+        t.to_string()
+    } else {
+        format!("{}…", t.chars().take(max).collect::<String>())
+    }
+}
+
+fn invalid_json_tool_error(e: serde_json::Error, prepared: &str) -> ToolError {
+    let preview = json_input_preview(prepared, 140);
+    ToolError::ExecutionFailed(format!(
+        "Invalid JSON: {}. Normalized input starts: {:?} (pass raw JSON or a ```json``` block; not HTML or plain prose)",
+        e, preview
+    ))
 }
 
 fn value_type(v: &serde_json::Value) -> &'static str {
@@ -373,5 +434,33 @@ mod tests {
             .unwrap();
         assert!(result.success);
         assert_eq!(result.data, "alice");
+    }
+
+    #[tokio::test]
+    async fn test_json_parse_markdown_fence() {
+        let tool = JsonTool;
+        let ctx = ToolContext::local("test".to_string());
+        let fenced = "```json\n{\"x\": 1}\n```";
+        let result = tool
+            .execute(serde_json::json!({"action": "parse", "input": fenced}), &ctx)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.data["x"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_json_parse_object_input_not_string() {
+        let tool = JsonTool;
+        let ctx = ToolContext::local("test".to_string());
+        let result = tool
+            .execute(
+                serde_json::json!({"action": "parse", "input": {"k": "v"}}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.data["k"], "v");
     }
 }

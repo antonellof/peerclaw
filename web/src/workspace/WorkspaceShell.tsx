@@ -217,31 +217,28 @@ export function WorkspaceShell() {
               <BookOpen className="size-4 shrink-0" />
               {!sidebarCollapsed && <span className="ml-2">Help</span>}
             </Button>
-            {!sidebarCollapsed && (
-              <>
-                <div className="text-[11px] text-muted-foreground">
-                  <span className="text-primary">●</span> {peerLine}
-                </div>
-                <div className="mt-1 font-mono text-[11px] text-muted-foreground">{balanceLine}</div>
-              </>
-            )}
           </div>
         </aside>
 
         {/* Main */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/80 bg-card/30 px-3 md:hidden">
-            <Button variant="ghost" size="icon" className="size-9 shrink-0" onClick={() => setMobileNavOpen(true)}>
+          <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/80 bg-card/30 px-3 md:px-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9 shrink-0 md:hidden"
+              onClick={() => setMobileNavOpen(true)}
+            >
               <Menu className="size-5" />
             </Button>
-            <span className="truncate text-sm font-medium">{workspaceNavTitle(view)}</span>
-            <div className="ml-auto flex shrink-0 items-center gap-1">
-              <Button variant="ghost" size="sm" className="text-xs" onClick={() => setSettingsOpen(true)}>
-                Settings
-              </Button>
-              <Button variant="ghost" size="sm" className="text-xs" onClick={() => setHelpOpen(true)}>
-                Help
-              </Button>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{workspaceNavTitle(view)}</span>
+            <div className="flex shrink-0 flex-col items-end gap-0.5 text-right sm:flex-row sm:items-center sm:gap-3">
+              <div className="text-[11px] text-muted-foreground">
+                <span className="text-primary">●</span> {peerLine}
+              </div>
+              {balanceLine ? (
+                <div className="font-mono text-[11px] text-muted-foreground tabular-nums">{balanceLine}</div>
+              ) : null}
             </div>
           </header>
 
@@ -288,10 +285,6 @@ export function WorkspaceShell() {
               <Settings2 className="size-4" />
               Settings
             </Button>
-          </div>
-          <div className="mt-auto border-t border-border p-4 text-xs text-muted-foreground">
-            <div>{peerLine}</div>
-            <div className="mt-1 font-mono">{balanceLine}</div>
           </div>
         </DialogContent>
       </Dialog>

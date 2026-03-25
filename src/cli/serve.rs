@@ -590,7 +590,9 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                     }
                 });
 
-                let result = agent.run_task(&request.description).await;
+                let result = agent
+                    .run_task(&request.description, Some(&*request.cancel))
+                    .await;
 
                 // Stop the log syncer
                 log_syncer.abort();

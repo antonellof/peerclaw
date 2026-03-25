@@ -253,6 +253,8 @@ pub struct AgentTaskRequest {
     /// Shared task store so the agent can stream logs in real-time
     pub task_store: Arc<RwLock<Vec<WebTask>>>,
     pub ws_control_tx: broadcast::Sender<serde_json::Value>,
+    /// Cooperative stop (`POST /api/tasks/:id/stop`) — checked between ReAct iterations.
+    pub cancel: Arc<AtomicBool>,
 }
 
 /// Static UI: `PEERCLAW_WEB_DIST` if set and valid, else `web/dist` under the crate root (after `npm run build` in `web/`).
@@ -974,7 +976,8 @@ Output rules:
 }
 
 /// Upper bound on LLM↔tool rounds (avoids unbounded memory growth on the conversation).
-const AGENTIC_MAX_ITERS: u32 = 1024;
+/// Kept modest so web agent runs cannot spin for thousands of passes; raise only if needed.
+const AGENTIC_MAX_ITERS: u32 = 64;
 
 fn default_chat_agentic() -> bool {
     true
@@ -1161,7 +1164,9 @@ async fn run_unified_agentic_inference(
                             .execute_local(&call.name, call.args.clone(), &ctx)
                             .await
                         {
-                            Ok(r) => serde_json::to_string(&r)
+                            // Feed only `ToolOutput` into the loop — omit `executed_by` / P2P metadata
+                            // so logs and context stay readable.
+                            Ok(r) => serde_json::to_string(&r.output)
                                 .unwrap_or_else(|_| "(unserializable)".into()),
                             Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
                         }
@@ -2388,11 +2393,17 @@ async fn api_create_task(
             .unwrap_or(false);
 
     if let Some(tx) = &state.agent_task_tx {
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut m = state.agent_task_cancels.write().await;
+            m.insert(task_id.clone(), cancel.clone());
+        }
         let store = state.task_store.clone();
         let tid = task_id.clone();
         let description = req.description.clone();
         let tx = tx.clone();
         let ws_tx = state.ws_control_tx.clone();
+        let state_spawn = state.clone();
 
         tokio::spawn(async move {
             // Mark as running
@@ -2416,6 +2427,7 @@ async fn api_create_task(
                 response_tx,
                 task_store: store.clone(),
                 ws_control_tx: ws_tx.clone(),
+                cancel: cancel.clone(),
             };
 
             tracing::info!(task_id = %tid, "Sending task to agent runtime");
@@ -2424,38 +2436,55 @@ async fn api_create_task(
                 match tokio::time::timeout(std::time::Duration::from_secs(300), response_rx).await {
                     Ok(Ok(result)) => {
                         tracing::info!(task_id = %tid, success = result.success, "Task result received, updating store");
+                        let user_stop = result.error.as_deref() == Some("Stopped by user");
                         let mut tasks = store.write().await;
                         if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
                             t.status = if result.success {
                                 "completed".to_string()
+                            } else if user_stop {
+                                "cancelled".to_string()
                             } else {
                                 "failed".to_string()
                             };
                             t.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                            t.result = Some(result.answer);
+                            t.result = Some(if user_stop {
+                                "Stopped by user.".to_string()
+                            } else {
+                                result.answer
+                            });
                             t.tokens_used = result.total_tokens;
                             t.iterations = result.iterations;
                             if let Some(err) = &result.error {
-                                t.logs.push(format!(
-                                    "[{}] Error: {}",
-                                    chrono::Utc::now().format("%H:%M:%S"),
-                                    err
-                                ));
+                                if !user_stop {
+                                    t.logs.push(format!(
+                                        "[{}] Error: {}",
+                                        chrono::Utc::now().format("%H:%M:%S"),
+                                        err
+                                    ));
+                                } else {
+                                    t.logs.push(format!(
+                                        "[{}] {}",
+                                        chrono::Utc::now().format("%H:%M:%S"),
+                                        err
+                                    ));
+                                }
                             }
-                            t.logs.push(format!(
-                                "[{}] Completed: {} iterations, {} tokens, {:.4} PCLAW spent",
-                                chrono::Utc::now().format("%H:%M:%S"),
-                                result.iterations,
-                                result.total_tokens,
-                                result.budget_spent,
-                            ));
-                            for tc in &result.tool_calls {
+                            if !user_stop {
                                 t.logs.push(format!(
-                                    "[tool] {} -> {} ({} ms)",
-                                    tc.tool_name,
-                                    if tc.success { "ok" } else { "failed" },
-                                    tc.duration_ms,
+                                    "[{}] Completed: {} iterations, {} tokens, {:.4} PCLAW spent",
+                                    chrono::Utc::now().format("%H:%M:%S"),
+                                    result.iterations,
+                                    result.total_tokens,
+                                    result.budget_spent,
                                 ));
+                                for tc in &result.tool_calls {
+                                    t.logs.push(format!(
+                                        "[tool] {} -> {} ({} ms)",
+                                        tc.tool_name,
+                                        if tc.success { "ok" } else { "failed" },
+                                        tc.duration_ms,
+                                    ));
+                                }
                             }
                         }
                         broadcast_tasks_changed(&ws_tx);
@@ -2479,7 +2508,21 @@ async fn api_create_task(
                         broadcast_tasks_changed(&ws_tx);
                     }
                 }
+            } else {
+                tracing::error!(task_id = %tid, "Failed to send task to agent runtime channel");
+                let mut tasks = store.write().await;
+                if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
+                    t.status = "failed".to_string();
+                    t.completed_at = Some(chrono::Utc::now().to_rfc3339());
+                    t.result = Some("Could not queue task to agent runtime (channel closed)".to_string());
+                    t.logs.push(format!(
+                        "[{}] Failed to queue task",
+                        chrono::Utc::now().format("%H:%M:%S")
+                    ));
+                }
+                broadcast_tasks_changed(&ws_tx);
             }
+            state_spawn.agent_task_cancels.write().await.remove(&tid);
         });
     } else if agentic_ready {
         let cancel = Arc::new(AtomicBool::new(false));

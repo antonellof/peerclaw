@@ -3,6 +3,7 @@
 //! Implements a ReAct-style loop: LLM generates thoughts and tool calls,
 //! tools are executed, results fed back, until a final answer is produced.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -142,7 +143,14 @@ impl AgentRuntime {
     }
 
     /// Run a task through the agentic loop.
-    pub async fn run_task(&mut self, user_input: &str) -> AgentResult {
+    ///
+    /// When `stop` is set, it is polled at the start of each iteration (after the current LLM or
+    /// tool work finishes).
+    pub async fn run_task(
+        &mut self,
+        user_input: &str,
+        stop: Option<&AtomicBool>,
+    ) -> AgentResult {
         self.budget.new_request();
         let mut tool_calls = Vec::new();
         let mut iterations = 0u32;
@@ -160,6 +168,19 @@ impl AgentRuntime {
 
         loop {
             iterations += 1;
+
+            if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
+                self.log("Stopped by user").await;
+                return AgentResult {
+                    answer: self.extract_last_text(),
+                    tool_calls,
+                    iterations,
+                    total_tokens,
+                    budget_spent: self.budget.total_spent(),
+                    success: false,
+                    error: Some("Stopped by user".to_string()),
+                };
+            }
 
             if iterations > MAX_ITERATIONS {
                 self.log("Max iterations reached, returning partial result")
@@ -275,6 +296,19 @@ impl AgentRuntime {
 
             // Execute tool calls
             for call in parsed_calls {
+                if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
+                    self.log("Stopped by user").await;
+                    return AgentResult {
+                        answer: self.extract_last_text(),
+                        tool_calls,
+                        iterations,
+                        total_tokens,
+                        budget_spent: self.budget.total_spent(),
+                        success: false,
+                        error: Some("Stopped by user".to_string()),
+                    };
+                }
+
                 self.log(&format!(
                     "Calling tool: {} with args: {}",
                     call.name, call.args
