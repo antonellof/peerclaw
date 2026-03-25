@@ -420,35 +420,6 @@ impl Default for ModelRegistry {
     }
 }
 
-/// Guard that releases model reference when dropped.
-struct ModelUseGuard<'a> {
-    cache: &'a ModelCache,
-    model_id: String,
-}
-
-impl<'a> ModelUseGuard<'a> {
-    fn new(cache: &'a ModelCache, model_id: &str) -> Self {
-        Self {
-            cache,
-            model_id: model_id.to_string(),
-        }
-    }
-}
-
-impl<'a> Drop for ModelUseGuard<'a> {
-    fn drop(&mut self) {
-        let _cache = self.cache;
-        let model_id = self.model_id.clone();
-
-        // We need to spawn because Drop is sync
-        tokio::spawn(async move {
-            // Can't actually call release here due to lifetime issues
-            // This would need a redesign for proper ref counting
-            let _ = model_id;
-        });
-    }
-}
-
 /// Inference engine configuration.
 #[derive(Debug, Clone)]
 pub struct InferenceConfig {

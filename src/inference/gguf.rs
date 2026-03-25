@@ -398,20 +398,33 @@ impl GgufBackend for LlamaCppBackend {
 
         tracing::debug!(token_count = tokens.len(), "Tokenized prompt");
 
-        // Create batch and add prompt tokens
-        let mut batch = LlamaBatch::new(512, 1);
-
-        for (i, token) in tokens.iter().enumerate() {
-            let is_last = i == tokens.len() - 1;
-            batch.add(*token, i as i32, &[0], is_last).map_err(|e| {
-                GgufError::GenerationFailed(format!("Failed to add token to batch: {:?}", e))
-            })?;
+        if tokens.len() as u32 >= self.config.n_ctx {
+            return Err(GgufError::ContextSizeExceeded {
+                max: self.config.n_ctx,
+                requested: tokens.len() as u32,
+            });
         }
 
-        // Decode the prompt
-        ctx.decode(&mut batch).map_err(|e| {
-            GgufError::GenerationFailed(format!("Failed to decode prompt: {:?}", e))
-        })?;
+        let n_batch = self.config.n_batch as usize;
+        let mut batch = LlamaBatch::new(n_batch, 1);
+
+        // Feed prompt in chunks of n_batch (llama.cpp requires n_tokens <= n_batch per decode call).
+        let chunks: Vec<&[llama_cpp_2::token::LlamaToken]> = tokens.chunks(n_batch).collect();
+        let mut pos = 0i32;
+        for (chunk_idx, chunk) in chunks.iter().enumerate() {
+            batch.clear();
+            let is_last_chunk = chunk_idx == chunks.len() - 1;
+            for (j, token) in chunk.iter().enumerate() {
+                let is_last_token = is_last_chunk && j == chunk.len() - 1;
+                batch.add(*token, pos, &[0], is_last_token).map_err(|e| {
+                    GgufError::GenerationFailed(format!("Failed to add token to batch: {:?}", e))
+                })?;
+                pos += 1;
+            }
+            ctx.decode(&mut batch).map_err(|e| {
+                GgufError::GenerationFailed(format!("Failed to decode prompt chunk: {:?}", e))
+            })?;
+        }
 
         let ttfb = start.elapsed();
 
@@ -538,20 +551,33 @@ impl GgufBackend for LlamaCppBackend {
             .str_to_token(&request.prompt, AddBos::Always)
             .map_err(|e| GgufError::TokenizationFailed(format!("{:?}", e)))?;
 
-        // Create batch and add prompt tokens
-        let mut batch = LlamaBatch::new(512, 1);
-
-        for (i, token) in tokens.iter().enumerate() {
-            let is_last = i == tokens.len() - 1;
-            batch.add(*token, i as i32, &[0], is_last).map_err(|e| {
-                GgufError::GenerationFailed(format!("Failed to add token to batch: {:?}", e))
-            })?;
+        if tokens.len() as u32 >= self.config.n_ctx {
+            return Err(GgufError::ContextSizeExceeded {
+                max: self.config.n_ctx,
+                requested: tokens.len() as u32,
+            });
         }
 
-        // Decode the prompt
-        ctx.decode(&mut batch).map_err(|e| {
-            GgufError::GenerationFailed(format!("Failed to decode prompt: {:?}", e))
-        })?;
+        let n_batch = self.config.n_batch as usize;
+        let mut batch = LlamaBatch::new(n_batch, 1);
+
+        // Feed prompt in chunks of n_batch.
+        let chunks: Vec<&[llama_cpp_2::token::LlamaToken]> = tokens.chunks(n_batch).collect();
+        let mut pos = 0i32;
+        for (chunk_idx, chunk) in chunks.iter().enumerate() {
+            batch.clear();
+            let is_last_chunk = chunk_idx == chunks.len() - 1;
+            for (j, token) in chunk.iter().enumerate() {
+                let is_last_token = is_last_chunk && j == chunk.len() - 1;
+                batch.add(*token, pos, &[0], is_last_token).map_err(|e| {
+                    GgufError::GenerationFailed(format!("Failed to add token to batch: {:?}", e))
+                })?;
+                pos += 1;
+            }
+            ctx.decode(&mut batch).map_err(|e| {
+                GgufError::GenerationFailed(format!("Failed to decode prompt chunk: {:?}", e))
+            })?;
+        }
 
         let ttfb = start.elapsed();
 
