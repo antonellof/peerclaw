@@ -115,6 +115,74 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 
 ---
 
+## Screenshots
+
+### Chat — Unified assistant with quick-start templates
+
+Clean composer with mode/model dropdowns, slash commands, and one-click templates for research, code review, trip planning, and more.
+
+<p align="center">
+  <img src="docs/screenshots/chat.png" alt="Chat interface with quick-start templates" width="720" />
+</p>
+
+### Chat — Agent settings & inference controls
+
+The mode dropdown lets you switch between streaming chat and background agent tasks. Tools, MCP, temperature, max tokens, and distributed inference are all accessible from a single menu.
+
+<p align="center">
+  <img src="docs/screenshots/chat-agent-settings.png" alt="Agent mode dropdown with settings submenu" width="720" />
+</p>
+
+### P2P Network — Peer topology & connections
+
+Interactive graph of connected peers with mDNS/Kademlia status, dial-by-multiaddr, and a filterable peer list. Each node is clickable for details.
+
+<p align="center">
+  <img src="docs/screenshots/p2p-peers.png" alt="P2P network topology with connected peers" width="720" />
+</p>
+
+### P2P Network — Node detail panel
+
+Click any node in the topology to inspect its state, peer ID, task history, and success rate.
+
+<p align="center">
+  <img src="docs/screenshots/p2p-node-info.png" alt="Node detail panel showing state and tasks" width="720" />
+</p>
+
+### Settings — Inference backends
+
+Configure Ollama, local GGUF models, and remote OpenAI-compatible APIs. Priority order: Remote API > Local GGUF > Ollama. Changes persist to `config.toml`.
+
+<p align="center">
+  <img src="docs/screenshots/settings-inference.png" alt="Inference settings dialog" width="720" />
+</p>
+
+### Settings — Workspace panels
+
+Quick navigation to all console panels — Home, Jobs, Providers, Skills, MCP servers, and P2P Network.
+
+<p align="center">
+  <img src="docs/screenshots/settings-workspace.png" alt="Workspace settings with panel shortcuts" width="720" />
+</p>
+
+### MCP — Server configuration
+
+Edit MCP server JSON directly in the dashboard. Stdio servers need `command` and `args`. Apply to connect, then enable MCP in chat to use the tools.
+
+<p align="center">
+  <img src="docs/screenshots/mcp-servers.png" alt="MCP server configuration panel" width="720" />
+</p>
+
+### Skills — Studio editor
+
+Create and edit `SKILL.md` prompt extensions with AI-assisted drafting. Select a model, write instructions, and let AI review or expand your skill before saving.
+
+<p align="center">
+  <img src="docs/screenshots/skills.png" alt="Skill studio editor with AI assist" width="720" />
+</p>
+
+---
+
 ## Quick Start
 
 ### Install
@@ -329,6 +397,11 @@ peerclaw job cancel <id>          # Cancel pending job
 ```bash
 peerclaw test inference           # Test local inference
 peerclaw test cluster --nodes 3   # Spawn test cluster
+peerclaw test cluster --nodes 5 --keep-alive  # Keep cluster running for dashboard testing
+
+# Or use the shell script for incremental node spin-up (visible in dashboard)
+./scripts/run_agents.sh           # 5 nodes, 3s between each
+./scripts/run_agents.sh 10 2      # 10 nodes, 2s delay
 ```
 
 ---
