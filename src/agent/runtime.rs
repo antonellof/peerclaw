@@ -727,6 +727,18 @@ fn re_inline_tool_call() -> &'static Regex {
     })
 }
 
+/// Matches bare `tool_name args: {json}` without the `name:` prefix.
+/// Small models often drop the `name:` prefix entirely.
+fn re_bare_tool_call() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        // Match `tool_name args: {json}` or `tool_name\nargs: {json}` at start of line.
+        // Tool names must contain an underscore or colon (MCP) to reduce false positives.
+        Regex::new(r#"(?m)^[ \t]*([\w]+(?:[_:][\w]+)+)\s+args:\s*(\{[^\n]*\})"#)
+            .expect("regex")
+    })
+}
+
 /// Parse inline `name: X args: {...}` lines that small models emit without `<tool_call>` wrappers.
 fn parse_inline_tool_calls(text: &str) -> Vec<ParsedToolCall> {
     let mut calls = Vec::new();
@@ -739,6 +751,19 @@ fn parse_inline_tool_calls(text: &str) -> Vec<ParsedToolCall> {
                     name: n.as_str().to_string(),
                     args,
                 });
+            }
+        }
+    }
+    // Fall back to bare `tool_name args: {json}` format (no `name:` prefix).
+    if calls.is_empty() {
+        for cap in re_bare_tool_call().captures_iter(text) {
+            if let (Some(n), Some(a)) = (cap.get(1), cap.get(2)) {
+                if let Ok(args) = serde_json::from_str::<serde_json::Value>(a.as_str()) {
+                    calls.push(ParsedToolCall {
+                        name: n.as_str().to_string(),
+                        args,
+                    });
+                }
             }
         }
     }
@@ -843,8 +868,11 @@ pub fn extract_answer(text: &str) -> String {
     result = re_strip_loose_pseudo_tools()
         .replace_all(&result, "")
         .to_string();
-    // Strip inline `name: X args: {...}` lines that small models emit.
+    // Strip inline `name: X args: {...}` and bare `tool_name args: {...}` lines.
     result = re_inline_tool_call()
+        .replace_all(&result, "")
+        .to_string();
+    result = re_bare_tool_call()
         .replace_all(&result, "")
         .to_string();
 
@@ -1017,5 +1045,48 @@ More text."#;
         assert!(answer.contains("Here is info."));
         assert!(answer.contains("Final answer."));
         assert!(!answer.contains("web_fetch"));
+    }
+
+    #[test]
+    fn test_parse_bare_tool_call() {
+        let text = "I'll search for that.\n\nmemory_search args: {\"query\": \"cat food\"}\n";
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "memory_search");
+        assert_eq!(calls[0].args["query"], "cat food");
+    }
+
+    #[test]
+    fn test_parse_bare_tool_call_multiple() {
+        let text = "Let me fetch multiple sources.\nweb_fetch args: {\"url\": \"https://a.example\"}\nweb_fetch args: {\"url\": \"https://b.example\"}";
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "web_fetch");
+        assert_eq!(calls[1].args["url"], "https://b.example");
+    }
+
+    #[test]
+    fn test_parse_bare_tool_call_mcp_colon() {
+        let text = "server:tool_name args: {\"key\": \"val\"}";
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "server:tool_name");
+    }
+
+    #[test]
+    fn test_extract_answer_strips_bare_tool_calls() {
+        let text = "Here is info.\n\nmemory_search args: {\"query\": \"test\"}\n\nFinal answer.";
+        let answer = extract_answer(text);
+        assert!(answer.contains("Here is info."));
+        assert!(answer.contains("Final answer."));
+        assert!(!answer.contains("memory_search"));
+    }
+
+    #[test]
+    fn test_bare_tool_call_no_false_positive_single_word() {
+        // Single words without underscores or colons should NOT match
+        let text = "Hello args: {\"key\": \"value\"}";
+        let calls = parse_tool_calls(text);
+        assert!(calls.is_empty());
     }
 }
