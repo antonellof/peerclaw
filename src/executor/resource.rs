@@ -64,7 +64,8 @@ impl ResourceMonitor {
                 current_state.ram_total_mb = ram_total_mb;
                 current_state.ram_available_mb = ram_available_mb;
 
-                // TODO: Add GPU monitoring via nvml-wrapper or Metal APIs
+                // GPU monitoring — best-effort, no external crate needed.
+                current_state.gpu_usage = probe_gpu_usage();
             }
         })
     }
@@ -211,6 +212,44 @@ impl ResourceState {
     /// Check if a model is loaded.
     pub fn has_model(&self, model_id: &str) -> bool {
         self.loaded_models.iter().any(|m| m == model_id)
+    }
+}
+
+/// Best-effort GPU utilization probe (no external crate).
+fn probe_gpu_usage() -> Option<f64> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("ioreg")
+            .args(["-r", "-d", "1", "-c", "IOAccelerator"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let line = line.trim();
+            if line.contains("GPU Activity(%)") || line.contains("Device Utilization %") {
+                if let Some(eq) = line.find('=') {
+                    let val = line[eq + 1..].trim().trim_matches('"');
+                    if let Ok(pct) = val.parse::<f64>() {
+                        return Some((pct / 100.0).clamp(0.0, 1.0));
+                    }
+                }
+            }
+        }
+        None
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let out = std::process::Command::new("nvidia-smi")
+            .args(["--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let val = text.trim().lines().next()?.trim().parse::<f64>().ok()?;
+        Some((val / 100.0).clamp(0.0, 1.0))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
     }
 }
 

@@ -27,6 +27,16 @@ pub enum NodeToolCommand {
         job_id: String,
         reply: oneshot::Sender<Result<serde_json::Value, String>>,
     },
+    /// Query the connected P2P peers from the network layer.
+    QueryPeers {
+        reply: oneshot::Sender<Vec<serde_json::Value>>,
+    },
+    /// Query the local wallet balance (and optionally transaction history).
+    QueryWallet {
+        include_history: bool,
+        history_limit: usize,
+        reply: oneshot::Sender<serde_json::Value>,
+    },
 }
 
 pub type NodeToolTx = mpsc::Sender<NodeToolCommand>;
@@ -61,4 +71,34 @@ pub async fn describe_p2p_job_via_node(
         .map_err(|_| "node tool channel closed".to_string())?;
     rx.await
         .map_err(|_| "node dropped job status reply".to_string())?
+}
+
+/// Query connected peers from the running node.
+pub async fn query_peers_via_node(
+    tx: &NodeToolTx,
+) -> Result<Vec<serde_json::Value>, String> {
+    let (reply, rx) = oneshot::channel();
+    tx.send(NodeToolCommand::QueryPeers { reply })
+        .await
+        .map_err(|_| "node tool channel closed".to_string())?;
+    rx.await
+        .map_err(|_| "node dropped peers reply".to_string())
+}
+
+/// Query wallet balance from the running node.
+pub async fn query_wallet_via_node(
+    tx: &NodeToolTx,
+    include_history: bool,
+    history_limit: usize,
+) -> Result<serde_json::Value, String> {
+    let (reply, rx) = oneshot::channel();
+    tx.send(NodeToolCommand::QueryWallet {
+        include_history,
+        history_limit,
+        reply,
+    })
+    .await
+    .map_err(|_| "node tool channel closed".to_string())?;
+    rx.await
+        .map_err(|_| "node dropped wallet reply".to_string())
 }

@@ -1,4 +1,5 @@
 import {
+  apiUrl,
   fetchJobs,
   fetchMcpStatus,
   fetchPeers,
@@ -23,7 +24,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { cmd: "/model", desc: "Show or switch model", args: "[name]", category: "Model" },
   { cmd: "/temperature", desc: "Set temperature", args: "<0-2>", category: "Model" },
   { cmd: "/max-tokens", desc: "Set max tokens", args: "<n>", category: "Model" },
-  { cmd: "/tools", desc: "List tools (stub)", category: "Tools" },
+  { cmd: "/tools", desc: "List available tools", category: "Tools" },
   { cmd: "/skills", desc: "List skills", category: "Skills" },
   { cmd: "/skill", desc: "Skill info", args: "info <name>", category: "Skills" },
   { cmd: "/mcp", desc: "MCP status", category: "Tools" },
@@ -173,12 +174,18 @@ Active jobs: ${status.active_jobs}`
       return `Current max tokens: ${ctx.settings.maxTokens}`
 
     case "tools":
-    case "tool":
-      return `Available tools (stub):
-  • calculator — arithmetic
-  • http_fetch — URLs
-  • file_read — local files
-Use /tool info <name> when wired to the API.`
+    case "tool": {
+      try {
+        const r = await fetch(apiUrl("/api/tools"))
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const j = await r.json() as { tools: { name: string; description: string; location: string }[]; count: number }
+        if (!j.tools.length) return "No tools available (start node with `peerclaw serve`)."
+        const lines = j.tools.map((t: { name: string; description: string }) => `  • **${t.name}** — ${t.description}`)
+        return `**${j.count} tools available:**\n${lines.join("\n")}`
+      } catch {
+        return "Could not fetch tools (node not running?)."
+      }
+    }
 
     case "skills":
     case "skill":

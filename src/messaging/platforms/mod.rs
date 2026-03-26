@@ -5,11 +5,13 @@
 
 mod p2p;
 mod repl;
+mod telegram;
 mod webhook;
 
 // Re-export platform implementations
 pub use p2p::P2pChannel;
 pub use repl::ReplChannel;
+pub use telegram::TelegramChannel;
 pub use webhook::WebhookChannel;
 
 // Platform channel stubs (would be WASM modules in production)
@@ -103,19 +105,22 @@ pub fn create_channel(config: ChannelConfig) -> Result<Box<dyn Channel>, Channel
         Platform::Webhook => Ok(Box::new(WebhookChannel::new(config))),
         Platform::P2p => Ok(Box::new(P2pChannel::new(config))),
         Platform::Telegram => {
-            // Would load WASM module or use native implementation
-            Err(ChannelError::PlatformError(
-                "Telegram channel requires WASM module or native implementation".into(),
-            ))
+            TelegramChannel::new(config).map(|ch| Box::new(ch) as Box<dyn Channel>)
         }
         Platform::Discord => Err(ChannelError::PlatformError(
-            "Discord channel requires WASM module or native implementation".into(),
+            "Discord channel requires the ironclaw adapter (ironclaw/channels-src/discord). \
+             Install it with `peerclaw skill install ironclaw-discord` or use a webhook channel instead."
+                .into(),
         )),
         Platform::Slack => Err(ChannelError::PlatformError(
-            "Slack channel requires WASM module or native implementation".into(),
+            "Slack channel requires the ironclaw adapter (ironclaw/channels-src/slack). \
+             Install it with `peerclaw skill install ironclaw-slack` or use a webhook channel instead."
+                .into(),
         )),
         Platform::Matrix => Err(ChannelError::PlatformError(
-            "Matrix channel requires WASM module or native implementation".into(),
+            "Matrix channel requires the ironclaw adapter (ironclaw/channels-src/matrix). \
+             Install it with `peerclaw skill install ironclaw-matrix` or use a webhook channel instead."
+                .into(),
         )),
         Platform::WebSocket => {
             // WebSocket is handled by the web module
@@ -166,7 +171,8 @@ mod tests {
     }
 
     #[test]
-    fn test_create_telegram_channel_fails() {
+    fn test_create_telegram_channel_requires_settings() {
+        // Without settings, creation should fail with a clear error
         let config = ChannelConfig {
             platform: Platform::Telegram,
             name: "test".to_string(),
@@ -175,5 +181,42 @@ mod tests {
 
         let channel = create_channel(config);
         assert!(channel.is_err());
+    }
+
+    #[test]
+    fn test_create_telegram_channel_with_token() {
+        let config = ChannelConfig {
+            platform: Platform::Telegram,
+            name: "test".to_string(),
+            settings: serde_json::json!({
+                "bot_token": "123456:ABC-DEF",
+                "allowed_chats": [],
+                "parse_mode": "Markdown"
+            }),
+            ..Default::default()
+        };
+
+        let channel = create_channel(config);
+        assert!(channel.is_ok());
+    }
+
+    #[test]
+    fn test_discord_returns_ironclaw_message() {
+        let config = ChannelConfig {
+            platform: Platform::Discord,
+            name: "test".to_string(),
+            ..Default::default()
+        };
+
+        match create_channel(config) {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("ironclaw"),
+                    "Error should mention ironclaw adapter: {msg}"
+                );
+            }
+            Ok(_) => panic!("Discord channel should not be created without ironclaw"),
+        }
     }
 }

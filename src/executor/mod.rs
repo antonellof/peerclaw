@@ -693,18 +693,79 @@ impl TaskExecutor {
         Ok(TaskData::WebSearch(WebSearchResult { results: vec![] }))
     }
 
-    /// Execute WASM tool locally.
+    /// Execute WASM tool locally via the Wasmtime sandbox.
     async fn execute_wasm_local(&self, task: WasmTask) -> Result<TaskData, ExecutorError> {
-        // TODO: Implement via wasm sandbox module
+        use crate::wasm::host::HostCapabilities;
+        use crate::wasm::{SandboxConfig, WasmSandbox};
+
         tracing::info!(
             tool_hash = %task.tool_hash,
             function = %task.function,
-            "Would execute WASM tool"
+            "Executing WASM tool locally"
+        );
+
+        // Build sandbox config from the task limits
+        let sandbox_config = SandboxConfig {
+            max_memory_bytes: 256 * 1024 * 1024, // 256 MB default
+            fuel_limit: task.max_fuel,
+            timeout: std::time::Duration::from_secs(task.timeout_secs as u64),
+        };
+
+        let sandbox = WasmSandbox::new(sandbox_config)
+            .map_err(|e| ExecutorError::WasmError(format!("Failed to create sandbox: {e}")))?;
+
+        // Resolve the WASM binary: look up by tool_hash in the tools directory
+        let tools_dir = crate::bootstrap::base_dir().join("tools");
+        let hash_prefix = &task.tool_hash[..16.min(task.tool_hash.len())];
+        let wasm_path = tools_dir.join(format!("{hash_prefix}.wasm"));
+
+        let wasm_bytes = tokio::fs::read(&wasm_path).await.map_err(|e| {
+            ExecutorError::WasmError(format!(
+                "Failed to read WASM module at {}: {e}",
+                wasm_path.display()
+            ))
+        })?;
+
+        // Compile the module
+        let module = sandbox
+            .compile(&wasm_bytes)
+            .map_err(|e| ExecutorError::WasmError(format!("WASM compilation failed: {e}")))?;
+
+        // Map task capabilities to host capabilities
+        let mut capabilities = HostCapabilities::minimal();
+        if task.capabilities.network_access {
+            capabilities.network_access = true;
+            for host in &task.capabilities.allowed_hosts {
+                capabilities.allowed_hosts.insert(host.clone());
+            }
+        }
+        if task.capabilities.filesystem_read {
+            capabilities.filesystem_read = true;
+        }
+        if task.capabilities.filesystem_write {
+            capabilities.filesystem_write = true;
+        }
+
+        // Execute in a blocking task since wasmtime is synchronous
+        let function = task.function.clone();
+        let params = task.params.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            sandbox.execute(&module, &function, params, capabilities)
+        })
+        .await
+        .map_err(|e| ExecutorError::WasmError(format!("WASM task panicked: {e}")))?
+        .map_err(|e| ExecutorError::WasmError(e.to_string()))?;
+
+        tracing::info!(
+            tool_hash = %task.tool_hash,
+            fuel_consumed = result.fuel_consumed,
+            memory_peak = result.memory_peak_bytes,
+            "WASM tool execution completed"
         );
 
         Ok(TaskData::Wasm(WasmResult {
-            value: serde_json::json!({"status": "not_implemented"}),
-            fuel_consumed: 0,
+            value: result.value,
+            fuel_consumed: result.fuel_consumed,
         }))
     }
 

@@ -180,6 +180,16 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
 
     let (node_tool_tx, mut node_tool_rx) = mpsc::channel::<crate::tools::NodeToolCommand>(64);
 
+    // Create job broadcast channel so JobManager can publish to GossipSub
+    let (job_broadcast_tx, mut job_broadcast_rx) =
+        mpsc::channel::<crate::job::JobBroadcast>(64);
+    runtime
+        .job_manager
+        .write()
+        .await
+        .set_broadcast_tx(job_broadcast_tx)
+        .await;
+
     // Create swarm manager for agent visualization
     let swarm_manager = Arc::new(crate::swarm::SwarmManager::new(
         crate::swarm::SwarmManagerConfig {
@@ -558,6 +568,58 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         .ok_or_else(|| "job not found".to_string());
                     let _ = reply.send(res);
                 }
+                NodeToolCommand::QueryPeers { reply } => {
+                    let network = runtime.network.read().await;
+                    let connected = network.connected_peers();
+                    let peers_json: Vec<serde_json::Value> = connected
+                        .iter()
+                        .map(|pid| {
+                            serde_json::json!({
+                                "peer_id": pid.to_string(),
+                                "is_local": false,
+                            })
+                        })
+                        .collect();
+                    let _ = reply.send(peers_json);
+                }
+                NodeToolCommand::QueryWallet { include_history, history_limit, reply } => {
+                    let bal = runtime.wallet.balance().await;
+                    let mut result = serde_json::json!({
+                        "peer_id": runtime.local_peer_id.to_string(),
+                        "balance": {
+                            "available": crate::wallet::from_micro(bal.available),
+                            "locked": crate::wallet::from_micro(bal.in_escrow),
+                            "staked": crate::wallet::from_micro(bal.staked),
+                            "total": crate::wallet::from_micro(bal.total),
+                            "unit": "PCLAW",
+                        },
+                    });
+                    if include_history {
+                        let txns = runtime.wallet.transactions(history_limit).await;
+                        let txn_json: Vec<serde_json::Value> = txns
+                            .iter()
+                            .map(|t| {
+                                serde_json::json!({
+                                    "id": t.id.0,
+                                    "type": t.tx_type.to_string(),
+                                    "amount": crate::wallet::from_micro(t.amount),
+                                    "direction": format!("{:?}", t.direction),
+                                    "timestamp": t.timestamp.to_rfc3339(),
+                                })
+                            })
+                            .collect();
+                        result["transactions"] = serde_json::json!(txn_json);
+                    }
+                    let _ = reply.send(result);
+                }
+            }
+        }
+
+        // Drain job broadcasts from the JobManager and publish on the network
+        while let Ok(broadcast) = job_broadcast_rx.try_recv() {
+            let mut network = runtime.network.write().await;
+            if let Err(e) = network.publish(&broadcast.topic, broadcast.data) {
+                tracing::warn!(topic = %broadcast.topic, error = %e, "Failed to publish job broadcast");
             }
         }
 

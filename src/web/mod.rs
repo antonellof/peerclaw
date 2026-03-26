@@ -300,6 +300,7 @@ fn api_router() -> Router<Arc<WebState>> {
         .route("/peers/network", get(api_peers_network))
         .route("/peers", get(api_peers))
         .route("/jobs", get(api_jobs))
+        .route("/tools", get(api_tools))
         .route("/skills/local", get(api_skills_local))
         .route("/skills/network", get(api_skills_network))
         .route("/skills/meta", get(api_skills_meta))
@@ -1617,6 +1618,25 @@ async fn api_peers_dial(
 async fn api_jobs(State(state): State<Arc<WebState>>) -> Json<Vec<WebJobInfo>> {
     let jobs = state.job_list.read().await;
     Json(jobs.clone())
+}
+
+/// GET /api/tools — list available tools from the node's ToolRegistry.
+async fn api_tools(State(state): State<Arc<WebState>>) -> Json<serde_json::Value> {
+    let Some(registry) = &state.tools else {
+        return Json(serde_json::json!({ "tools": [], "hint": "No tool registry (node not started with serve)" }));
+    };
+    let infos = registry.list_tools().await;
+    let tools: Vec<serde_json::Value> = infos
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "name": t.name,
+                "description": t.description,
+                "location": format!("{:?}", t.location),
+            })
+        })
+        .collect();
+    Json(serde_json::json!({ "tools": tools, "count": tools.len() }))
 }
 
 #[derive(Deserialize)]

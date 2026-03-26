@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 use serde::Serialize;
 
 use super::parser::{parse_skill, ParseError};
-use super::{LoadedSkill, SkillAnnouncement, SkillSource, SkillTrust};
+use super::{LoadedSkill, SkillAnnouncement, SkillAnnouncementBatch, SkillSource, SkillTrust};
 
 /// Skill registry manages local and network skills.
 pub struct SkillRegistry {
@@ -200,6 +200,59 @@ impl SkillRegistry {
             true
         } else {
             false
+        }
+    }
+
+    /// Build a signed skill announcement batch for publishing to the network.
+    ///
+    /// Only includes skills that have `sharing.enabled = true`.
+    /// The caller should serialize the result and publish it to the
+    /// `peerclaw/skills/v1` GossipSub topic.
+    pub async fn build_announcement_batch<F>(
+        &self,
+        signer: F,
+    ) -> Option<SkillAnnouncementBatch>
+    where
+        F: FnOnce(&[u8]) -> Vec<u8>,
+    {
+        let announcements = self.get_announcements().await;
+        if announcements.is_empty() {
+            return None;
+        }
+
+        let mut batch =
+            SkillAnnouncementBatch::new(self.local_peer_id.clone(), announcements);
+        batch.sign(signer);
+        Some(batch)
+    }
+
+    /// Handle an incoming skill announcement batch from the network.
+    ///
+    /// Validates the batch is not expired, then registers each announced skill.
+    /// Ignores announcements from ourselves.
+    pub async fn handle_announcement_batch(&self, batch: &SkillAnnouncementBatch) {
+        // Ignore our own announcements
+        if batch.peer_id == self.local_peer_id {
+            return;
+        }
+
+        // Reject stale announcements (older than 10 minutes)
+        if batch.is_expired(600) {
+            tracing::debug!(
+                peer = %batch.peer_id,
+                "Ignoring expired skill announcement batch"
+            );
+            return;
+        }
+
+        tracing::info!(
+            peer = %batch.peer_id,
+            count = batch.skills.len(),
+            "Received skill announcements from network"
+        );
+
+        for announcement in &batch.skills {
+            self.register_network_skill(announcement.clone()).await;
         }
     }
 }

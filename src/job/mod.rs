@@ -20,7 +20,7 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 
 #[derive(Error, Debug)]
 pub enum JobError {
@@ -52,6 +52,18 @@ pub enum JobError {
     Serialization(String),
 }
 
+/// A broadcast command for sending job messages over GossipSub.
+#[derive(Debug)]
+pub struct JobBroadcast {
+    /// The GossipSub topic to publish on.
+    pub topic: String,
+    /// MessagePack-serialized payload.
+    pub data: Vec<u8>,
+}
+
+/// Sender half for broadcasting job messages to the P2P network.
+pub type JobBroadcastTx = mpsc::Sender<JobBroadcast>;
+
 /// The job manager handles the lifecycle of jobs.
 pub struct JobManager {
     /// Local peer ID for identifying this node in bids
@@ -68,6 +80,9 @@ pub struct JobManager {
     pricing: RwLock<PricingStrategy>,
     /// Reference to wallet for escrow
     wallet: Arc<Wallet>,
+    /// Optional channel for broadcasting job messages over GossipSub.
+    /// Set via `set_broadcast_tx` after the P2P network is initialised.
+    broadcast_tx: RwLock<Option<JobBroadcastTx>>,
 }
 
 impl JobManager {
@@ -81,6 +96,28 @@ impl JobManager {
             completed_jobs: RwLock::new(Vec::new()),
             pricing: RwLock::new(PricingStrategy::default()),
             wallet,
+            broadcast_tx: RwLock::new(None),
+        }
+    }
+
+    /// Attach a broadcast channel so the job manager can publish messages
+    /// to the P2P network via GossipSub.
+    pub async fn set_broadcast_tx(&self, tx: JobBroadcastTx) {
+        *self.broadcast_tx.write().await = Some(tx);
+    }
+
+    /// Best-effort publish a serialized job message on the given topic.
+    async fn broadcast(&self, topic: &str, data: Vec<u8>) {
+        let guard = self.broadcast_tx.read().await;
+        if let Some(ref tx) = *guard {
+            if let Err(e) = tx.try_send(JobBroadcast {
+                topic: topic.to_string(),
+                data,
+            }) {
+                tracing::warn!("Failed to enqueue job broadcast: {}", e);
+            }
+        } else {
+            tracing::debug!("No broadcast channel configured; skipping GossipSub publish");
         }
     }
 
@@ -108,10 +145,24 @@ impl JobManager {
         let job_id = request.id.clone();
 
         // Store locally
-        self.requests.write().await.insert(job_id.clone(), request);
+        self.requests
+            .write()
+            .await
+            .insert(job_id.clone(), request.clone());
         self.bids.write().await.insert(job_id.clone(), Vec::new());
 
-        // TODO: Broadcast to network via GossipSub
+        // Broadcast to network via GossipSub
+        let msg = network::JobMessage::Request(network::JobRequestMessage::new(
+            request,
+            &self
+                .local_peer_id
+                .parse::<libp2p::PeerId>()
+                .unwrap_or_else(|_| libp2p::PeerId::random()),
+        ));
+        if let Ok(data) = network::serialize_message(&msg) {
+            self.broadcast(network::topics::JOB_REQUESTS, data).await;
+            tracing::info!(job_id = %job_id, "Job request broadcast to network");
+        }
 
         Ok(job_id)
     }
@@ -214,8 +265,12 @@ impl JobManager {
             )
             .await?;
 
+        // Capture values before moving into Job::new
+        let winner_peer_id = bid.bidder_id.clone();
+        let escrow_id = escrow.id;
+
         // Create the active job
-        let job = Job::new(request, bid, escrow.id);
+        let job = Job::new(request, bid, escrow_id.clone());
 
         // Move from requests to active
         self.requests.write().await.remove(job_id);
@@ -225,7 +280,18 @@ impl JobManager {
             .await
             .insert(job_id.clone(), job.clone());
 
-        // TODO: Notify the winning bidder via P2P
+        // Notify the winning bidder via P2P (BidAccepted on the status topic)
+        let accept_msg = network::JobMessage::BidAccepted(network::BidAcceptedMessage {
+            job_id: job_id.clone(),
+            bid_id: bid_id.0.clone(),
+            winner_peer_id: winner_peer_id.clone(),
+            escrow_id: escrow_id.0.clone(),
+            signature: vec![],
+        });
+        if let Ok(data) = network::serialize_message(&accept_msg) {
+            self.broadcast(network::topics::JOB_STATUS, data).await;
+            tracing::info!(job_id = %job_id, winner = %winner_peer_id, "Bid acceptance broadcast to network");
+        }
 
         Ok(job)
     }
@@ -262,7 +328,18 @@ impl JobManager {
     /// Submit a bid for a job request.
     pub async fn submit_bid(&self, request: &JobRequest) -> Result<Option<JobBid>, JobError> {
         if let Some(bid) = self.evaluate_request(request).await {
-            // TODO: Send bid to requester via P2P
+            // Send bid to requester via P2P (broadcast on bids topic)
+            let msg = network::JobMessage::Bid(network::JobBidMessage::new(
+                bid.clone(),
+                &self
+                    .local_peer_id
+                    .parse::<libp2p::PeerId>()
+                    .unwrap_or_else(|_| libp2p::PeerId::random()),
+            ));
+            if let Ok(data) = network::serialize_message(&msg) {
+                self.broadcast(network::topics::JOB_BIDS, data).await;
+                tracing::info!(job_id = %bid.job_id, price = bid.price, "Bid broadcast to network");
+            }
             Ok(Some(bid))
         } else {
             Ok(None)

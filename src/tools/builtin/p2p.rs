@@ -14,7 +14,10 @@ use crate::tools::tool::{
     optional_bool, optional_i64, optional_str, require_str, ApprovalRequirement, Tool, ToolContext,
     ToolDomain, ToolError, ToolOutput,
 };
-use crate::tools::{describe_p2p_job_via_node, submit_p2p_job_via_node};
+use crate::tools::{
+    describe_p2p_job_via_node, query_peers_via_node, query_wallet_via_node,
+    submit_p2p_job_via_node,
+};
 
 /// Job submission tool - submit work to the P2P network.
 pub struct JobSubmitTool {
@@ -336,26 +339,37 @@ impl Tool for PeerDiscoveryTool {
         let capability = optional_str(&params, "capability").unwrap_or("any");
         let limit = optional_i64(&params, "limit", 10) as usize;
 
-        // TODO: Actually query P2P network
-        // For now, return a placeholder response with the local peer
-        let peers = vec![serde_json::json!({
+        // Always include the local peer
+        let mut peers = vec![serde_json::json!({
             "peer_id": ctx.peer_id,
             "capabilities": ["inference", "compute"],
-            "models": ["llama-3.2-3b", "qwen-2.5-7b"],
-            "price_per_token": 0.001,
-            "reliability": 100,
-            "latency_ms": 0,
             "is_local": true,
         })];
 
+        // Query connected peers from the running node if available
+        if let Some(ref tx) = ctx.node_tool_tx {
+            match query_peers_via_node(tx).await {
+                Ok(remote_peers) => {
+                    peers.extend(remote_peers);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to query peers from node: {}", e);
+                }
+            }
+        }
+
+        // Apply limit
+        let peers: Vec<_> = peers.into_iter().take(limit).collect();
+        let peer_count = peers.len();
+
         let result = serde_json::json!({
             "peers": peers,
-            "peer_count": peers.len(),
+            "peer_count": peer_count,
             "filter": {
                 "capability": capability,
                 "limit": limit,
             },
-            "network_size": 1, // Total known peers
+            "network_size": peer_count,
         });
 
         Ok(ToolOutput::success(result, start.elapsed()))
@@ -426,30 +440,35 @@ impl Tool for WalletBalanceTool {
         let start = Instant::now();
 
         let include_history = optional_bool(&params, "include_history", false);
-        let _history_limit = optional_i64(&params, "history_limit", 10) as usize;
+        let history_limit = optional_i64(&params, "history_limit", 10) as usize;
 
-        // TODO: Actually query Wallet
-        // For now, return placeholder data
+        // Query real wallet data from the running node if available
+        if let Some(ref tx) = ctx.node_tool_tx {
+            match query_wallet_via_node(tx, include_history, history_limit).await {
+                Ok(result) => {
+                    return Ok(ToolOutput::success(result, start.elapsed()));
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to query wallet from node: {}", e);
+                    // Fall through to offline fallback
+                }
+            }
+        }
+
+        // Offline fallback when no node is running
         let mut result = serde_json::json!({
             "peer_id": ctx.peer_id,
             "balance": {
-                "available": 15000.0,
+                "available": 0.0,
                 "locked": 0.0,
-                "total": 15000.0,
+                "total": 0.0,
                 "unit": "PCLAW",
             },
-            "stats": {
-                "total_earned": 0.0,
-                "total_spent": 0.0,
-                "jobs_completed": 0,
-                "jobs_submitted": 0,
-            }
+            "note": "No running node; wallet data unavailable. Start `peerclaw serve` for live balances.",
         });
 
         if include_history {
-            result["transactions"] = serde_json::json!([
-                // Empty for now
-            ]);
+            result["transactions"] = serde_json::json!([]);
         }
 
         Ok(ToolOutput::success(result, start.elapsed()))

@@ -231,7 +231,8 @@ impl Runtime {
         network.subscribe(job_network::topics::JOB_BIDS)?;
         network.subscribe(job_network::topics::JOB_STATUS)?;
         network.subscribe(crate::p2p::provider::PROVIDER_TOPIC)?;
-        tracing::info!("Subscribed to job marketplace and provider topics");
+        network.subscribe(crate::skills::SKILLS_TOPIC)?;
+        tracing::info!("Subscribed to job marketplace, provider, and skills topics");
         Ok(())
     }
 
@@ -293,6 +294,31 @@ impl Runtime {
             models = manifest.models.len(),
             "Advertised provider manifest to network"
         );
+
+        Ok(())
+    }
+
+    /// Advertise shared skills to the P2P network via GossipSub.
+    pub async fn advertise_skills(&self) -> anyhow::Result<()> {
+        let identity = self.identity.clone();
+        let batch = self
+            .skills
+            .build_announcement_batch(|data| identity.sign(data).to_bytes().to_vec())
+            .await;
+
+        if let Some(batch) = batch {
+            let skill_count = batch.skills.len();
+            let data = rmp_serde::to_vec(&batch)
+                .map_err(|e| anyhow::anyhow!("Failed to serialize skill announcements: {}", e))?;
+
+            let mut network = self.network.write().await;
+            network.publish(crate::skills::SKILLS_TOPIC, data)?;
+
+            tracing::info!(
+                skills = skill_count,
+                "Advertised skills to network"
+            );
+        }
 
         Ok(())
     }
@@ -497,6 +523,13 @@ impl Runtime {
                         );
                         self.provider_tracker.update_provider(manifest).await;
                     }
+                }
+            }
+            t if t == crate::skills::SKILLS_TOPIC => {
+                if let Ok(batch) =
+                    rmp_serde::from_slice::<crate::skills::SkillAnnouncementBatch>(&data)
+                {
+                    self.skills.handle_announcement_batch(&batch).await;
                 }
             }
             _ => {}

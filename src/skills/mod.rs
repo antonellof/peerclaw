@@ -29,6 +29,9 @@ use serde::{Deserialize, Serialize};
 /// Maximum file size for SKILL.md (64 KiB).
 pub const MAX_SKILL_SIZE: u64 = 64 * 1024;
 
+/// GossipSub topic for skill announcements across the P2P network.
+pub const SKILLS_TOPIC: &str = "peerclaw/skills/v1";
+
 /// Regex for validating skill names.
 static SKILL_NAME_PATTERN: std::sync::LazyLock<Regex> =
     std::sync::LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$").unwrap());
@@ -222,6 +225,65 @@ pub struct SkillAnnouncement {
     pub keywords: Vec<String>,
     /// Tags.
     pub tags: Vec<String>,
+}
+
+/// A batch of skill announcements from a single peer, with signature.
+/// Published to the `peerclaw/skills/v1` GossipSub topic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillAnnouncementBatch {
+    /// The announcing peer's ID.
+    pub peer_id: String,
+    /// All skills this peer is sharing.
+    pub skills: Vec<SkillAnnouncement>,
+    /// Unix timestamp when this batch was created.
+    pub timestamp: u64,
+    /// Ed25519 signature over (peer_id || timestamp || skills hash).
+    pub signature: Vec<u8>,
+}
+
+impl SkillAnnouncementBatch {
+    /// Create a new unsigned batch.
+    pub fn new(peer_id: String, skills: Vec<SkillAnnouncement>) -> Self {
+        Self {
+            peer_id,
+            skills,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            signature: vec![],
+        }
+    }
+
+    /// Get the bytes to sign.
+    pub fn signing_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(self.peer_id.as_bytes());
+        bytes.extend_from_slice(&self.timestamp.to_le_bytes());
+        // Hash the skills payload for a compact signing input
+        let skills_bytes = rmp_serde::to_vec(&self.skills).unwrap_or_default();
+        let skills_hash = blake3::hash(&skills_bytes);
+        bytes.extend_from_slice(skills_hash.as_bytes());
+        bytes
+    }
+
+    /// Sign this batch.
+    pub fn sign<F>(&mut self, signer: F)
+    where
+        F: FnOnce(&[u8]) -> Vec<u8>,
+    {
+        let bytes = self.signing_bytes();
+        self.signature = signer(&bytes);
+    }
+
+    /// Check if this batch is expired (older than `max_age_secs`).
+    pub fn is_expired(&self, max_age_secs: u64) -> bool {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        now.saturating_sub(self.timestamp) > max_age_secs
+    }
 }
 
 #[cfg(test)]

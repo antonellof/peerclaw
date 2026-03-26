@@ -5,7 +5,7 @@
 
 mod state;
 
-pub use state::{ChannelState, ChannelUpdate, SignedUpdate};
+pub use state::{ChannelCloseRequest, ChannelState, ChannelUpdate, SignedUpdate};
 
 use crate::identity::NodeIdentity;
 use crate::wallet::{from_micro, Wallet, WalletError};
@@ -268,7 +268,7 @@ impl std::fmt::Display for PaymentChannel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Channel[{}]: {} ↔ {} ({:.6}/{:.6} PCLAW) [{}]",
+            "Channel[{}]: {} <-> {} ({:.6}/{:.6} PCLAW) [{}]",
             self.id,
             &self.local_peer[..8.min(self.local_peer.len())],
             &self.remote_peer[..8.min(self.remote_peer.len())],
@@ -289,6 +289,9 @@ pub struct ChannelManager {
     channels: RwLock<HashMap<ChannelId, PaymentChannel>>,
     /// Channels by remote peer ID
     by_peer: RwLock<HashMap<String, ChannelId>>,
+    /// Remote peer public keys (hex-encoded) for signature verification.
+    /// Populated when a channel is opened or when a peer's public key is received.
+    peer_public_keys: RwLock<HashMap<String, String>>,
 }
 
 impl ChannelManager {
@@ -299,7 +302,22 @@ impl ChannelManager {
             wallet,
             channels: RwLock::new(HashMap::new()),
             by_peer: RwLock::new(HashMap::new()),
+            peer_public_keys: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Register a remote peer's public key for signature verification.
+    /// The key should be hex-encoded Ed25519 public key bytes (32 bytes = 64 hex chars).
+    pub async fn register_peer_public_key(&self, peer_id: &str, hex_public_key: String) {
+        self.peer_public_keys
+            .write()
+            .await
+            .insert(peer_id.to_string(), hex_public_key);
+    }
+
+    /// Get a remote peer's registered public key.
+    pub async fn get_peer_public_key(&self, peer_id: &str) -> Option<String> {
+        self.peer_public_keys.read().await.get(peer_id).cloned()
     }
 
     /// Open a new channel with a peer.
@@ -409,9 +427,44 @@ impl ChannelManager {
     }
 
     /// Receive a payment update from remote peer.
+    ///
+    /// Verifies the signer matches the channel's remote peer, looks up their
+    /// registered public key, and validates the Ed25519 signature before applying
+    /// the balance update.
     pub async fn receive_payment(&self, signed_update: &SignedUpdate) -> Result<(), ChannelError> {
-        // Verify signature
-        // TODO: Get remote peer's public key and verify
+        // Look up the channel first to find the remote peer ID
+        let remote_peer = {
+            let channels = self.channels.read().await;
+            let channel = channels
+                .get(&signed_update.update.channel_id)
+                .ok_or_else(|| {
+                    ChannelError::NotFound(signed_update.update.channel_id.clone())
+                })?;
+            channel.remote_peer.clone()
+        };
+
+        // Verify the signer matches the remote peer
+        if signed_update.signer != remote_peer {
+            return Err(ChannelError::InvalidSignature);
+        }
+
+        // Get remote peer's public key and verify the signature
+        let hex_public_key = self
+            .peer_public_keys
+            .read()
+            .await
+            .get(&remote_peer)
+            .cloned()
+            .ok_or_else(|| {
+                ChannelError::InvalidState(format!(
+                    "No public key registered for remote peer {}",
+                    remote_peer
+                ))
+            })?;
+
+        if !signed_update.verify_with_hex_key(&hex_public_key) {
+            return Err(ChannelError::InvalidSignature);
+        }
 
         let mut channels = self.channels.write().await;
         let channel = channels
@@ -424,8 +477,18 @@ impl ChannelManager {
         Ok(())
     }
 
-    /// Close a channel cooperatively.
-    pub async fn close_channel(&self, channel_id: &ChannelId) -> Result<(), ChannelError> {
+    /// Initiate a cooperative channel close.
+    ///
+    /// Creates a signed `ChannelCloseRequest` representing our proposed final state.
+    /// The caller should deliver this request to the remote peer (e.g., via P2P messaging).
+    /// Once the remote peer countersigns (via `finalize_close`), the channel is settled.
+    ///
+    /// If no P2P transport is available, the channel transitions to `Closing` locally
+    /// and can be force-closed after the channel's expiration timeout.
+    pub async fn close_channel(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Result<ChannelCloseRequest, ChannelError> {
         let mut channels = self.channels.write().await;
         let channel = channels
             .get_mut(channel_id)
@@ -439,16 +502,131 @@ impl ChannelManager {
 
         channel.status = ChannelStatus::Closing;
 
-        // TODO: Broadcast closing state to remote peer
-        // TODO: Wait for cooperative close or timeout
+        // Create a signed close request with the current balance state.
+        // The remote peer can verify this signature and countersign to agree.
+        let close_request = ChannelCloseRequest::new(
+            channel_id.clone(),
+            channel.local_balance,
+            channel.remote_balance,
+            channel.nonce,
+            &self.identity,
+        );
 
-        // For now, immediate close
+        tracing::info!(
+            channel = %channel_id,
+            local_balance = channel.local_balance,
+            remote_balance = channel.remote_balance,
+            "Channel close initiated, awaiting cooperative finalization"
+        );
+
+        Ok(close_request)
+    }
+
+    /// Finalize a cooperative close after receiving the remote peer's agreement.
+    ///
+    /// Called when the remote peer has accepted our close request (or sent their own).
+    /// Verifies the remote peer's signature on the close request, then settles.
+    pub async fn finalize_close(
+        &self,
+        channel_id: &ChannelId,
+        remote_close_request: &ChannelCloseRequest,
+    ) -> Result<(), ChannelError> {
+        let mut channels = self.channels.write().await;
+        let channel = channels
+            .get_mut(channel_id)
+            .ok_or_else(|| ChannelError::NotFound(channel_id.clone()))?;
+
+        if !matches!(
+            channel.status,
+            ChannelStatus::Closing | ChannelStatus::Open
+        ) {
+            return Err(ChannelError::InvalidState(
+                "Channel is not in a closeable state".into(),
+            ));
+        }
+
+        // Verify the remote peer's signature on the close request
+        let hex_public_key = self
+            .peer_public_keys
+            .read()
+            .await
+            .get(&channel.remote_peer)
+            .cloned()
+            .ok_or_else(|| {
+                ChannelError::InvalidState(format!(
+                    "No public key registered for remote peer {}",
+                    channel.remote_peer
+                ))
+            })?;
+
+        if !remote_close_request.verify(&hex_public_key) {
+            return Err(ChannelError::InvalidSignature);
+        }
+
+        // Verify balances match the channel capacity
+        if remote_close_request.final_local_balance + remote_close_request.final_remote_balance
+            != channel.capacity
+        {
+            return Err(ChannelError::InvalidState(
+                "Close request balances do not match channel capacity".into(),
+            ));
+        }
+
         channel.status = ChannelStatus::Closed;
 
+        tracing::info!(
+            channel = %channel_id,
+            "Channel cooperatively closed"
+        );
+
         // Remove from by_peer index
+        let remote_peer = channel.remote_peer.clone();
+        drop(channels);
         {
             let mut by_peer = self.by_peer.write().await;
-            by_peer.remove(&channel.remote_peer);
+            by_peer.remove(&remote_peer);
+        }
+
+        Ok(())
+    }
+
+    /// Force-close an expired channel without remote peer cooperation.
+    ///
+    /// Can only be called after the channel's expiration time has passed.
+    /// Settles using the latest signed state we have.
+    pub async fn force_close_expired(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Result<(), ChannelError> {
+        let mut channels = self.channels.write().await;
+        let channel = channels
+            .get_mut(channel_id)
+            .ok_or_else(|| ChannelError::NotFound(channel_id.clone()))?;
+
+        if !channel.is_expired() {
+            return Err(ChannelError::InvalidState(
+                "Channel has not expired yet; use cooperative close instead".into(),
+            ));
+        }
+
+        if matches!(channel.status, ChannelStatus::Closed) {
+            return Err(ChannelError::InvalidState(
+                "Channel is already closed".into(),
+            ));
+        }
+
+        channel.status = ChannelStatus::Closed;
+
+        tracing::warn!(
+            channel = %channel_id,
+            "Channel force-closed after expiration"
+        );
+
+        let remote_peer = channel.remote_peer.clone();
+        drop(channels);
+        {
+            let mut by_peer = self.by_peer.write().await;
+            by_peer.remove(&remote_peer);
         }
 
         Ok(())

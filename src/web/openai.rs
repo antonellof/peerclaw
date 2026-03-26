@@ -3,7 +3,7 @@
 //! Provides compatibility with OpenAI SDK clients via:
 //! - POST /v1/chat/completions
 //! - GET /v1/models
-//! - POST /v1/embeddings (stub)
+//! - POST /v1/embeddings
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -544,19 +544,54 @@ pub async fn list_models(State(state): State<Arc<WebState>>) -> Json<ModelsRespo
     })
 }
 
-/// POST /v1/embeddings (stub - not implemented)
-pub async fn embeddings(Json(_req): Json<EmbeddingsRequest>) -> (StatusCode, Json<ErrorResponse>) {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(ErrorResponse {
-            error: ErrorDetail {
-                message:
-                    "Embeddings are not yet implemented. This endpoint is reserved for future use."
-                        .to_string(),
-                error_type: "not_implemented".to_string(),
-                param: None,
-                code: Some("embeddings_not_available".to_string()),
-            },
-        }),
-    )
+/// POST /v1/embeddings — generate embeddings using the node's configured embedding provider.
+pub async fn embeddings(
+    Json(req): Json<EmbeddingsRequest>,
+) -> Result<Json<EmbeddingsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let embedder = crate::vector::get_embedder();
+
+    let texts: Vec<String> = match req.input {
+        EmbeddingInput::Single(s) => vec![s],
+        EmbeddingInput::Multiple(v) => v,
+    };
+
+    let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+    let vectors = embedder
+        .embed_batch(&refs)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: ErrorDetail {
+                        message: format!("Embedding failed: {e}"),
+                        error_type: "embedding_error".to_string(),
+                        param: None,
+                        code: None,
+                    },
+                }),
+            )
+        })?;
+
+    let total_tokens = texts.iter().map(|t| t.split_whitespace().count() as u32).sum::<u32>();
+
+    let data: Vec<EmbeddingData> = vectors
+        .into_iter()
+        .enumerate()
+        .map(|(i, emb)| EmbeddingData {
+            object: "embedding",
+            index: i as u32,
+            embedding: emb,
+        })
+        .collect();
+
+    Ok(Json(EmbeddingsResponse {
+        object: "list",
+        data,
+        model: req.model,
+        usage: EmbeddingUsage {
+            prompt_tokens: total_tokens,
+            total_tokens,
+        },
+    }))
 }
