@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { ChevronDown, Send } from "lucide-react"
+import { ChevronDown, Plus, Send, Settings2, Wrench, Plug, Zap } from "lucide-react"
 
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
 import { createTask, fetchOpenAiModels, fetchTaskDetail, postChatStream, stopWebTask } from "@/lib/api"
@@ -133,7 +133,9 @@ export function ChatPanel({ onRegisterControls }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [showWelcome, setShowWelcome] = useState(true)
-  const [composerMode, setComposerMode] = useState<"chat" | "agent">("chat")
+  /** When true, next send creates a background agent task instead of streaming chat. */
+  const [deepTaskMode, setDeepTaskMode] = useState(false)
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false)
   const [models, setModels] = useState<string[]>([])
   const model = chatPreferences.model
   const setModel = useCallback(
@@ -245,7 +247,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
       openAgent?: boolean
     } | null
     if (st?.agentPreset) {
-      setComposerMode("agent")
+      setDeepTaskMode(true)
       setAgentTaskType(st.agentPreset.taskType)
       setInput(st.agentPreset.text)
       setShowWelcome(false)
@@ -253,7 +255,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
       return
     }
     if (st?.openAgent) {
-      setComposerMode("agent")
+      setDeepTaskMode(true)
       setShowWelcome(false)
       navigate(`${location.pathname}${location.search}`, { replace: true, state: {} })
     }
@@ -463,7 +465,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
 
   useLayoutEffect(() => {
     syncComposerHeight()
-  }, [input, composerMode, autocompleteOpen, syncComposerHeight])
+  }, [input, deepTaskMode, autocompleteOpen, syncComposerHeight])
 
   useEffect(() => {
     window.addEventListener("resize", syncComposerHeight)
@@ -524,9 +526,10 @@ export function ChatPanel({ onRegisterControls }: Props) {
       return
     }
 
-    if (composerMode === "agent") {
+    if (deepTaskMode) {
       setInput("")
       setShowWelcome(false)
+      setDeepTaskMode(false)
       setMessages((m) => [...m, { id: newId(), role: "user", content }])
       setTyping(true)
       try {
@@ -646,7 +649,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
     if (!t) return
     setAgentTaskType(t.taskType)
     setInput(t.text)
-    setComposerMode("agent")
+    setDeepTaskMode(true)
   }
 
   const applyScenarioPreset = (key: string) => {
@@ -654,7 +657,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
     if (!p) return
     setAgentTaskType(p.type)
     setInput(p.text)
-    setComposerMode("agent")
+    setDeepTaskMode(true)
   }
 
   return (
@@ -662,7 +665,6 @@ export function ChatPanel({ onRegisterControls }: Props) {
       <header className="flex h-12 shrink-0 items-center border-b border-border/70 bg-card/20 px-3 md:px-4">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-foreground">Assistant</p>
-          <p className="truncate text-[11px] text-muted-foreground">Streaming chat &amp; quick agent runs</p>
         </div>
       </header>
 
@@ -761,7 +763,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
                 </div>
               </div>
             ))}
-            {typing && composerMode === "agent" && (
+            {typing && (
               <div className="pl-11 text-sm text-muted-foreground">Working…</div>
             )}
                 </div>
@@ -784,111 +786,31 @@ export function ChatPanel({ onRegisterControls }: Props) {
             )}
           </div>
 
-          <div className="shrink-0 border-t border-border/80 bg-gradient-to-t from-card/90 to-card/40 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 md:px-4">
-            <div className="mx-auto max-w-3xl space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-lg border border-border/60 bg-muted/40 p-0.5">
-              <button
-                type="button"
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                  composerMode === "chat" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
-                )}
-                onClick={() => setComposerMode("chat")}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                  composerMode === "agent" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
-                )}
-                onClick={() => setComposerMode("agent")}
-              >
-                Agent goal
-              </button>
+          <div className="shrink-0 border-t border-border/80 bg-gradient-to-t from-card/90 to-card/40 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 md:px-4">
+            <div className="mx-auto max-w-3xl space-y-2">
+
+          {/* Active badges row - show non-default settings as small dismissible pills */}
+          {(deepTaskMode || chatPreferences.useMcp) && (
+            <div className="flex flex-wrap items-center gap-1.5 px-1">
+              {deepTaskMode && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                  <Zap className="size-3" />
+                  Deep task · {agentTaskType}
+                  <button type="button" className="ml-0.5 opacity-60 hover:opacity-100" onClick={() => setDeepTaskMode(false)}>×</button>
+                </span>
+              )}
+              {chatPreferences.useMcp && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-purple-500/40 bg-purple-500/10 px-2 py-0.5 text-[11px] font-medium text-purple-700 dark:text-purple-400">
+                  <Plug className="size-3" />
+                  MCP
+                  <button type="button" className="ml-0.5 opacity-60 hover:opacity-100" onClick={() => setChatPreferences({ useMcp: false })}>×</button>
+                </span>
+              )}
             </div>
-            <button
-              type="button"
-              title="Node tools + P2P job_submit / job_status ReAct loop"
-              className={cn(
-                "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-                chatPreferences.useAgentic
-                  ? "border-primary/60 bg-primary/15 text-foreground"
-                  : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50",
-              )}
-              onClick={() => setChatPreferences({ useAgentic: !chatPreferences.useAgentic })}
-            >
-              Tools
-            </button>
-            <button
-              type="button"
-              title="Use MCP tools from configured servers (MCP page)"
-              className={cn(
-                "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-                chatPreferences.useMcp
-                  ? "border-primary/60 bg-primary/15 text-foreground"
-                  : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/50",
-              )}
-              onClick={() => setChatPreferences({ useMcp: !chatPreferences.useMcp })}
-            >
-              MCP
-            </button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 max-w-[11rem] gap-1 border-border/80 px-2 font-normal"
-                  title="Model for this chat"
-                >
-                  <span className="truncate text-xs">{model}</span>
-                  <ChevronDown className="size-3.5 shrink-0 opacity-50" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
-                <DropdownMenuLabel className="text-xs">Model</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
-                  {modelList.map((m) => (
-                    <DropdownMenuRadioItem key={m} value={m} className="text-xs">
-                      {m}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {composerMode === "agent" && (
-              <>
-                <select
-                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                  title="If a skill with this name exists under your node skills directory, its instructions are prepended to the agent goal (see examples/skills/)."
-                  value={agentTaskType}
-                  onChange={(e) => setAgentTaskType(e.target.value)}
-                >
-                  {["general", "research", "code", "monitor", "analyze"].map((x) => (
-                    <option key={x} value={x}>
-                      {x}
-                    </option>
-                  ))}
-                </select>
-                <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                  Budget
-                  <input
-                    type="number"
-                    className="h-8 w-16 rounded-md border border-input bg-background px-1.5 text-xs"
-                    value={agentBudget}
-                    min={0.5}
-                    step={0.5}
-                    onChange={(e) => setAgentBudget(parseFloat(e.target.value) || 5)}
-                  />
-                </label>
-              </>
-            )}
-          </div>
+          )}
 
           <div className="relative rounded-2xl border border-border/80 bg-background shadow-sm">
+            {/* Slash command autocomplete */}
             {autocompleteOpen && filteredAc.length > 0 && (
               <div className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-48 overflow-auto rounded-xl border border-border bg-popover p-1 shadow-lg">
                 {filteredAc.map((c, i) => (
@@ -910,52 +832,218 @@ export function ChatPanel({ onRegisterControls }: Props) {
                 ))}
               </div>
             )}
-            <Textarea
-              ref={textareaRef}
-              rows={1}
-              placeholder={
-                composerMode === "agent"
-                  ? "Describe the goal (node needs --agent)…"
-                  : "Message, or type / for commands…"
-              }
-              value={input}
-              onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault()
-                  void send()
+
+            {/* Plus menu popover */}
+            {plusMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setPlusMenuOpen(false)} />
+                <div className="absolute bottom-full left-0 z-40 mb-2 w-64 rounded-xl border border-border bg-popover p-1.5 shadow-lg">
+                  {/* Tools toggle */}
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted"
+                    onClick={() => {
+                      setChatPreferences({ useAgentic: !chatPreferences.useAgentic })
+                    }}
+                  >
+                    <Wrench className={cn("size-4", chatPreferences.useAgentic ? "text-primary" : "text-muted-foreground")} />
+                    <div className="flex-1">
+                      <div className="font-medium">Tools</div>
+                      <div className="text-[11px] text-muted-foreground">ReAct loop with node tools</div>
+                    </div>
+                    <div className={cn(
+                      "size-4 rounded-full border-2 transition-colors",
+                      chatPreferences.useAgentic ? "border-primary bg-primary" : "border-muted-foreground/40",
+                    )} />
+                  </button>
+
+                  {/* MCP toggle */}
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted"
+                    onClick={() => {
+                      setChatPreferences({ useMcp: !chatPreferences.useMcp })
+                    }}
+                  >
+                    <Plug className={cn("size-4", chatPreferences.useMcp ? "text-purple-500" : "text-muted-foreground")} />
+                    <div className="flex-1">
+                      <div className="font-medium">MCP tools</div>
+                      <div className="text-[11px] text-muted-foreground">External tool servers</div>
+                    </div>
+                    <div className={cn(
+                      "size-4 rounded-full border-2 transition-colors",
+                      chatPreferences.useMcp ? "border-purple-500 bg-purple-500" : "border-muted-foreground/40",
+                    )} />
+                  </button>
+
+                  <div className="my-1 border-t border-border/60" />
+
+                  {/* Deep task mode */}
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted"
+                    onClick={() => {
+                      setDeepTaskMode(!deepTaskMode)
+                      setPlusMenuOpen(false)
+                    }}
+                  >
+                    <Zap className={cn("size-4", deepTaskMode ? "text-amber-500" : "text-muted-foreground")} />
+                    <div className="flex-1">
+                      <div className="font-medium">Deep task</div>
+                      <div className="text-[11px] text-muted-foreground">Background agent with multi-step tools</div>
+                    </div>
+                    <div className={cn(
+                      "size-4 rounded-full border-2 transition-colors",
+                      deepTaskMode ? "border-amber-500 bg-amber-500" : "border-muted-foreground/40",
+                    )} />
+                  </button>
+
+                  {/* Deep task sub-options */}
+                  {deepTaskMode && (
+                    <div className="ml-7 mt-1 space-y-2 px-3 pb-2">
+                      <div>
+                        <label className="text-[11px] font-medium text-muted-foreground">Task type</label>
+                        <select
+                          className="mt-0.5 h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
+                          value={agentTaskType}
+                          onChange={(e) => setAgentTaskType(e.target.value)}
+                        >
+                          {["general", "research", "code", "monitor", "analyze"].map((x) => (
+                            <option key={x} value={x}>{x}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-medium text-muted-foreground">Budget (PCLAW)</label>
+                        <input
+                          type="number"
+                          className="mt-0.5 h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
+                          value={agentBudget}
+                          min={0.5}
+                          step={0.5}
+                          onChange={(e) => setAgentBudget(parseFloat(e.target.value) || 5)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            <div className="flex items-end gap-0">
+              {/* Plus button */}
+              <button
+                type="button"
+                className={cn(
+                  "mb-2 ml-2 flex size-9 shrink-0 items-center justify-center rounded-full border border-border/80 transition-colors hover:bg-muted",
+                  plusMenuOpen && "bg-muted",
+                )}
+                onClick={() => setPlusMenuOpen(!plusMenuOpen)}
+                title="Options"
+              >
+                <Plus className="size-4 text-muted-foreground" />
+              </button>
+
+              {/* Textarea */}
+              <Textarea
+                ref={textareaRef}
+                rows={1}
+                placeholder={
+                  deepTaskMode
+                    ? "Describe the goal for the agent…"
+                    : "Message, or type / for commands…"
                 }
-                if (autocompleteOpen && filteredAc.length) {
-                  if (e.key === "ArrowDown") {
+                value={input}
+                onChange={(e) => onInputChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault()
-                    setAutocompleteIdx((i) => (i + 1) % filteredAc.length)
+                    void send()
                   }
-                  if (e.key === "ArrowUp") {
-                    e.preventDefault()
-                    setAutocompleteIdx((i) => (i - 1 + filteredAc.length) % filteredAc.length)
+                  if (autocompleteOpen && filteredAc.length) {
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault()
+                      setAutocompleteIdx((i) => (i + 1) % filteredAc.length)
+                    }
+                    if (e.key === "ArrowUp") {
+                      e.preventDefault()
+                      setAutocompleteIdx((i) => (i - 1 + filteredAc.length) % filteredAc.length)
+                    }
+                    if (e.key === "Tab" && filteredAc[autocompleteIdx]) {
+                      e.preventDefault()
+                      setInput(filteredAc[autocompleteIdx]!.cmd + " ")
+                    }
                   }
-                  if (e.key === "Tab" && filteredAc[autocompleteIdx]) {
-                    e.preventDefault()
-                    setInput(filteredAc[autocompleteIdx]!.cmd + " ")
-                  }
-                }
-              }}
-              className="min-h-[52px] max-h-[min(50dvh,22.5rem)] resize-none border-0 bg-transparent py-3 pr-12 focus-visible:ring-0"
-              disabled={typing || streamLocked}
-            />
-            <Button
-              size="icon"
-              className="absolute bottom-2 right-2 size-9 shrink-0 rounded-full"
-              disabled={typing || streamLocked}
-              onClick={() => void send()}
-            >
-              <Send className="size-4" />
-            </Button>
+                }}
+                className="min-h-[52px] max-h-[min(50dvh,22.5rem)] flex-1 resize-none border-0 bg-transparent py-3 pr-12 focus-visible:ring-0"
+                disabled={typing || streamLocked}
+              />
+
+              {/* Send button */}
+              <Button
+                size="icon"
+                className="absolute bottom-2 right-2 size-9 shrink-0 rounded-full"
+                disabled={typing || streamLocked}
+                onClick={() => void send()}
+              >
+                <Send className="size-4" />
+              </Button>
+            </div>
+
+            {/* Bottom toolbar - mode & model selectors like Cursor */}
+            <div className="flex items-center gap-1.5 px-3 pb-2 pt-0.5">
+              {/* Mode dropdown: Chat / Agent */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    {deepTaskMode ? (
+                      <><Zap className="size-3 text-amber-500" /> Agent</>
+                    ) : (
+                      <><Settings2 className="size-3" /> Chat</>
+                    )}
+                    <ChevronDown className="size-3 opacity-50" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-48">
+                  <DropdownMenuRadioGroup value={deepTaskMode ? "agent" : "chat"} onValueChange={(v) => setDeepTaskMode(v === "agent")}>
+                    <DropdownMenuRadioItem value="chat" className="text-xs">
+                      Chat <span className="ml-auto text-[10px] text-muted-foreground">streaming</span>
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="agent" className="text-xs">
+                      Agent <span className="ml-auto text-[10px] text-muted-foreground">deep task</span>
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {/* Model dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex max-w-[10rem] items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <span className="truncate">{model}</span>
+                    <ChevronDown className="size-3 shrink-0 opacity-50" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56">
+                  <DropdownMenuLabel className="text-xs">Model</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
+                    {modelList.map((m) => (
+                      <DropdownMenuRadioItem key={m} value={m} className="text-xs">
+                        {m}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-              <p className="text-center text-[10px] text-muted-foreground">
-                <kbd className="rounded border border-border/80 px-1">/</kbd> commands ·{" "}
-                <kbd className="rounded border border-border/80 px-1">↵</kbd> send · Shift+Enter newline
-              </p>
             </div>
           </div>
         </div>

@@ -425,9 +425,13 @@ fn html_to_text(html: &str, max_length: usize) -> String {
 
     text = text.trim().to_string();
 
-    // Truncate if needed
+    // Truncate if needed (find nearest char boundary to avoid panic on multi-byte UTF-8)
     if text.len() > max_length {
-        text.truncate(max_length);
+        let mut end = max_length;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
         // Find last complete word
         if let Some(pos) = text.rfind(' ') {
             text.truncate(pos);
