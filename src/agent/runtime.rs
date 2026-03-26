@@ -728,13 +728,14 @@ fn re_inline_tool_call() -> &'static Regex {
 }
 
 /// Matches bare `tool_name args: {json}` without the `name:` prefix.
-/// Small models often drop the `name:` prefix entirely.
+/// Small models often drop the `name:` prefix entirely and may emit the call
+/// inline without a preceding newline (e.g. `…recommendations.memory_search args: {…}`).
 fn re_bare_tool_call() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
-        // Match `tool_name args: {json}` or `tool_name\nargs: {json}` at start of line.
         // Tool names must contain an underscore or colon (MCP) to reduce false positives.
-        Regex::new(r#"(?m)^[ \t]*([\w]+(?:[_:][\w]+)+)\s+args:\s*(\{[^\n]*\})"#)
+        // No start-of-line anchor: models often emit tool calls inline after punctuation.
+        Regex::new(r#"([\w]+(?:[_:][\w]+)+)\s+args:\s*(\{[^\n]*\})"#)
             .expect("regex")
     })
 }
@@ -1088,5 +1089,23 @@ More text."#;
         let text = "Hello args: {\"key\": \"value\"}";
         let calls = parse_tool_calls(text);
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn test_parse_bare_tool_call_inline_no_newline() {
+        // Model emits tool call directly after text without newline
+        let text = "Let me gather some current information.memory_search args: {\"query\": \"Bari Italy travel\"}";
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "memory_search");
+        assert_eq!(calls[0].args["query"], "Bari Italy travel");
+    }
+
+    #[test]
+    fn test_extract_answer_strips_inline_bare_no_newline() {
+        let text = "I'll help you plan.memory_search args: {\"query\": \"test\"}\nMore text.";
+        let answer = extract_answer(text);
+        assert!(answer.contains("I'll help you plan."));
+        assert!(!answer.contains("memory_search"));
     }
 }
