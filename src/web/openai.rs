@@ -355,13 +355,16 @@ async fn handle_streaming(
     let prompt = messages_to_prompt(&req.messages);
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
+    // Create a delta channel so the inference backend can push token chunks as they are generated.
+    let (delta_tx, mut delta_rx) = mpsc::unbounded_channel::<String>();
+
     let inference_req = InferenceRequest {
         prompt,
         model: req.model.clone(),
         max_tokens: req.max_tokens.unwrap_or(500),
         temperature: req.temperature.unwrap_or(0.7),
         response_tx,
-        stream_delta_tx: None,
+        stream_delta_tx: Some(delta_tx),
     };
 
     inference_tx
@@ -369,18 +372,11 @@ async fn handle_streaming(
         .await
         .map_err(|_| error_response("Failed to send inference request", "internal_error"))?;
 
-    // Wait for the full response first (we simulate streaming)
-    let response = tokio::time::timeout(Duration::from_secs(120), response_rx)
-        .await
-        .map_err(|_| error_response("Inference timeout", "timeout"))?
-        .map_err(|_| error_response("Inference cancelled", "cancelled"))?;
-
     let completion_id = generate_completion_id();
     let created = unix_timestamp();
     let model = req.model.clone();
-    let text = response.text;
 
-    // Create SSE stream
+    // Create SSE stream -- deltas are forwarded as they arrive from the inference backend.
     let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(64);
 
     tokio::spawn(async move {
@@ -406,9 +402,8 @@ async fn handle_streaming(
             ))
             .await;
 
-        // Stream content in word-boundary chunks
-        let words: Vec<&str> = text.split_inclusive(' ').collect();
-        for (i, word) in words.iter().enumerate() {
+        // Forward real token deltas from the inference engine as SSE content chunks.
+        while let Some(chunk) = delta_rx.recv().await {
             let content_chunk = ChatCompletionChunk {
                 id: completion_id.clone(),
                 object: "chat.completion.chunk",
@@ -418,23 +413,28 @@ async fn handle_streaming(
                     index: 0,
                     delta: Delta {
                         role: None,
-                        content: Some(word.to_string()),
+                        content: Some(chunk),
                     },
                     finish_reason: None,
                 }],
             };
 
-            let _ = tx
+            if tx
                 .send(Ok(
                     Event::default().data(serde_json::to_string(&content_chunk).unwrap())
                 ))
-                .await;
-
-            // Small delay for streaming effect (20ms per word chunk)
-            if i < words.len() - 1 {
-                tokio::time::sleep(Duration::from_millis(20)).await;
+                .await
+                .is_err()
+            {
+                // Client disconnected
+                return;
             }
         }
+
+        // Wait for the final response (carries token counts / metadata).
+        // The delta channel is closed before response_tx is sent, so we reach here
+        // only after all tokens have been streamed.
+        let _response = tokio::time::timeout(Duration::from_secs(120), response_rx).await;
 
         // Send finish chunk
         let finish_chunk = ChatCompletionChunk {

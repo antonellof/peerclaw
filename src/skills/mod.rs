@@ -276,6 +276,18 @@ impl SkillAnnouncementBatch {
         self.signature = signer(&bytes);
     }
 
+    /// Verify the batch signature with the given verifier closure.
+    ///
+    /// The verifier receives `(signing_bytes, signature)` and should return
+    /// `true` if the signature is valid for the announcing peer.
+    pub fn verify<F>(&self, verifier: F) -> bool
+    where
+        F: FnOnce(&[u8], &[u8]) -> bool,
+    {
+        let bytes = self.signing_bytes();
+        verifier(&bytes, &self.signature)
+    }
+
     /// Check if this batch is expired (older than `max_age_secs`).
     pub fn is_expired(&self, max_age_secs: u64) -> bool {
         let now = std::time::SystemTime::now()

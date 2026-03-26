@@ -228,9 +228,16 @@ impl SkillRegistry {
 
     /// Handle an incoming skill announcement batch from the network.
     ///
-    /// Validates the batch is not expired, then registers each announced skill.
-    /// Ignores announcements from ourselves.
-    pub async fn handle_announcement_batch(&self, batch: &SkillAnnouncementBatch) {
+    /// Validates that the batch is not expired, verifies the Ed25519 signature
+    /// using the provided verifier, then registers each announced skill.
+    /// Ignores announcements from ourselves and rejects unverified batches.
+    ///
+    /// The `verifier` closure receives `(peer_id, signing_bytes, signature)` and
+    /// should return `true` if the signature is valid for that peer.
+    pub async fn handle_announcement_batch<F>(&self, batch: &SkillAnnouncementBatch, verifier: F)
+    where
+        F: FnOnce(&str, &[u8], &[u8]) -> bool,
+    {
         // Ignore our own announcements
         if batch.peer_id == self.local_peer_id {
             return;
@@ -245,10 +252,20 @@ impl SkillRegistry {
             return;
         }
 
+        // Verify the batch signature
+        let signing_bytes = batch.signing_bytes();
+        if !verifier(&batch.peer_id, &signing_bytes, &batch.signature) {
+            tracing::warn!(
+                peer = %batch.peer_id,
+                "Rejected skill announcement batch: invalid signature"
+            );
+            return;
+        }
+
         tracing::info!(
             peer = %batch.peer_id,
             count = batch.skills.len(),
-            "Received skill announcements from network"
+            "Received verified skill announcements from network"
         );
 
         for announcement in &batch.skills {

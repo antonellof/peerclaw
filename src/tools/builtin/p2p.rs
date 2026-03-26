@@ -492,16 +492,57 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_job_submit() {
+    async fn test_job_submit_requires_node() {
         let tool = JobSubmitTool::new();
         let ctx = ToolContext::local("test-peer".to_string());
+
+        // Without a running node (node_tool_tx is None), job_submit should fail.
+        let err = tool
+            .execute(
+                serde_json::json!({
+                    "type": "inference",
+                    "prompt": "Hello, world!",
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ToolError::ExecutionFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn test_job_submit_with_node() {
+        use crate::tools::node_tool::{NodeToolCommand, P2pJobSubmitResult};
+        use tokio::sync::mpsc;
+
+        let tool = JobSubmitTool::new();
+
+        // Wire up a mock node_tool channel that responds with success.
+        let (tx, mut rx) = mpsc::channel::<NodeToolCommand>(8);
+        tokio::spawn(async move {
+            if let Some(cmd) = rx.recv().await {
+                match cmd {
+                    NodeToolCommand::SubmitP2pJob { reply, .. } => {
+                        let _ = reply.send(P2pJobSubmitResult {
+                            success: true,
+                            job_id: Some("test-job-123".to_string()),
+                            error: None,
+                        });
+                    }
+                    _ => panic!("unexpected command"),
+                }
+            }
+        });
+
+        let mut ctx = ToolContext::local("test-peer".to_string());
+        ctx.node_tool_tx = Some(tx);
 
         let result = tool
             .execute(
                 serde_json::json!({
                     "type": "inference",
                     "prompt": "Hello, world!",
-                    "model": "llama-3.2-3b"
                 }),
                 &ctx,
             )
@@ -509,7 +550,7 @@ mod tests {
             .unwrap();
 
         assert!(result.success);
-        assert!(result.data["job_id"].as_str().is_some());
+        assert_eq!(result.data["job_id"], "test-job-123");
         assert_eq!(result.data["status"], "submitted");
     }
 

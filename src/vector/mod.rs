@@ -90,6 +90,15 @@ impl From<DistanceMetric> for Distance {
     }
 }
 
+/// Convert a vectx Distance back to our serializable DistanceMetric.
+fn distance_to_metric(d: Distance) -> DistanceMetric {
+    match d {
+        Distance::Cosine => DistanceMetric::Cosine,
+        Distance::Euclidean => DistanceMetric::Euclidean,
+        Distance::Dot => DistanceMetric::DotProduct,
+    }
+}
+
 /// Search result with score and metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -122,11 +131,23 @@ impl SearchResult {
     }
 }
 
+/// Serializable snapshot of a single collection (metadata + all points).
+/// Used for JSON persistence since vectx's CollectionConfig / Distance
+/// do not derive Serialize/Deserialize.
+#[derive(Debug, Serialize, Deserialize)]
+struct CollectionSnapshot {
+    name: String,
+    vector_dim: usize,
+    distance: DistanceMetric,
+    use_hnsw: bool,
+    enable_bm25: bool,
+    points: Vec<Point>,
+}
+
 /// Vector store managing multiple collections
 pub struct VectorStore {
     config: VectorStoreConfig,
     collections: Arc<RwLock<std::collections::HashMap<String, Arc<Collection>>>>,
-    #[allow(dead_code)]
     storage_path: Option<std::path::PathBuf>,
 }
 
@@ -159,11 +180,111 @@ impl VectorStore {
         Ok(store)
     }
 
-    /// Load collections from storage
+    /// Load collections from storage by reading every `*.json` file in the
+    /// storage directory, deserializing the snapshot, and re-creating the
+    /// in-memory Collection with all its points.
     fn load_collections(&self) -> Result<()> {
-        // TODO: Implement collection persistence using vectx-storage
-        // For now, collections are ephemeral
+        let storage = match &self.storage_path {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+
+        let entries = std::fs::read_dir(storage)
+            .map_err(|e| VectorError::StorageError(format!("read_dir failed: {e}")))?;
+
+        let mut collections = self.collections.write();
+
+        for entry in entries {
+            let entry =
+                entry.map_err(|e| VectorError::StorageError(format!("dir entry error: {e}")))?;
+            let path = entry.path();
+
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+
+            let data = std::fs::read(&path)
+                .map_err(|e| VectorError::StorageError(format!("read {}: {e}", path.display())))?;
+
+            let snap: CollectionSnapshot = serde_json::from_slice(&data).map_err(|e| {
+                VectorError::StorageError(format!("deserialize {}: {e}", path.display()))
+            })?;
+
+            let cfg = CollectionConfig {
+                name: snap.name.clone(),
+                vector_dim: snap.vector_dim,
+                distance: snap.distance.into(),
+                use_hnsw: snap.use_hnsw,
+                enable_bm25: snap.enable_bm25,
+            };
+
+            let collection = Collection::new(cfg);
+            // Batch-insert all points for efficiency (rebuilds indexes once)
+            if !snap.points.is_empty() {
+                collection.batch_upsert(snap.points).map_err(|e| {
+                    VectorError::StorageError(format!(
+                        "batch_upsert for collection '{}': {e}",
+                        snap.name
+                    ))
+                })?;
+            }
+
+            tracing::info!(
+                collection = %snap.name,
+                count = collection.count(),
+                "Loaded collection from disk"
+            );
+            collections.insert(snap.name, Arc::new(collection));
+        }
+
         Ok(())
+    }
+
+    /// Persist a single collection to disk as an atomic JSON write
+    /// (write to a temp file then rename).
+    fn save_collection(&self, name: &str) -> Result<()> {
+        let storage = match &self.storage_path {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+
+        let col = {
+            let collections = self.collections.read();
+            collections
+                .get(name)
+                .cloned()
+                .ok_or_else(|| VectorError::CollectionNotFound(name.to_string()))?
+        };
+
+        let snap = CollectionSnapshot {
+            name: name.to_string(),
+            vector_dim: col.vector_dim(),
+            distance: distance_to_metric(col.distance()),
+            use_hnsw: col.use_hnsw(),
+            enable_bm25: col.enable_bm25(),
+            points: col.get_all_points(),
+        };
+
+        let json = serde_json::to_vec(&snap)
+            .map_err(|e| VectorError::StorageError(format!("serialize '{}': {e}", name)))?;
+
+        let final_path = storage.join(format!("{name}.json"));
+        let tmp_path = storage.join(format!(".{name}.json.tmp"));
+
+        std::fs::write(&tmp_path, &json)
+            .map_err(|e| VectorError::StorageError(format!("write tmp: {e}")))?;
+        std::fs::rename(&tmp_path, &final_path)
+            .map_err(|e| VectorError::StorageError(format!("rename: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Remove the on-disk file for a collection.
+    fn remove_collection_file(&self, name: &str) {
+        if let Some(storage) = &self.storage_path {
+            let path = storage.join(format!("{name}.json"));
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     /// Create a new collection
@@ -189,6 +310,10 @@ impl VectorStore {
 
         let collection = Collection::new(config);
         collections.insert(name.to_string(), Arc::new(collection));
+        // Release the write lock before saving to avoid holding it during I/O
+        drop(collections);
+
+        self.save_collection(name)?;
 
         tracing::info!(collection = name, dim = dim, "Created vector collection");
         Ok(())
@@ -208,10 +333,16 @@ impl VectorStore {
         Ok(collections.get(name).unwrap().clone())
     }
 
-    /// Delete a collection
+    /// Delete a collection (and its on-disk file if persistence is enabled)
     pub fn delete_collection(&self, name: &str) -> Result<bool> {
-        let mut collections = self.collections.write();
-        Ok(collections.remove(name).is_some())
+        let removed = {
+            let mut collections = self.collections.write();
+            collections.remove(name).is_some()
+        };
+        if removed {
+            self.remove_collection_file(name);
+        }
+        Ok(removed)
     }
 
     /// List all collections
@@ -252,6 +383,7 @@ impl VectorStore {
         );
 
         col.upsert(point)?;
+        self.save_collection(collection)?;
         Ok(())
     }
 
@@ -391,10 +523,11 @@ impl VectorStore {
             .map(|point| SearchResult::from_point(&point, 1.0)))
     }
 
-    /// Delete a point
+    /// Delete a point (and persist the change if storage is enabled)
     pub fn delete(&self, collection: &str, id: &str) -> Result<bool> {
         let col = self.get_collection(collection)?;
         col.delete(id)?;
+        self.save_collection(collection)?;
         Ok(true)
     }
 
@@ -555,5 +688,154 @@ mod tests {
         store.delete("test", "vec1").unwrap();
 
         assert_eq!(store.count("test").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_persistence_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        // --- Phase 1: create store, insert data, drop store ---
+        {
+            let store = VectorStore::with_storage(
+                VectorStoreConfig {
+                    embedding_dim: 4,
+                    use_hnsw: false,
+                    enable_bm25: true,
+                    distance: DistanceMetric::Cosine,
+                },
+                path,
+            )
+            .unwrap();
+
+            store.create_collection_with_dim("memories", 4).unwrap();
+
+            store
+                .upsert(
+                    "memories",
+                    "m1",
+                    vec![1.0, 0.0, 0.0, 0.0],
+                    Some(serde_json::json!({"text": "hello world", "tag": "greeting"})),
+                )
+                .unwrap();
+            store
+                .upsert(
+                    "memories",
+                    "m2",
+                    vec![0.0, 1.0, 0.0, 0.0],
+                    Some(serde_json::json!({"text": "goodbye", "tag": "farewell"})),
+                )
+                .unwrap();
+
+            assert_eq!(store.count("memories").unwrap(), 2);
+            // store is dropped here
+        }
+
+        // --- Phase 2: reload from disk, verify data survived ---
+        {
+            let store = VectorStore::with_storage(
+                VectorStoreConfig {
+                    embedding_dim: 4,
+                    use_hnsw: false,
+                    enable_bm25: true,
+                    distance: DistanceMetric::Cosine,
+                },
+                path,
+            )
+            .unwrap();
+
+            // Collection should exist
+            let collections = store.list_collections();
+            assert_eq!(collections.len(), 1);
+            assert_eq!(collections[0].name, "memories");
+            assert_eq!(collections[0].count, 2);
+            assert_eq!(collections[0].dimension, 4);
+
+            // Points should be retrievable
+            let m1 = store.get("memories", "m1").unwrap().expect("m1 missing");
+            assert_eq!(m1.id, "m1");
+            assert_eq!(m1.text.as_deref(), Some("hello world"));
+            let payload = m1.payload.unwrap();
+            assert_eq!(payload["tag"], "greeting");
+
+            let m2 = store.get("memories", "m2").unwrap().expect("m2 missing");
+            assert_eq!(m2.id, "m2");
+
+            // Vector search should work on reloaded data
+            let results = store
+                .search("memories", vec![1.0, 0.0, 0.0, 0.0], 1)
+                .unwrap();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].id, "m1");
+        }
+
+        // --- Phase 3: delete a point, reload, verify deletion persisted ---
+        {
+            let store = VectorStore::with_storage(
+                VectorStoreConfig {
+                    embedding_dim: 4,
+                    use_hnsw: false,
+                    enable_bm25: true,
+                    distance: DistanceMetric::Cosine,
+                },
+                path,
+            )
+            .unwrap();
+
+            store.delete("memories", "m1").unwrap();
+            assert_eq!(store.count("memories").unwrap(), 1);
+        }
+
+        // Reload again
+        {
+            let store = VectorStore::with_storage(
+                VectorStoreConfig {
+                    embedding_dim: 4,
+                    use_hnsw: false,
+                    enable_bm25: true,
+                    distance: DistanceMetric::Cosine,
+                },
+                path,
+            )
+            .unwrap();
+
+            assert_eq!(store.count("memories").unwrap(), 1);
+            assert!(store.get("memories", "m1").unwrap().is_none());
+            assert!(store.get("memories", "m2").unwrap().is_some());
+        }
+
+        // --- Phase 4: delete the collection, reload, verify file is gone ---
+        {
+            let store = VectorStore::with_storage(
+                VectorStoreConfig {
+                    embedding_dim: 4,
+                    use_hnsw: false,
+                    enable_bm25: true,
+                    distance: DistanceMetric::Cosine,
+                },
+                path,
+            )
+            .unwrap();
+
+            assert!(store.delete_collection("memories").unwrap());
+            // File should be removed
+            assert!(!path.join("memories.json").exists());
+        }
+
+        // Reload - should be empty
+        {
+            let store = VectorStore::with_storage(
+                VectorStoreConfig {
+                    embedding_dim: 4,
+                    use_hnsw: false,
+                    enable_bm25: true,
+                    distance: DistanceMetric::Cosine,
+                },
+                path,
+            )
+            .unwrap();
+
+            assert!(store.list_collections().is_empty());
+        }
     }
 }
