@@ -265,6 +265,8 @@ pub struct AgentTaskRequest {
     pub ws_control_tx: broadcast::Sender<serde_json::Value>,
     /// Cooperative stop (`POST /api/tasks/:id/stop`) — checked between ReAct iterations.
     pub cancel: Arc<AtomicBool>,
+    /// Session id for conversation history continuity.
+    pub session_id: Option<String>,
 }
 
 /// Static UI: `PEERCLAW_WEB_DIST` if set and valid, else `web/dist` under the crate root (after `npm run build` in `web/`).
@@ -2714,6 +2716,9 @@ struct CreateTaskPayload {
     /// When true, run the goal through the MCP tool loop instead of the loaded agent runtime.
     #[serde(default)]
     use_mcp: bool,
+    /// Optional session id for conversation continuity across agent tasks.
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -2788,6 +2793,18 @@ async fn api_create_task(
             .map(|m| m.tool_count() > 0)
             .unwrap_or(false);
 
+    // Build conversation-enriched description when a session_id is provided.
+    let enriched_description = if req.session_id.is_some() {
+        build_prompt_with_history(
+            &state.chat_sessions,
+            req.session_id.as_deref(),
+            &req.description,
+        )
+        .await
+    } else {
+        req.description.clone()
+    };
+
     if let Some(tx) = &state.agent_task_tx {
         let cancel = Arc::new(AtomicBool::new(false));
         {
@@ -2796,10 +2813,12 @@ async fn api_create_task(
         }
         let store = state.task_store.clone();
         let tid = task_id.clone();
-        let description = req.description.clone();
+        let description = enriched_description.clone();
         let tx = tx.clone();
         let ws_tx = state.ws_control_tx.clone();
         let state_spawn = state.clone();
+        let session_id = req.session_id.clone();
+        let raw_description = req.description.clone();
 
         tokio::spawn(async move {
             // Mark as running
@@ -2824,6 +2843,7 @@ async fn api_create_task(
                 task_store: store.clone(),
                 ws_control_tx: ws_tx.clone(),
                 cancel: cancel.clone(),
+                session_id: session_id.clone(),
             };
 
             tracing::info!(task_id = %tid, "Sending task to agent runtime");
@@ -2833,6 +2853,11 @@ async fn api_create_task(
                     Ok(Ok(result)) => {
                         tracing::info!(task_id = %tid, success = result.success, "Task result received, updating store");
                         let user_stop = result.error.as_deref() == Some("Stopped by user");
+                        let answer_text = if user_stop {
+                            "Stopped by user.".to_string()
+                        } else {
+                            result.answer.clone()
+                        };
                         let mut tasks = store.write().await;
                         if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
                             t.status = if result.success {
@@ -2843,11 +2868,7 @@ async fn api_create_task(
                                 "failed".to_string()
                             };
                             t.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                            t.result = Some(if user_stop {
-                                "Stopped by user.".to_string()
-                            } else {
-                                result.answer
-                            });
+                            t.result = Some(answer_text.clone());
                             t.tokens_used = result.total_tokens;
                             t.iterations = result.iterations;
                             if let Some(err) = &result.error {
@@ -2884,6 +2905,16 @@ async fn api_create_task(
                             }
                         }
                         broadcast_tasks_changed(&ws_tx);
+                        // Persist turn into chat session so follow-up messages have context.
+                        if let Some(sid) = &session_id {
+                            save_session_turn(
+                                &state_spawn.chat_sessions,
+                                sid,
+                                &raw_description,
+                                &answer_text,
+                            )
+                            .await;
+                        }
                     }
                     Ok(Err(e)) => {
                         tracing::error!(task_id = %tid, error = %e, "Agent task channel closed");
@@ -2940,7 +2971,9 @@ async fn api_create_task(
         let include_mcp_catalog = req.use_mcp && mcp_for.is_some();
         let store = state.task_store.clone();
         let tid = task_id.clone();
-        let description = req.description.clone();
+        let description = enriched_description.clone();
+        let raw_description = req.description.clone();
+        let session_id = req.session_id.clone();
         let skill_block = skill_block.clone();
         let model = req
             .model
@@ -2992,6 +3025,7 @@ async fn api_create_task(
 
             match infer_outcome {
                 Ok((resp, _tool_logs)) => {
+                    let answer_text = resp.text.clone();
                     let mut tasks = store.write().await;
                     if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
                         // Pass / tool lines already streamed into `t.logs` during the run.
@@ -3004,7 +3038,18 @@ async fn api_create_task(
                             t.iterations = 1;
                         }
                     }
+                    drop(tasks);
                     broadcast_tasks_changed(&ws_tx);
+                    // Persist turn into chat session for follow-up continuity.
+                    if let Some(sid) = &session_id {
+                        save_session_turn(
+                            &state_spawn.chat_sessions,
+                            sid,
+                            &raw_description,
+                            &answer_text,
+                        )
+                        .await;
+                    }
                 }
                 Err(e) => {
                     let user_stop = e == "Stopped by user";
@@ -3046,7 +3091,9 @@ async fn api_create_task(
             .expect("mcp_ready implies Some");
         let store = state.task_store.clone();
         let tid = task_id.clone();
-        let description = req.description.clone();
+        let description = enriched_description.clone();
+        let raw_description = req.description.clone();
+        let session_id = req.session_id.clone();
         let skill_block = skill_block.clone();
         let model = req
             .model
@@ -3099,6 +3146,7 @@ async fn api_create_task(
 
             match infer_outcome {
                 Ok((resp, _tool_logs)) => {
+                    let answer_text = resp.text.clone();
                     let mut tasks = store.write().await;
                     if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
                         // Pass / tool lines already streamed into `t.logs` during the run.
@@ -3110,7 +3158,17 @@ async fn api_create_task(
                             t.iterations = 1;
                         }
                     }
+                    drop(tasks);
                     broadcast_tasks_changed(&ws_tx);
+                    if let Some(sid) = &session_id {
+                        save_session_turn(
+                            &state_spawn.chat_sessions,
+                            sid,
+                            &raw_description,
+                            &answer_text,
+                        )
+                        .await;
+                    }
                 }
                 Err(e) => {
                     let user_stop = e == "Stopped by user";

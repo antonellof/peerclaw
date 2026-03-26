@@ -538,6 +538,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
           budget,
           model,
           use_mcp: chatPreferences.useMcp,
+          session_id: sessionId,
         })
         if (!res.success || !res.task_id) {
           setMessages((m) => [

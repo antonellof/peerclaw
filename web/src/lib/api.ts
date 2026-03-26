@@ -401,11 +401,15 @@ export async function createTask(payload: {
   model?: string | null
   budget?: number
   use_mcp?: boolean
+  session_id?: string | null
 }): Promise<{ success: boolean; task_id?: string; error?: string }> {
   const r = await apiFetch("/api/tasks", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      ...(payload.session_id ? { session_id: payload.session_id } : {}),
+    }),
   })
   return r.json()
 }

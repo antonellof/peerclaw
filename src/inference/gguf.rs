@@ -319,9 +319,10 @@ impl GgufBackend for LlamaCppBackend {
         tracing::info!(path = ?path, "Loading GGUF model with llama-cpp-2");
         let start = Instant::now();
 
-        // Create model params
+        // Create model params — n_gpu_layers: -1 means offload all layers (auto).
+        let gpu_layers = if config.n_gpu_layers < 0 { 999 } else { config.n_gpu_layers as u32 };
         let model_params =
-            LlamaModelParams::default().with_n_gpu_layers(config.n_gpu_layers as u32);
+            LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
 
         let model = LlamaModel::load_from_file(&self.backend, path, &model_params)
             .map_err(|e| GgufError::LoadFailed(format!("{:?}", e)))?;
@@ -336,9 +337,20 @@ impl GgufBackend for LlamaCppBackend {
             .map(|m| (m.len() / (1024 * 1024)) as u32)
             .unwrap_or(4096);
 
+        let gpu_info = if config.n_gpu_layers != 0 {
+            #[cfg(target_os = "macos")]
+            { "Metal" }
+            #[cfg(not(target_os = "macos"))]
+            { "CUDA (if available)" }
+        } else {
+            "CPU only"
+        };
+
         tracing::info!(
             model_id = %id,
             memory_mb = memory_mb,
+            gpu_layers = gpu_layers,
+            gpu = gpu_info,
             elapsed_ms = start.elapsed().as_millis(),
             "Model loaded successfully"
         );
@@ -428,14 +440,25 @@ impl GgufBackend for LlamaCppBackend {
 
         let ttfb = start.elapsed();
 
-        // Set up sampler
-        let mut sampler =
-            LlamaSampler::chain_simple([LlamaSampler::dist(1234), LlamaSampler::greedy()]);
+        // Set up sampler chain: top-p → temperature → dist (for non-deterministic sampling).
+        // When temperature ≈ 0, use greedy for deterministic output.
+        let mut sampler = if request.temperature < 0.01 {
+            LlamaSampler::chain_simple([LlamaSampler::greedy()])
+        } else {
+            LlamaSampler::chain_simple([
+                LlamaSampler::top_p(request.top_p.min(1.0).max(0.0), 1),
+                LlamaSampler::temp(request.temperature),
+                LlamaSampler::dist(rand::random::<u32>()),
+            ])
+        };
 
         // Generate tokens
         let mut output = String::new();
         let mut token_count = 0u32;
         let mut n_cur = tokens.len();
+
+        // Pre-compute stop sequences as byte strings for matching.
+        let stop_seqs: Vec<&str> = request.stop_sequences.iter().map(|s| s.as_str()).collect();
 
         while token_count < request.max_tokens {
             // Sample next token
@@ -447,8 +470,7 @@ impl GgufBackend for LlamaCppBackend {
                 break;
             }
 
-            // Decode token to text using bytes
-            // Args: token, buffer_size, special (decode specials), lstrip
+            // Decode token to text
             if let Ok(bytes) = inner
                 .model
                 .model
@@ -461,6 +483,18 @@ impl GgufBackend for LlamaCppBackend {
 
             token_count += 1;
 
+            // Check stop sequences
+            if !stop_seqs.is_empty() && stop_seqs.iter().any(|ss| output.ends_with(ss)) {
+                // Trim the stop sequence from the output.
+                for ss in &stop_seqs {
+                    if output.ends_with(ss) {
+                        output.truncate(output.len() - ss.len());
+                        break;
+                    }
+                }
+                break;
+            }
+
             // Prepare for next token
             batch.clear();
             batch
@@ -469,7 +503,6 @@ impl GgufBackend for LlamaCppBackend {
                     GgufError::GenerationFailed(format!("Failed to add token: {:?}", e))
                 })?;
 
-            // Decode
             ctx.decode(&mut batch)
                 .map_err(|e| GgufError::GenerationFailed(format!("Failed to decode: {:?}", e)))?;
 
@@ -581,26 +614,31 @@ impl GgufBackend for LlamaCppBackend {
 
         let ttfb = start.elapsed();
 
-        // Set up sampler
-        let mut sampler =
-            LlamaSampler::chain_simple([LlamaSampler::dist(1234), LlamaSampler::greedy()]);
+        // Set up sampler chain with temperature and top-p.
+        let mut sampler = if request.temperature < 0.01 {
+            LlamaSampler::chain_simple([LlamaSampler::greedy()])
+        } else {
+            LlamaSampler::chain_simple([
+                LlamaSampler::top_p(request.top_p.min(1.0).max(0.0), 1),
+                LlamaSampler::temp(request.temperature),
+                LlamaSampler::dist(rand::random::<u32>()),
+            ])
+        };
 
         // Generate tokens with streaming
         let mut output = String::new();
         let mut token_count = 0u32;
         let mut n_cur = tokens.len();
+        let stop_seqs: Vec<&str> = request.stop_sequences.iter().map(|s| s.as_str()).collect();
 
         while token_count < request.max_tokens {
-            // Sample next token
             let new_token = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(new_token);
 
-            // Check for end of sequence
             if inner.model.model.is_eog_token(new_token) {
                 break;
             }
 
-            // Decode token to text and stream it
             if let Ok(bytes) = inner
                 .model
                 .model
@@ -608,14 +646,22 @@ impl GgufBackend for LlamaCppBackend {
             {
                 if let Ok(s) = std::str::from_utf8(&bytes) {
                     output.push_str(s);
-                    // Stream the token to the callback
                     token_callback(s);
                 }
             }
 
             token_count += 1;
 
-            // Prepare for next token
+            if !stop_seqs.is_empty() && stop_seqs.iter().any(|ss| output.ends_with(ss)) {
+                for ss in &stop_seqs {
+                    if output.ends_with(ss) {
+                        output.truncate(output.len() - ss.len());
+                        break;
+                    }
+                }
+                break;
+            }
+
             batch.clear();
             batch
                 .add(new_token, n_cur as i32, &[0], true)
@@ -623,7 +669,6 @@ impl GgufBackend for LlamaCppBackend {
                     GgufError::GenerationFailed(format!("Failed to add token: {:?}", e))
                 })?;
 
-            // Decode
             ctx.decode(&mut batch)
                 .map_err(|e| GgufError::GenerationFailed(format!("Failed to decode: {:?}", e)))?;
 
