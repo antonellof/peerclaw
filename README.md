@@ -188,7 +188,7 @@ Create and edit `SKILL.md` prompt extensions with AI-assisted drafting. Select a
 ### Install
 
 ```bash
-git clone https://github.com/yourusername/peerclaw.git
+git clone https://github.com/antonellof/peerclaw.git
 cd peerclaw
 cargo build --release
 ```
