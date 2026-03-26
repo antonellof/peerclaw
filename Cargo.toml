@@ -1,6 +1,6 @@
 [package]
 name = "peerclaw"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.80"
 description = "Decentralized P2P AI agent network"

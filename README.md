@@ -526,4 +526,4 @@ policy_enforcement = true
 
 ---
 
-*v0.4 — March 2026*
+*v0.3.0 — March 2026*

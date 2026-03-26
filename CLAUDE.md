@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PeerClaw is a fully decentralized peer-to-peer AI agent network written in Rust. It ships as a single static binary where autonomous AI agents collaborate, share resources, and transact using a native token economy.
 
-**Current Status:** v0.2 - Production-ready with full P2P networking, local inference, vector memory, skills system, and multi-platform messaging.
+**Current Status:** v0.3.0 - Production-ready with full P2P networking, local inference, vector persistence, skills system, agent runtime, provider sharing, true SSE streaming, and multi-platform messaging.
 
 ## Build Commands
 
