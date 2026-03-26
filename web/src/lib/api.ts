@@ -832,7 +832,7 @@ export async function postChatStream(
   return donePayload
 }
 
-export type OpenAiModel = { id: string; object?: string }
+export type OpenAiModel = { id: string; object?: string; owned_by?: string }
 
 export type ModelsListResponse = { data?: OpenAiModel[] }
 

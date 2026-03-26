@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { ChevronDown, Plus, Send, Settings2, Wrench, Plug, Zap } from "lucide-react"
+import { ChevronDown, Send, Settings2, Zap } from "lucide-react"
 
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
 import { createTask, fetchOpenAiModels, fetchTaskDetail, postChatStream, stopWebTask } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
@@ -135,8 +139,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
   const [showWelcome, setShowWelcome] = useState(true)
   /** When true, next send creates a background agent task instead of streaming chat. */
   const [deepTaskMode, setDeepTaskMode] = useState(false)
-  const [plusMenuOpen, setPlusMenuOpen] = useState(false)
-  const [models, setModels] = useState<string[]>([])
+  const [models, setModels] = useState<{ id: string; owned_by?: string }[]>([])
   const model = chatPreferences.model
   const setModel = useCallback(
     (m: string) => {
@@ -207,15 +210,16 @@ export function ChatPanel({ onRegisterControls }: Props) {
   const refreshModels = useCallback(async () => {
     try {
       const list = await fetchOpenAiModels()
-      const ids = list.map((m) => m.id).filter(Boolean)
-      if (ids.length) {
-        setModels(ids)
-        if (!ids.includes(chatPreferences.model)) {
-          setChatPreferences({ model: ids[0]! })
+      const items = list.filter((m) => m.id).map((m) => ({ id: m.id, owned_by: m.owned_by }))
+      if (items.length) {
+        setModels(items)
+        if (!items.some((m) => m.id === chatPreferences.model)) {
+          setChatPreferences({ model: items[0]!.id })
         }
       }
     } catch {
-      setModels(["llama-3.2-3b", "llama-3.2-1b", "phi-3-mini"])
+      // Keep whatever was loaded before; if empty, leave empty — the
+      // fallback modelList below will show a single "default" entry.
     }
   }, [chatPreferences.model, setChatPreferences])
 
@@ -642,7 +646,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
     requestAnimationFrame(updateScrollPinState)
   }, [messages, streamLocked, typing, updateScrollPinState])
 
-  const modelList = models.length ? models : ["llama-3.2-3b"]
+  const modelList = models.length ? models : [{ id: chatPreferences.model || "default", owned_by: "unknown" }]
+  const [modelSearch, setModelSearch] = useState("")
 
   const applyAgentTemplate = (key: keyof typeof AGENT_TASK_TEMPLATES) => {
     const t = AGENT_TASK_TEMPLATES[key]
@@ -789,26 +794,6 @@ export function ChatPanel({ onRegisterControls }: Props) {
           <div className="shrink-0 border-t border-border/80 bg-gradient-to-t from-card/90 to-card/40 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 md:px-4">
             <div className="mx-auto max-w-3xl space-y-2">
 
-          {/* Active badges row - show non-default settings as small dismissible pills */}
-          {(deepTaskMode || chatPreferences.useMcp) && (
-            <div className="flex flex-wrap items-center gap-1.5 px-1">
-              {deepTaskMode && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
-                  <Zap className="size-3" />
-                  Deep task · {agentTaskType}
-                  <button type="button" className="ml-0.5 opacity-60 hover:opacity-100" onClick={() => setDeepTaskMode(false)}>×</button>
-                </span>
-              )}
-              {chatPreferences.useMcp && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-purple-500/40 bg-purple-500/10 px-2 py-0.5 text-[11px] font-medium text-purple-700 dark:text-purple-400">
-                  <Plug className="size-3" />
-                  MCP
-                  <button type="button" className="ml-0.5 opacity-60 hover:opacity-100" onClick={() => setChatPreferences({ useMcp: false })}>×</button>
-                </span>
-              )}
-            </div>
-          )}
-
           <div className="relative rounded-2xl border border-border/80 bg-background shadow-sm">
             {/* Slash command autocomplete */}
             {autocompleteOpen && filteredAc.length > 0 && (
@@ -833,166 +818,54 @@ export function ChatPanel({ onRegisterControls }: Props) {
               </div>
             )}
 
-            {/* Plus menu popover */}
-            {plusMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setPlusMenuOpen(false)} />
-                <div className="absolute bottom-full left-0 z-40 mb-2 w-64 rounded-xl border border-border bg-popover p-1.5 shadow-lg">
-                  {/* Tools toggle */}
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted"
-                    onClick={() => {
-                      setChatPreferences({ useAgentic: !chatPreferences.useAgentic })
-                    }}
-                  >
-                    <Wrench className={cn("size-4", chatPreferences.useAgentic ? "text-primary" : "text-muted-foreground")} />
-                    <div className="flex-1">
-                      <div className="font-medium">Tools</div>
-                      <div className="text-[11px] text-muted-foreground">ReAct loop with node tools</div>
-                    </div>
-                    <div className={cn(
-                      "size-4 rounded-full border-2 transition-colors",
-                      chatPreferences.useAgentic ? "border-primary bg-primary" : "border-muted-foreground/40",
-                    )} />
-                  </button>
-
-                  {/* MCP toggle */}
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted"
-                    onClick={() => {
-                      setChatPreferences({ useMcp: !chatPreferences.useMcp })
-                    }}
-                  >
-                    <Plug className={cn("size-4", chatPreferences.useMcp ? "text-purple-500" : "text-muted-foreground")} />
-                    <div className="flex-1">
-                      <div className="font-medium">MCP tools</div>
-                      <div className="text-[11px] text-muted-foreground">External tool servers</div>
-                    </div>
-                    <div className={cn(
-                      "size-4 rounded-full border-2 transition-colors",
-                      chatPreferences.useMcp ? "border-purple-500 bg-purple-500" : "border-muted-foreground/40",
-                    )} />
-                  </button>
-
-                  <div className="my-1 border-t border-border/60" />
-
-                  {/* Deep task mode */}
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted"
-                    onClick={() => {
-                      setDeepTaskMode(!deepTaskMode)
-                      setPlusMenuOpen(false)
-                    }}
-                  >
-                    <Zap className={cn("size-4", deepTaskMode ? "text-amber-500" : "text-muted-foreground")} />
-                    <div className="flex-1">
-                      <div className="font-medium">Deep task</div>
-                      <div className="text-[11px] text-muted-foreground">Background agent with multi-step tools</div>
-                    </div>
-                    <div className={cn(
-                      "size-4 rounded-full border-2 transition-colors",
-                      deepTaskMode ? "border-amber-500 bg-amber-500" : "border-muted-foreground/40",
-                    )} />
-                  </button>
-
-                  {/* Deep task sub-options */}
-                  {deepTaskMode && (
-                    <div className="ml-7 mt-1 space-y-2 px-3 pb-2">
-                      <div>
-                        <label className="text-[11px] font-medium text-muted-foreground">Task type</label>
-                        <select
-                          className="mt-0.5 h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
-                          value={agentTaskType}
-                          onChange={(e) => setAgentTaskType(e.target.value)}
-                        >
-                          {["general", "research", "code", "monitor", "analyze"].map((x) => (
-                            <option key={x} value={x}>{x}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-medium text-muted-foreground">Budget (PCLAW)</label>
-                        <input
-                          type="number"
-                          className="mt-0.5 h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
-                          value={agentBudget}
-                          min={0.5}
-                          step={0.5}
-                          onChange={(e) => setAgentBudget(parseFloat(e.target.value) || 5)}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            <div className="flex items-end gap-0">
-              {/* Plus button */}
-              <button
-                type="button"
-                className={cn(
-                  "mb-2 ml-2 flex size-9 shrink-0 items-center justify-center rounded-full border border-border/80 transition-colors hover:bg-muted",
-                  plusMenuOpen && "bg-muted",
-                )}
-                onClick={() => setPlusMenuOpen(!plusMenuOpen)}
-                title="Options"
-              >
-                <Plus className="size-4 text-muted-foreground" />
-              </button>
-
-              {/* Textarea */}
-              <Textarea
-                ref={textareaRef}
-                rows={1}
-                placeholder={
-                  deepTaskMode
-                    ? "Describe the goal for the agent…"
-                    : "Message, or type / for commands…"
+            {/* Textarea */}
+            <Textarea
+              ref={textareaRef}
+              rows={1}
+              placeholder={
+                deepTaskMode
+                  ? "Describe the goal for the agent…"
+                  : "Message, or type / for commands…"
+              }
+              value={input}
+              onChange={(e) => onInputChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  void send()
                 }
-                value={input}
-                onChange={(e) => onInputChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
+                if (autocompleteOpen && filteredAc.length) {
+                  if (e.key === "ArrowDown") {
                     e.preventDefault()
-                    void send()
+                    setAutocompleteIdx((i) => (i + 1) % filteredAc.length)
                   }
-                  if (autocompleteOpen && filteredAc.length) {
-                    if (e.key === "ArrowDown") {
-                      e.preventDefault()
-                      setAutocompleteIdx((i) => (i + 1) % filteredAc.length)
-                    }
-                    if (e.key === "ArrowUp") {
-                      e.preventDefault()
-                      setAutocompleteIdx((i) => (i - 1 + filteredAc.length) % filteredAc.length)
-                    }
-                    if (e.key === "Tab" && filteredAc[autocompleteIdx]) {
-                      e.preventDefault()
-                      setInput(filteredAc[autocompleteIdx]!.cmd + " ")
-                    }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault()
+                    setAutocompleteIdx((i) => (i - 1 + filteredAc.length) % filteredAc.length)
                   }
-                }}
-                className="min-h-[52px] max-h-[min(50dvh,22.5rem)] flex-1 resize-none border-0 bg-transparent py-3 pr-12 focus-visible:ring-0"
-                disabled={typing || streamLocked}
-              />
+                  if (e.key === "Tab" && filteredAc[autocompleteIdx]) {
+                    e.preventDefault()
+                    setInput(filteredAc[autocompleteIdx]!.cmd + " ")
+                  }
+                }
+              }}
+              className="min-h-[52px] max-h-[min(50dvh,22.5rem)] resize-none border-0 bg-transparent py-3 pr-12 focus-visible:ring-0"
+              disabled={typing || streamLocked}
+            />
 
-              {/* Send button */}
-              <Button
-                size="icon"
-                className="absolute bottom-2 right-2 size-9 shrink-0 rounded-full"
-                disabled={typing || streamLocked}
-                onClick={() => void send()}
-              >
-                <Send className="size-4" />
-              </Button>
-            </div>
+            {/* Send button */}
+            <Button
+              size="icon"
+              className="absolute bottom-2 right-2 size-9 shrink-0 rounded-full"
+              disabled={typing || streamLocked}
+              onClick={() => void send()}
+            >
+              <Send className="size-4" />
+            </Button>
 
-            {/* Bottom toolbar - mode & model selectors like Cursor */}
-            <div className="flex items-center gap-1.5 px-3 pb-2 pt-0.5">
-              {/* Mode dropdown: Chat / Agent */}
+            {/* Bottom toolbar */}
+            <div className="flex items-center gap-1 px-3 pb-2 pt-0.5">
+              {/* Mode dropdown with settings submenu */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -1007,7 +880,9 @@ export function ChatPanel({ onRegisterControls }: Props) {
                     <ChevronDown className="size-3 opacity-50" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuContent align="start" className="w-56">
+                  {/* Mode selection */}
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Mode</DropdownMenuLabel>
                   <DropdownMenuRadioGroup value={deepTaskMode ? "agent" : "chat"} onValueChange={(v) => setDeepTaskMode(v === "agent")}>
                     <DropdownMenuRadioItem value="chat" className="text-xs">
                       Chat <span className="ml-auto text-[10px] text-muted-foreground">streaming</span>
@@ -1016,30 +891,174 @@ export function ChatPanel({ onRegisterControls }: Props) {
                       Agent <span className="ml-auto text-[10px] text-muted-foreground">deep task</span>
                     </DropdownMenuRadioItem>
                   </DropdownMenuRadioGroup>
+
+                  <DropdownMenuSeparator />
+
+                  {/* Tool toggles */}
+                  <DropdownMenuCheckboxItem
+                    className="text-xs"
+                    checked={chatPreferences.useAgentic}
+                    onCheckedChange={(v) => setChatPreferences({ useAgentic: !!v })}
+                  >
+                    Tools (ReAct loop)
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    className="text-xs"
+                    checked={chatPreferences.useMcp}
+                    onCheckedChange={(v) => setChatPreferences({ useMcp: !!v })}
+                  >
+                    MCP tools
+                  </DropdownMenuCheckboxItem>
+
+                  {/* Agent task settings submenu - only meaningful when in agent mode */}
+                  {deepTaskMode && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger className="text-xs">Task type</DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className="w-40">
+                          <DropdownMenuRadioGroup value={agentTaskType} onValueChange={setAgentTaskType}>
+                            {["general", "research", "code", "monitor", "analyze"].map((x) => (
+                              <DropdownMenuRadioItem key={x} value={x} className="text-xs capitalize">
+                                {x}
+                              </DropdownMenuRadioItem>
+                            ))}
+                          </DropdownMenuRadioGroup>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                      <div className="flex items-center gap-2 px-2 py-1.5">
+                        <span className="text-xs text-muted-foreground">Budget</span>
+                        <input
+                          type="number"
+                          className="h-6 w-16 rounded border border-input bg-background px-1.5 text-xs"
+                          value={agentBudget}
+                          min={0.5}
+                          step={0.5}
+                          onChange={(e) => setAgentBudget(parseFloat(e.target.value) || 5)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <span className="text-[10px] text-muted-foreground">PCLAW</span>
+                      </div>
+                    </>
+                  )}
+
+                  <DropdownMenuSeparator />
+
+                  {/* Settings submenu */}
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="text-xs">Settings</DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-52">
+                      <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Inference</DropdownMenuLabel>
+                      <div className="space-y-2 px-2 py-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">Temperature</span>
+                          <input
+                            type="number"
+                            className="h-6 w-14 rounded border border-input bg-background px-1.5 text-xs"
+                            value={settings.temperature}
+                            min={0}
+                            max={2}
+                            step={0.1}
+                            onChange={(e) => setSettings({ temperature: parseFloat(e.target.value) || 0.7 })}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">Max tokens</span>
+                          <input
+                            type="number"
+                            className="h-6 w-16 rounded border border-input bg-background px-1.5 text-xs"
+                            value={settings.maxTokens}
+                            min={50}
+                            step={50}
+                            onChange={(e) => setSettings({ maxTokens: parseInt(e.target.value) || 500 })}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
+                      </div>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuCheckboxItem
+                        className="text-xs"
+                        checked={settings.distributed}
+                        onCheckedChange={(v) => setSettings({ distributed: !!v })}
+                      >
+                        Distributed (P2P)
+                      </DropdownMenuCheckboxItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              {/* Model dropdown */}
-              <DropdownMenu>
+              {/* Model dropdown - grouped by provider with search */}
+              <DropdownMenu onOpenChange={(open) => { if (!open) setModelSearch("") }}>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex max-w-[10rem] items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    className="inline-flex max-w-[12rem] items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   >
                     <span className="truncate">{model}</span>
                     <ChevronDown className="size-3 shrink-0 opacity-50" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-56">
-                  <DropdownMenuLabel className="text-xs">Model</DropdownMenuLabel>
+                <DropdownMenuContent align="start" className="w-64">
+                  <div className="px-2 pb-1.5 pt-1">
+                    <input
+                      type="text"
+                      placeholder="Search models…"
+                      className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+                      value={modelSearch}
+                      onChange={(e) => setModelSearch(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    />
+                  </div>
                   <DropdownMenuSeparator />
-                  <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
-                    {modelList.map((m) => (
-                      <DropdownMenuRadioItem key={m} value={m} className="text-xs">
-                        {m}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
+                  <div className="max-h-64 overflow-y-auto">
+                    <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
+                      {(() => {
+                        const q = modelSearch.toLowerCase().trim()
+                        const filtered = q
+                          ? modelList.filter((m) => m.id.toLowerCase().includes(q))
+                          : modelList
+
+                        const groups: Record<string, typeof filtered> = {}
+                        for (const m of filtered) {
+                          const key = m.owned_by ?? "unknown"
+                          ;(groups[key] ??= []).push(m)
+                        }
+
+                        const groupOrder = ["local-gguf", "ollama", "remote-api", "unknown"]
+                        const groupLabels: Record<string, string> = {
+                          "local-gguf": "Local GGUF",
+                          "ollama": "Ollama",
+                          "remote-api": "Remote API",
+                          "unknown": "Other",
+                        }
+
+                        const sortedKeys = Object.keys(groups).sort(
+                          (a, b) => (groupOrder.indexOf(a) === -1 ? 99 : groupOrder.indexOf(a)) - (groupOrder.indexOf(b) === -1 ? 99 : groupOrder.indexOf(b))
+                        )
+
+                        if (filtered.length === 0) {
+                          return <div className="px-3 py-4 text-center text-xs text-muted-foreground">No models match &ldquo;{modelSearch}&rdquo;</div>
+                        }
+
+                        return sortedKeys.map((key, gi) => (
+                          <div key={key}>
+                            {gi > 0 && <DropdownMenuSeparator />}
+                            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                              {groupLabels[key] ?? key}
+                            </DropdownMenuLabel>
+                            {groups[key]!.map((m) => (
+                              <DropdownMenuRadioItem key={m.id} value={m.id} className="text-xs">
+                                {m.id}
+                              </DropdownMenuRadioItem>
+                            ))}
+                          </div>
+                        ))
+                      })()}
+                    </DropdownMenuRadioGroup>
+                  </div>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
