@@ -2035,7 +2035,24 @@ async fn api_chat(
     if req.agentic {
         if let Some(registry) = state.tools.clone() {
             if state.inference_tx.is_some() {
-                let body = format!("### User thread\n{prompt_for_model}");
+                // Auto-inject matching skill prompt if a skill registry is available.
+                let skill_inject = if let Some(ref skills) = state.skills {
+                    skills.select_best(&user_message).await
+                        .filter(|s| s.is_available())
+                        .map(|s| {
+                            let body = s.prompt();
+                            let clipped = if body.chars().count() > 6_000 {
+                                format!("{}…(truncated)", body.chars().take(6_000).collect::<String>())
+                            } else {
+                                body.to_string()
+                            };
+                            format!("### Active Skill: {}\n{}\n\n", s.name(), clipped)
+                        })
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let body = format!("{skill_inject}### User thread\n{prompt_for_model}");
                 match run_unified_agentic_inference(
                     state.as_ref(),
                     Some(registry),

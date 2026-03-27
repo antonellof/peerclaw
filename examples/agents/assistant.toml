@@ -70,16 +70,26 @@ total = 2000.0
 [tools]
 builtin = [
     "web_fetch",
+    "web_search",
     "http",
+    "browser",
+    "pdf_read",
     "file_read",
     "file_write",
     "file_list",
+    "apply_patch",
     "shell",
     "memory_search",
     "memory_write",
-    "echo",
-    "time",
     "json",
+    "time",
+    "echo",
+    "llm_task",
+    "agent_spawn",
+    "job_submit",
+    "job_status",
+    "peer_discovery",
+    "wallet_balance",
 ]
 allowed_commands = ["ls", "cat", "grep", "find", "wc", "sort", "head", "tail", "curl", "python3", "node", "git", "npm", "pip"]
 

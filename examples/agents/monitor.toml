@@ -30,7 +30,7 @@ per_hour = 2.0
 total = 50.0
 
 [tools]
-builtin = ["read_file", "write_file", "p2p_status", "p2p_peers", "job_list"]
+builtin = ["file_read", "file_write", "shell", "web_fetch", "peer_discovery", "wallet_balance", "job_submit", "job_status", "memory_search", "memory_write"]
 
 [memory]
 collection = "network_logs"

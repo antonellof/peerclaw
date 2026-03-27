@@ -30,7 +30,7 @@ per_hour = 15.0
 total = 150.0
 
 [tools]
-builtin = ["read_file", "write_file", "list_dir", "shell"]
+builtin = ["file_read", "file_write", "file_list", "shell", "json", "web_fetch", "pdf_read", "memory_search", "memory_write", "llm_task"]
 # Allow Python and common data tools
 allowed_commands = ["python3", "sqlite3", "jq", "sort", "uniq", "wc", "awk"]
 

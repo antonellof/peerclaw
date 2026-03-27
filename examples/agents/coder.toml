@@ -29,7 +29,7 @@ per_hour = 20.0
 total = 200.0
 
 [tools]
-builtin = ["read_file", "write_file", "list_dir", "shell", "apply_patch"]
+builtin = ["file_read", "file_write", "file_list", "shell", "apply_patch", "web_search", "web_fetch", "json", "memory_search", "memory_write", "llm_task"]
 # Restrict shell to safe commands
 allowed_commands = ["cargo", "npm", "python", "git", "ls", "cat", "grep"]
 

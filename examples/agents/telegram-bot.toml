@@ -31,7 +31,7 @@ per_day = 50.0
 total = 500.0
 
 [tools]
-builtin = ["web_search", "web_fetch", "time"]
+builtin = ["web_search", "web_fetch", "browser", "json", "time", "memory_search", "memory_write", "wallet_balance"]
 
 [channels]
 telegram = { bot_token_env = "TELEGRAM_BOT_TOKEN" }

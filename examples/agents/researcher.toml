@@ -30,7 +30,7 @@ per_hour = 10.0
 total = 100.0
 
 [tools]
-builtin = ["web_search", "web_fetch", "read_file", "write_file"]
+builtin = ["web_search", "web_fetch", "browser", "pdf_read", "file_read", "file_write", "json", "memory_search", "memory_write", "llm_task", "agent_spawn"]
 
 [memory]
 collection = "research_memory"

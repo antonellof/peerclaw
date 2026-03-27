@@ -115,6 +115,13 @@ impl SkillRegistry {
         self.local_skills.read().await.get(name).cloned()
     }
 
+    /// Select the best matching skill for the given user input text.
+    pub async fn select_best(&self, input: &str) -> Option<Arc<LoadedSkill>> {
+        let skills: Vec<Arc<LoadedSkill>> = self.local_skills.read().await.values().cloned().collect();
+        let scores = super::selector::select_skills(&skills, input, &[], 1, 0.3);
+        scores.into_iter().next().map(|s| s.skill)
+    }
+
     /// List all local skills.
     pub async fn list_local(&self) -> Vec<Arc<LoadedSkill>> {
         self.local_skills.read().await.values().cloned().collect()
