@@ -1346,37 +1346,54 @@ async fn run_unified_agentic_inference(
         let mut calls = crate::agent::parse_tool_calls(&text);
         if calls.is_empty() {
             // Detect "plan without action" — model describes what it *would* do but
-            // doesn't emit tool_call blocks. Auto-generate a web_search from the user's goal.
-            if iter == 1 {
+            // doesn't emit tool_call blocks. Auto-generate tool calls from context.
+            if iter <= 3 {
                 let plan_phrases = ["let me search", "let me gather", "let me look",
                     "i'll search", "i'll research", "i'll fetch", "i'll start by",
-                    "sub-questions", "let me find", "let me check"];
+                    "sub-questions", "let me find", "let me check", "i'll gather",
+                    "let me explore", "i'll explore", "i'll investigate"];
                 let lower = text.to_lowercase();
                 let is_plan = plan_phrases.iter().any(|p| lower.contains(p));
 
                 if is_plan {
-                    // Extract the original user goal from conversation to build a search query.
-                    let goal = conversation_body.lines()
-                        .find(|l| !l.starts_with('#') && !l.starts_with("Tool ") && l.len() > 10)
-                        .unwrap_or(&conversation_body)
-                        .trim()
-                        .chars().take(200).collect::<String>();
+                    // Try to extract a URL from the conversation (from prior tool results).
+                    let url_from_results = conversation
+                        .rfind("\"url\":")
+                        .and_then(|pos| {
+                            let after = &conversation[pos + 6..];
+                            let start = after.find('"')? + 1;
+                            let end = after[start..].find('"')? + start;
+                            let url = &after[start..end];
+                            if url.starts_with("http") { Some(url.to_string()) } else { None }
+                        });
 
-                    // Auto-create a web_search tool call from the user's intent.
-                    let auto_call = crate::agent::ParsedToolCall {
-                        name: "web_search".to_string(),
-                        args: serde_json::json!({ "query": goal }),
-                    };
-                    calls = vec![auto_call];
+                    if let Some(url) = url_from_results {
+                        // We have search results — auto-fetch the top URL.
+                        calls = vec![crate::agent::ParsedToolCall {
+                            name: "web_fetch".to_string(),
+                            args: serde_json::json!({ "url": url }),
+                        }];
+                    } else {
+                        // No prior results — auto-search the user's goal.
+                        let goal = conversation_body.lines()
+                            .find(|l| !l.starts_with('#') && !l.starts_with("Tool ") && l.len() > 10)
+                            .unwrap_or(&conversation_body)
+                            .trim()
+                            .chars().take(200).collect::<String>();
+                        calls = vec![crate::agent::ParsedToolCall {
+                            name: "web_search".to_string(),
+                            args: serde_json::json!({ "query": goal }),
+                        }];
+                    }
 
                     if let Some(ref sink) = progress {
                         sink.append_log(format!(
-                            "[{}] Pass {}: model planned but didn't call tools — auto-searching",
+                            "[{}] Pass {}: model planned but didn't call tools — auto-{}",
                             chrono::Utc::now().format("%H:%M:%S"),
                             iter,
+                            if calls[0].name == "web_fetch" { "fetching URL" } else { "searching" },
                         )).await;
                     }
-                    // Fall through to the tool execution below with our auto-generated call
                 }
             }
 
