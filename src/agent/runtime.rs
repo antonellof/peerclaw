@@ -113,6 +113,7 @@ impl AgentRuntime {
             sandboxed: false,
             available_secrets: vec![],
             node_tool_tx,
+            egress_policy: None,
         };
 
         Self {

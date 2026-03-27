@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use reqwest::Client;
 
+use crate::safety::ssrf;
 use crate::tools::tool::{
     optional_i64, optional_str, require_str, ApprovalRequirement, Tool, ToolContext, ToolDomain,
     ToolError, ToolOutput,
@@ -103,15 +104,11 @@ impl Tool for HttpTool {
         let timeout_secs = optional_i64(&params, "timeout", 30) as u64;
 
         // Validate URL
-        let parsed_url = reqwest::Url::parse(url)
+        let _parsed_url = reqwest::Url::parse(url)
             .map_err(|e| ToolError::InvalidParameters(format!("Invalid URL: {}", e)))?;
 
-        // Security: block local addresses
-        if is_local_address(&parsed_url) {
-            return Err(ToolError::NotAuthorized(
-                "Requests to local addresses are not allowed".to_string(),
-            ));
-        }
+        // SSRF protection: validate URL against blocked IP ranges and metadata endpoints
+        ssrf::validate_url(url).map_err(|e| ToolError::NotAuthorized(e.to_string()))?;
 
         // Build request
         let mut builder = match method.as_str() {
@@ -292,15 +289,12 @@ impl Tool for WebFetchTool {
         let url = require_str(&params, "url")?;
         let max_length = optional_i64(&params, "max_length", 50000) as usize;
 
-        // Validate and fetch URL
-        let parsed_url = reqwest::Url::parse(url)
+        // Validate URL
+        let _parsed_url = reqwest::Url::parse(url)
             .map_err(|e| ToolError::InvalidParameters(format!("Invalid URL: {}", e)))?;
 
-        if is_local_address(&parsed_url) {
-            return Err(ToolError::NotAuthorized(
-                "Requests to local addresses are not allowed".to_string(),
-            ));
-        }
+        // SSRF protection: validate URL against blocked IP ranges and metadata endpoints
+        ssrf::validate_url(url).map_err(|e| ToolError::NotAuthorized(e.to_string()))?;
 
         let response = self
             .client
@@ -360,21 +354,6 @@ impl Tool for WebFetchTool {
 
     fn rate_limit(&self) -> Option<u32> {
         Some(30) // 30 requests per minute
-    }
-}
-
-fn is_local_address(url: &reqwest::Url) -> bool {
-    if let Some(host) = url.host_str() {
-        let host_lower = host.to_lowercase();
-        host_lower == "localhost"
-            || host_lower == "127.0.0.1"
-            || host_lower == "::1"
-            || host_lower.starts_with("192.168.")
-            || host_lower.starts_with("10.")
-            || host_lower.starts_with("172.16.")
-            || host_lower.ends_with(".local")
-    } else {
-        false
     }
 }
 
@@ -470,14 +449,15 @@ mod tests {
     }
 
     #[test]
-    fn test_is_local_address() {
-        let url = reqwest::Url::parse("http://localhost:8080").unwrap();
-        assert!(is_local_address(&url));
+    fn test_ssrf_blocks_local_addresses() {
+        assert!(ssrf::validate_url("http://127.0.0.1:8080").is_err());
+        assert!(ssrf::validate_url("http://192.168.1.1").is_err());
+        assert!(ssrf::validate_url("http://169.254.169.254/latest/meta-data").is_err());
+    }
 
-        let url = reqwest::Url::parse("http://192.168.1.1").unwrap();
-        assert!(is_local_address(&url));
-
-        let url = reqwest::Url::parse("https://example.com").unwrap();
-        assert!(!is_local_address(&url));
+    #[test]
+    fn test_ssrf_allows_public_addresses() {
+        assert!(ssrf::validate_url("http://8.8.8.8").is_ok());
+        assert!(ssrf::validate_url("https://1.1.1.1").is_ok());
     }
 }

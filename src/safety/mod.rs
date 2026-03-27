@@ -6,9 +6,11 @@
 //! - Tool output: Detect leaks and injection attempts before LLM sees them
 //! - Outbound: Validate responses before returning to user
 
+pub mod egress;
 pub mod leak_detector;
 pub mod policy;
 pub mod sanitizer;
+pub mod ssrf;
 pub mod validator;
 
 use std::time::Duration;
@@ -16,6 +18,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use egress::{EgressDenied, EgressPolicy, EgressRule};
 pub use leak_detector::{LeakDetector, LeakMatch, SecretPattern};
 pub use policy::{Policy, PolicyAction, PolicyRule, PolicyViolation};
 pub use sanitizer::{SanitizeAction, SanitizedOutput, Sanitizer};

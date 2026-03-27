@@ -1310,6 +1310,7 @@ async fn run_unified_agentic_inference(
                             sandboxed: false,
                             available_secrets: vec![],
                             node_tool_tx: state.node_tool_tx.clone(),
+                            egress_policy: None,
                         };
                         match reg
                             .execute_local(&call.name, call.args.clone(), &ctx)

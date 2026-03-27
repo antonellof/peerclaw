@@ -20,6 +20,8 @@ pub struct AgentSpec {
     pub memory: Option<MemorySpec>,
     #[serde(default)]
     pub routines: Option<RoutinesSpec>,
+    #[serde(default)]
+    pub network_policy: Option<NetworkPolicySpec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +159,45 @@ pub struct CronRoutine {
     pub task: String,
 }
 
+/// Network egress policy: deny-by-default or allow-by-default with rules.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkPolicySpec {
+    /// Default action: "deny" (allowlist mode) or "allow" (blocklist mode).
+    #[serde(default = "default_policy_default")]
+    pub default: String,
+    /// Ordered list of egress rules.
+    #[serde(default)]
+    pub rules: Vec<NetworkPolicyRule>,
+}
+
+fn default_policy_default() -> String {
+    "deny".to_string()
+}
+
+/// A single egress rule within the network policy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkPolicyRule {
+    /// Host pattern, e.g. "api.github.com" or "*.openai.com".
+    pub host: String,
+    /// Optional port restriction (e.g. 443). If absent, any port is matched.
+    pub port: Option<u16>,
+    /// Optional HTTP method restriction (e.g. ["GET", "POST"]).
+    /// If absent, all methods are allowed for this rule.
+    #[serde(default)]
+    pub methods: Vec<String>,
+    /// Optional tool restriction: only these tools may use this rule.
+    /// If absent, any tool may use it.
+    #[serde(default)]
+    pub tools: Vec<String>,
+    /// Action for this rule: "allow" or "deny". Default is "allow".
+    #[serde(default = "default_rule_action")]
+    pub action: String,
+}
+
+fn default_rule_action() -> String {
+    "allow".to_string()
+}
+
 impl AgentSpec {
     /// Parse an agent spec from TOML content.
     pub fn from_toml(content: &str) -> Result<Self, toml::de::Error> {
@@ -220,5 +261,50 @@ websocket = true
         assert_eq!(spec.model.max_tokens, 4096);
         assert!(spec.capabilities.web_access);
         assert_eq!(spec.tools.builtin.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_network_policy() {
+        let toml = r#"
+[agent]
+name = "policy-bot"
+description = "Bot with network policy"
+
+[network_policy]
+default = "deny"
+
+[[network_policy.rules]]
+host = "api.github.com"
+port = 443
+methods = ["GET", "POST"]
+tools = ["web_fetch"]
+
+[[network_policy.rules]]
+host = "*.openai.com"
+port = 443
+"#;
+        let spec = AgentSpec::from_toml(toml).unwrap();
+        let policy = spec.network_policy.unwrap();
+        assert_eq!(policy.default, "deny");
+        assert_eq!(policy.rules.len(), 2);
+        assert_eq!(policy.rules[0].host, "api.github.com");
+        assert_eq!(policy.rules[0].port, Some(443));
+        assert_eq!(policy.rules[0].methods, vec!["GET", "POST"]);
+        assert_eq!(policy.rules[0].tools, vec!["web_fetch"]);
+        assert_eq!(policy.rules[0].action, "allow");
+        assert_eq!(policy.rules[1].host, "*.openai.com");
+        assert!(policy.rules[1].methods.is_empty());
+        assert!(policy.rules[1].tools.is_empty());
+    }
+
+    #[test]
+    fn test_parse_no_network_policy() {
+        let toml = r#"
+[agent]
+name = "simple-bot"
+description = "No policy"
+"#;
+        let spec = AgentSpec::from_toml(toml).unwrap();
+        assert!(spec.network_policy.is_none());
     }
 }

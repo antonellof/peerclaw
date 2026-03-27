@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::node_tool::NodeToolTx;
+use crate::safety::egress::EgressPolicy;
 
 /// Execution context for tool calls.
 #[derive(Debug, Clone)]
@@ -25,6 +26,8 @@ pub struct ToolContext {
     pub available_secrets: Vec<String>,
     /// When set, `job_submit` / `job_status` forward to the running `peerclaw serve` node (P2P marketplace).
     pub node_tool_tx: Option<NodeToolTx>,
+    /// Network egress policy for this agent (if any).
+    pub egress_policy: Option<EgressPolicy>,
 }
 
 impl ToolContext {
@@ -38,6 +41,7 @@ impl ToolContext {
             sandboxed: false,
             available_secrets: vec![],
             node_tool_tx: None,
+            egress_policy: None,
         }
     }
 
@@ -51,6 +55,7 @@ impl ToolContext {
             sandboxed: false,
             available_secrets: vec![],
             node_tool_tx: None,
+            egress_policy: None,
         }
     }
 }

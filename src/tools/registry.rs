@@ -15,6 +15,7 @@ use tokio::sync::RwLock;
 use super::builtin;
 use super::tool::{parameter_schema_prompt_hint, Tool, ToolContext, ToolDomain, ToolError};
 use super::{ToolCapabilities, ToolLocation, ToolResult};
+use crate::safety::egress;
 
 fn required_json_value_missing(v: Option<&serde_json::Value>) -> bool {
     match v {
@@ -253,6 +254,23 @@ impl ToolRegistry {
 
         if let Err(e) = self.precheck_local_params(name, &params) {
             return Err(ToolError::InvalidParameters(e));
+        }
+
+        // Egress policy check for network tools.
+        if egress::is_network_tool(name) {
+            if let Some(ref policy) = ctx.egress_policy {
+                // Extract URL from params (both `http` and `web_fetch` use "url").
+                if let Some(url) = params.get("url").and_then(|v| v.as_str()) {
+                    let method = params
+                        .get("method")
+                        .and_then(|v| v.as_str());
+                    if let Err(denied) =
+                        policy.check_egress_with_method(url, name, method)
+                    {
+                        return Err(ToolError::NotAuthorized(denied.to_string()));
+                    }
+                }
+            }
         }
 
         let tool = self
