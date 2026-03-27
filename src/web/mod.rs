@@ -1219,6 +1219,8 @@ async fn run_unified_agentic_inference(
     progress: Option<AgenticTaskProgressSink>,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<(InferenceResponse, Vec<String>), String> {
+    // Cap max_tokens to prevent runaway inference (user might send millions)
+    let max_tokens = max_tokens.min(16384);
     let Some(tx) = &state.inference_tx else {
         return Err("Inference not available".into());
     };
@@ -1286,9 +1288,15 @@ async fn run_unified_agentic_inference(
             ))
             .await;
         }
+        // Add a generation prompt at the end so the model knows it should respond as Assistant
+        // and use tool_call blocks if it needs tools.
+        let mut prompt_for_model = conversation.clone();
+        if iter == 1 {
+            prompt_for_model.push_str("\n\nAssistant:");
+        }
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let request = InferenceRequest {
-            prompt: conversation.clone(),
+            prompt: prompt_for_model,
             model: model.clone(),
             max_tokens,
             temperature,
@@ -2065,7 +2073,7 @@ async fn api_chat(
     Json(req): Json<ChatRequest>,
 ) -> Json<ChatResponse> {
     let model = req.model.unwrap_or_else(|| "llama-3.2-3b".to_string());
-    let max_tokens = req.max_tokens.unwrap_or(2048);
+    let max_tokens = req.max_tokens.unwrap_or(2048).min(16384);
     let temperature = req.temperature.unwrap_or(0.7);
     let user_message = req.message.clone();
 
@@ -2280,7 +2288,7 @@ async fn api_chat_stream(
     Json(req): Json<ChatRequest>,
 ) -> Result<Response, (axum::http::StatusCode, Json<ChatResponse>)> {
     let model = req.model.unwrap_or_else(|| "llama-3.2-3b".to_string());
-    let max_tokens = req.max_tokens.unwrap_or(2048);
+    let max_tokens = req.max_tokens.unwrap_or(2048).min(16384);
     let temperature = req.temperature.unwrap_or(0.7);
     let user_message = req.message.clone();
 
