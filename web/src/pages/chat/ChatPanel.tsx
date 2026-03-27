@@ -744,7 +744,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   {m.agentTaskId && (
                     <div className="mb-2 text-[11px] text-muted-foreground">{m.agentStatusLine}</div>
                   )}
-                  {m.role === "assistant" ? (
+                  {m.role === "assistant" || m.role === "system" ? (
                     <ChatMessageMarkdown
                       content={m.content}
                       isAnimating={streamLocked && m.id === streamingMessageId}

@@ -181,6 +181,8 @@ pub struct WebState {
     pub skills: Option<Arc<crate::skills::SkillRegistry>>,
     /// Bounded chat history keyed by `session_id` for `/api/chat`.
     pub chat_sessions: Arc<RwLock<HashMap<String, Vec<ChatMessage>>>>,
+    /// Persistent session store (redb-backed); `None` when running without a data directory.
+    pub session_store: Option<Arc<crate::agent::SessionStore>>,
     /// MCP settings (mutable from `PUT /api/mcp/config`; in-memory until you edit `config.toml`).
     pub mcp_config: Arc<RwLock<crate::mcp::McpConfig>>,
     /// Live MCP connections + tool catalog when `reload_mcp_manager` has run successfully.
@@ -408,6 +410,7 @@ pub fn create_web_state(
         ws_control_tx: new_ws_control_plane(),
         skills: None,
         chat_sessions: Arc::new(RwLock::new(HashMap::new())),
+        session_store: None,
         mcp_config: Arc::new(RwLock::new(crate::mcp::McpConfig::default())),
         mcp_manager: Arc::new(RwLock::new(None)),
         tools: None,
@@ -448,6 +451,7 @@ pub fn create_web_state_with_channels(
         ws_control_tx: new_ws_control_plane(),
         skills: None,
         chat_sessions: Arc::new(RwLock::new(HashMap::new())),
+        session_store: None,
         mcp_config: Arc::new(RwLock::new(crate::mcp::McpConfig::default())),
         mcp_manager: Arc::new(RwLock::new(None)),
         tools: None,
@@ -487,6 +491,7 @@ pub fn create_web_state_with_inference(
         ws_control_tx: new_ws_control_plane(),
         skills: None,
         chat_sessions: Arc::new(RwLock::new(HashMap::new())),
+        session_store: None,
         mcp_config: Arc::new(RwLock::new(crate::mcp::McpConfig::default())),
         mcp_manager: Arc::new(RwLock::new(None)),
         tools: None,
@@ -526,6 +531,7 @@ pub fn create_web_state_with_swarm(
         ws_control_tx: new_ws_control_plane(),
         skills: None,
         chat_sessions: Arc::new(RwLock::new(HashMap::new())),
+        session_store: None,
         mcp_config: Arc::new(RwLock::new(crate::mcp::McpConfig::default())),
         mcp_manager: Arc::new(RwLock::new(None)),
         tools: None,
@@ -1169,8 +1175,11 @@ async fn build_agentic_system_prefix(
         infos.retain(|t| matches!(t.location, ToolLocation::Local));
         infos.sort_by(|a, b| a.name.cmp(&b.name));
         // Keep only the most useful tools for small-context models.
-        let priority_tools = ["web_fetch", "json", "shell", "read_file", "write_file",
-            "memory_search", "memory_store", "job_submit", "job_status"];
+        let priority_tools = [
+            "web_fetch", "web_search", "shell", "file_read", "file_write", "apply_patch",
+            "browser", "pdf_read", "json", "memory_search", "memory_write",
+            "llm_task", "agent_spawn", "job_submit", "job_status",
+        ];
         let (priority, rest): (Vec<_>, Vec<_>) = infos.into_iter()
             .partition(|t| priority_tools.contains(&t.name.as_str()));
         for t in &priority {
@@ -1254,15 +1263,12 @@ async fn run_unified_agentic_inference(
     let mut consecutive_all_fail_passes: u32 = 0;
 
     for iter in 1..=AGENTIC_MAX_ITERS {
-        // Compact conversation to fit model context.
+        // Compact conversation to fit model context using smart pruning.
         if conversation.len() > conv_max_chars {
-            let keep_tail = conv_max_chars.saturating_sub(prefix_len + 200);
-            let cut_at = conversation.len().saturating_sub(keep_tail);
-            let boundary = conversation[cut_at..].find('\n').map(|i| cut_at + i + 1).unwrap_or(cut_at);
-            conversation = format!(
-                "{}\n\n(Earlier conversation compacted.)\n\n{}",
-                &conversation[..prefix_len],
-                &conversation[boundary..]
+            conversation = crate::agent::compaction::prune_string_conversation(
+                &conversation,
+                prefix_len,
+                conv_max_chars,
             );
         }
 
@@ -1872,20 +1878,49 @@ struct ChatResponse {
 }
 
 /// Build the model prompt with recent session history prepended.
+///
+/// First checks the in-memory cache; if empty, falls back to the persistent [`SessionStore`].
 async fn build_prompt_with_history(
     sessions: &RwLock<HashMap<String, Vec<ChatMessage>>>,
+    session_id: Option<&str>,
+    user_message: &str,
+) -> String {
+    build_prompt_with_history_persistent(sessions, None, session_id, user_message).await
+}
+
+/// Like [`build_prompt_with_history`] but also consults a persistent [`SessionStore`].
+async fn build_prompt_with_history_persistent(
+    sessions: &RwLock<HashMap<String, Vec<ChatMessage>>>,
+    store: Option<&crate::agent::SessionStore>,
     session_id: Option<&str>,
     user_message: &str,
 ) -> String {
     let Some(sid) = session_id else {
         return user_message.to_string();
     };
+
+    // Try in-memory first.
     let guard = sessions.read().await;
-    let Some(msgs) = guard.get(sid) else {
-        return user_message.to_string();
+    let in_memory = guard.get(sid);
+
+    // Collect messages: prefer in-memory, fall back to persistent store.
+    let msgs: Vec<ChatMessage> = if let Some(cached) = in_memory {
+        if !cached.is_empty() {
+            cached.clone()
+        } else {
+            drop(guard);
+            load_from_store(store, sid)
+        }
+    } else {
+        drop(guard);
+        load_from_store(store, sid)
     };
+
+    if msgs.is_empty() {
+        return user_message.to_string();
+    }
+
     // Keep recent turns but cap total chars to ~6k so we don't blow context for small models.
-    // For large-context remote models this is still enough for good continuity.
     const MAX_HISTORY_CHARS: usize = 6_000;
     let mut prefix = String::new();
     for m in msgs.iter().rev() {
@@ -1902,9 +1937,44 @@ async fn build_prompt_with_history(
     }
 }
 
-/// Append a user+assistant turn to the session and cap at MAX_MSGS.
+/// Load turns from the persistent store and convert to [`ChatMessage`].
+fn load_from_store(
+    store: Option<&crate::agent::SessionStore>,
+    session_id: &str,
+) -> Vec<ChatMessage> {
+    let Some(store) = store else {
+        return Vec::new();
+    };
+    match store.load_session(session_id, 40) {
+        Ok(turns) => turns
+            .into_iter()
+            .map(|t| ChatMessage {
+                role: t.role,
+                content: t.content,
+            })
+            .collect(),
+        Err(e) => {
+            tracing::warn!(session = session_id, "Failed to load session from store: {}", e);
+            Vec::new()
+        }
+    }
+}
+
+/// Append a user+assistant turn to the in-memory session cache and cap at MAX_MSGS.
+/// Also persists to the [`SessionStore`] if available.
 async fn save_session_turn(
     sessions: &RwLock<HashMap<String, Vec<ChatMessage>>>,
+    session_id: &str,
+    user_message: &str,
+    assistant_text: &str,
+) {
+    save_session_turn_persistent(sessions, None, session_id, user_message, assistant_text).await;
+}
+
+/// Like [`save_session_turn`] but also persists to a [`SessionStore`].
+async fn save_session_turn_persistent(
+    sessions: &RwLock<HashMap<String, Vec<ChatMessage>>>,
+    store: Option<&crate::agent::SessionStore>,
     session_id: &str,
     user_message: &str,
     assistant_text: &str,
@@ -1924,6 +1994,16 @@ async fn save_session_turn(
         let drain = entry.len() - MAX_MSGS;
         entry.drain(0..drain);
     }
+
+    // Persist to disk.
+    if let Some(store) = store {
+        if let Err(e) = store.save_turn(session_id, "user", user_message) {
+            tracing::warn!(session = session_id, "Failed to persist user turn: {}", e);
+        }
+        if let Err(e) = store.save_turn(session_id, "assistant", assistant_text) {
+            tracing::warn!(session = session_id, "Failed to persist assistant turn: {}", e);
+        }
+    }
 }
 
 async fn api_chat(
@@ -1935,8 +2015,10 @@ async fn api_chat(
     let temperature = req.temperature.unwrap_or(0.7);
     let user_message = req.message.clone();
 
-    let prompt_for_model = build_prompt_with_history(
+    let store_ref = state.session_store.as_deref();
+    let prompt_for_model = build_prompt_with_history_persistent(
         &state.chat_sessions,
+        store_ref,
         req.session_id.as_deref(),
         &user_message,
     )
@@ -1970,8 +2052,9 @@ async fn api_chat(
                 {
                     Ok((response, _)) => {
                         if let Some(ref sid) = req.session_id {
-                            save_session_turn(
+                            save_session_turn_persistent(
                                 &state.chat_sessions,
+                                store_ref,
                                 sid,
                                 &user_message,
                                 &response.text,
@@ -2151,6 +2234,7 @@ async fn api_chat_stream(
                 let body = format!("### User thread\n{prompt_for_model}");
                 let state_spawn = state.clone();
                 let sessions = state.chat_sessions.clone();
+                let session_store_spawn = state.session_store.clone();
                 let session_id = req.session_id.clone();
                 let user_message_for_session = user_message.clone();
                 let model_spawn = model.clone();
@@ -2182,8 +2266,9 @@ async fn api_chat_stream(
                                 return;
                             }
                             if let Some(ref sid) = session_id {
-                                save_session_turn(
+                                save_session_turn_persistent(
                                     &sessions,
+                                    session_store_spawn.as_deref(),
                                     sid,
                                     &user_message_for_session,
                                     &response.text,
@@ -2238,6 +2323,7 @@ async fn api_chat_stream(
                 let body = format!("### User thread\n{prompt_for_model}");
                 let state_spawn = state.clone();
                 let sessions = state.chat_sessions.clone();
+                let session_store_spawn = state.session_store.clone();
                 let session_id = req.session_id.clone();
                 let user_message_for_session = user_message.clone();
                 let model_spawn = model.clone();
@@ -2268,8 +2354,9 @@ async fn api_chat_stream(
                                 return;
                             }
                             if let Some(ref sid) = session_id {
-                                save_session_turn(
+                                save_session_turn_persistent(
                                     &sessions,
+                                    session_store_spawn.as_deref(),
                                     sid,
                                     &user_message_for_session,
                                     &response.text,
@@ -2361,6 +2448,7 @@ async fn api_chat_stream(
     }
 
     let sessions = state.chat_sessions.clone();
+    let session_store_spawn = state.session_store.clone();
     let session_id = req.session_id.clone();
     let user_message_for_session = user_message.clone();
 
@@ -2397,8 +2485,9 @@ async fn api_chat_stream(
         };
 
         if let Some(ref sid) = session_id {
-            save_session_turn(
+            save_session_turn_persistent(
                 &sessions,
+                session_store_spawn.as_deref(),
                 sid,
                 &user_message_for_session,
                 &response.text,

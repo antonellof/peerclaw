@@ -44,6 +44,7 @@ pub fn silence_llama_logs() {
 pub mod batch;
 pub mod cache;
 pub mod distribution;
+pub mod failover;
 pub mod gguf;
 pub mod live_settings;
 pub mod model;
@@ -65,6 +66,7 @@ pub use distribution::{
     DistributionError, DownloadProgress, ModelAnnouncement, ModelDistributionMessage,
     ModelDistributor, ModelMetadata, CHUNK_SIZE,
 };
+pub use failover::{BackendId, ErrorKind, FailoverChain};
 pub use gguf::{
     AsyncGgufEngine, GgufBackend, GgufConfig, GgufEngine, GgufError, GgufModelHandle, GgufModelInfo,
 };
@@ -88,6 +90,8 @@ pub struct InferenceEngine {
     live: Arc<tokio::sync::RwLock<InferenceLiveSettings>>,
     /// GGUF backend for local model inference
     gguf: gguf::GgufEngine,
+    /// Failover chain for multi-backend inference
+    failover: Option<FailoverChain>,
 }
 
 impl InferenceEngine {
@@ -116,9 +120,31 @@ impl InferenceEngine {
             registry,
             live,
             gguf,
+            failover: None,
         };
 
         Ok(engine)
+    }
+
+    /// Enable the failover chain for multi-backend inference.
+    ///
+    /// When enabled, `generate()` will try backends in order:
+    /// local GGUF -> (P2P if enabled) -> Ollama -> remote API,
+    /// with circuit breaker logic per backend.
+    pub fn enable_failover(&mut self, p2p_enabled: bool) {
+        let gguf_arc = Arc::new(gguf::GgufEngine::new(gguf::GgufConfig {
+            n_gpu_layers: self.config.gpu_layers,
+            n_ctx: self.config.context_size,
+            n_batch: self.config.batch_size,
+            ..Default::default()
+        }));
+
+        self.failover = Some(FailoverChain::new(
+            self.live.clone(),
+            gguf_arc,
+            self.registry.clone(),
+            p2p_enabled,
+        ));
     }
 
     pub fn live_settings(&self) -> Arc<tokio::sync::RwLock<InferenceLiveSettings>> {
@@ -226,13 +252,21 @@ impl InferenceEngine {
 
     /// Run inference on a model.
     ///
-    /// Tries local GGUF models first. If the model isn't available locally
-    /// and Ollama is enabled (USE_OLLAMA=1 or OLLAMA_BASE_URL set), falls
-    /// back to Ollama's API.
+    /// When the failover chain is enabled, tries backends in order:
+    /// local GGUF -> (P2P) -> Ollama -> remote API, with circuit breakers.
+    ///
+    /// Otherwise falls back to the legacy path: remote API first, then
+    /// local GGUF, then Ollama.
     pub async fn generate(
         &self,
         request: &GenerateRequest,
     ) -> Result<GenerateResponse, InferenceError> {
+        // Use failover chain if enabled
+        if let Some(failover) = &self.failover {
+            return failover.execute_with_failover(request).await;
+        }
+
+        // --- Legacy path (no failover chain) ---
         let start = Instant::now();
         let live = self.live.read().await;
 

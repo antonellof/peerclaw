@@ -325,6 +325,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             peer_dial_tx: Some(peer_dial_tx),
             p2p_network_hints,
             inference: Some(runtime.inference.clone()),
+            session_store: None,
             channel_registry: None,
             wallet: None,
             vector_store: None,

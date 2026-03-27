@@ -47,6 +47,11 @@ pub struct ModelSpec {
     pub temperature: f32,
     #[serde(default)]
     pub system_prompt: String,
+    /// Model context window size in tokens. When the conversation exceeds 75%
+    /// of this limit, context compaction kicks in. Default: `None` (uses runtime
+    /// default of 4096).
+    #[serde(default)]
+    pub context_window: Option<u32>,
 }
 
 fn default_model() -> String {
@@ -66,6 +71,7 @@ impl Default for ModelSpec {
             max_tokens: default_max_tokens(),
             temperature: default_temperature(),
             system_prompt: String::new(),
+            context_window: None,
         }
     }
 }

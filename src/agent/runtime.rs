@@ -14,8 +14,11 @@ use tokio::sync::RwLock;
 use crate::executor::task::{ChatMessage, ExecutionTask, InferenceTask, MessageRole, TaskData};
 use crate::executor::TaskExecutor;
 use crate::tools::{NodeToolTx, ToolContext, ToolRegistry};
+use crate::vector::VectorStore;
 
 use super::budget::BudgetTracker;
+use super::compaction;
+use super::session::SessionStore;
 use super::spec::AgentSpec;
 
 /// Configuration for an agent runtime instance.
@@ -28,7 +31,13 @@ pub struct AgentConfig {
     pub temperature: f32,
     pub system_prompt: String,
     pub allowed_tools: Vec<String>,
+    /// Model context window size in tokens. Used to trigger context compaction.
+    /// Default: 4096 (conservative for small local GGUF models).
+    pub context_window: u32,
 }
+
+/// Default context window size in tokens for small local models.
+const DEFAULT_CONTEXT_WINDOW: u32 = 4096;
 
 impl AgentConfig {
     /// Create from an AgentSpec.
@@ -44,6 +53,7 @@ impl AgentConfig {
             temperature: spec.model.temperature,
             system_prompt: spec.model.system_prompt.clone(),
             allowed_tools: spec.tools.builtin.clone(),
+            context_window: spec.model.context_window.unwrap_or(DEFAULT_CONTEXT_WINDOW),
         }
     }
 }
@@ -93,6 +103,10 @@ pub struct AgentRuntime {
     tool_context: ToolContext,
     /// Task log for the web UI
     pub task_log: Arc<RwLock<Vec<String>>>,
+    /// Persistent session store (optional).
+    pub session_store: Option<Arc<SessionStore>>,
+    /// Vector store for cross-session agent memory (optional).
+    pub vector_store: Option<Arc<VectorStore>>,
 }
 
 impl AgentRuntime {
@@ -125,7 +139,21 @@ impl AgentRuntime {
             budget,
             tool_context,
             task_log: Arc::new(RwLock::new(Vec::new())),
+            session_store: None,
+            vector_store: None,
         }
+    }
+
+    /// Attach a vector store for cross-session agent memory.
+    pub fn with_vector_store(mut self, store: Arc<VectorStore>) -> Self {
+        self.vector_store = Some(store);
+        self
+    }
+
+    /// Attach a persistent session store to this runtime.
+    pub fn with_session_store(mut self, store: Arc<SessionStore>) -> Self {
+        self.session_store = Some(store);
+        self
     }
 
     /// Create from an AgentSpec.
@@ -150,10 +178,24 @@ impl AgentRuntime {
     ///
     /// When `stop` is set, it is polled at the start of each iteration (after the current LLM or
     /// tool work finishes).
+    ///
+    /// When `session_id` is provided and a [`SessionStore`] is attached, prior conversation turns
+    /// are loaded into context before the task starts, and the user input + final answer are
+    /// persisted after the task completes.
     pub async fn run_task(
         &mut self,
         user_input: &str,
         stop: Option<&AtomicBool>,
+    ) -> AgentResult {
+        self.run_task_with_session(user_input, stop, None).await
+    }
+
+    /// Like [`run_task`](Self::run_task) but with an explicit session id for conversation continuity.
+    pub async fn run_task_with_session(
+        &mut self,
+        user_input: &str,
+        stop: Option<&AtomicBool>,
+        session_id: Option<&str>,
     ) -> AgentResult {
         self.budget.new_request();
         let mut tool_calls = Vec::new();
@@ -163,11 +205,41 @@ impl AgentRuntime {
         self.log(&format!("Task received: {}", user_input)).await;
 
         // Build system prompt with tool descriptions
-        let system = self.build_system_prompt().await;
+        let system = self.build_system_prompt(user_input).await;
 
         // Initialize conversation for this task
         self.conversation.clear();
         self.conversation.push(ChatMessage::system(&system));
+
+        // If a session_id is provided, load recent history from the session store.
+        if let (Some(sid), Some(store)) = (session_id, &self.session_store) {
+            const MAX_HISTORY_TURNS: usize = 40;
+            match store.load_session(sid, MAX_HISTORY_TURNS) {
+                Ok(turns) if !turns.is_empty() => {
+                    self.log(&format!(
+                        "Loaded {} prior turns from session '{}'",
+                        turns.len(),
+                        sid
+                    ))
+                    .await;
+                    for turn in &turns {
+                        match turn.role.as_str() {
+                            "user" => self.conversation.push(ChatMessage::user(&turn.content)),
+                            "assistant" => {
+                                self.conversation.push(ChatMessage::assistant(&turn.content))
+                            }
+                            _ => self.conversation.push(ChatMessage::user(&turn.content)),
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.log(&format!("Failed to load session '{}': {}", sid, e))
+                        .await;
+                }
+                _ => {}
+            }
+        }
+
         self.conversation.push(ChatMessage::user(user_input));
 
         loop {
@@ -213,6 +285,21 @@ impl AgentRuntime {
                     success: false,
                     error: Some("Budget exhausted".to_string()),
                 };
+            }
+
+            // Compact context if approaching the model's context window limit.
+            if compaction::needs_compaction(&self.conversation, self.config.context_window) {
+                let max_chars = (self.config.context_window as usize) * 4 * 3 / 4; // 75% of window
+                let before = self.conversation.len();
+                compaction::prune_conversation(&mut self.conversation, max_chars);
+                let after = self.conversation.len();
+                if before != after {
+                    self.log(&format!(
+                        "Context compacted: {} → {} messages ({} chars budget)",
+                        before, after, max_chars
+                    ))
+                    .await;
+                }
             }
 
             // Call LLM
@@ -287,8 +374,25 @@ impl AgentRuntime {
             if parsed_calls.is_empty() {
                 // No tool calls → this is the final answer
                 self.log("Final answer produced").await;
+                let answer = extract_answer(&response_text);
+
+                // Persist to session store if available.
+                if let (Some(sid), Some(store)) = (session_id, &self.session_store) {
+                    if let Err(e) = store.save_turn(sid, "user", user_input) {
+                        tracing::warn!(session = sid, "Failed to save user turn: {}", e);
+                    }
+                    if let Err(e) = store.save_turn(sid, "assistant", &answer) {
+                        tracing::warn!(session = sid, "Failed to save assistant turn: {}", e);
+                    }
+                }
+
+                // Auto-save task summary to vector store for cross-session memory
+                if self.vector_store.is_some() {
+                    self.save_task_memory(user_input, &answer).await;
+                }
+
                 return AgentResult {
-                    answer: extract_answer(&response_text),
+                    answer,
                     tool_calls,
                     iterations,
                     total_tokens,
@@ -418,8 +522,8 @@ impl AgentRuntime {
         }
     }
 
-    /// Build the system prompt with tool descriptions.
-    async fn build_system_prompt(&self) -> String {
+    /// Build the system prompt with tool descriptions and recalled memories.
+    async fn build_system_prompt(&self, user_input: &str) -> String {
         let mut prompt = self.config.system_prompt.clone();
 
         if prompt.is_empty() {
@@ -427,6 +531,18 @@ impl AgentRuntime {
                 "You are {}, a helpful AI assistant. You solve tasks step by step using available tools.\n",
                 self.config.name
             );
+        }
+
+        // Inject recalled memories from vector store (cross-session learning)
+        if let Some(store) = &self.vector_store {
+            let memories = self.recall_memories(store, user_input).await;
+            if !memories.is_empty() {
+                prompt.push_str("\n\n## Recalled Memories\n\n");
+                prompt.push_str("The following are relevant memories from previous sessions. Use them to inform your response:\n\n");
+                for (i, memory) in memories.iter().enumerate() {
+                    prompt.push_str(&format!("{}. {}\n", i + 1, memory));
+                }
+            }
         }
 
         // Add tool descriptions
@@ -454,6 +570,124 @@ impl AgentRuntime {
         }
 
         prompt
+    }
+
+    /// Search the vector store for memories relevant to the current task.
+    /// Returns up to 5 text snippets.
+    async fn recall_memories(&self, store: &VectorStore, query: &str) -> Vec<String> {
+        const MEMORY_COLLECTION: &str = "memories";
+        const MAX_MEMORIES: usize = 5;
+        const MIN_SCORE: f32 = 0.25;
+
+        // Ensure the memories collection exists
+        let collection_exists = store
+            .list_collections()
+            .iter()
+            .any(|c| c.name == MEMORY_COLLECTION);
+
+        if !collection_exists {
+            return Vec::new();
+        }
+
+        // Generate embedding for the query
+        let embedder = crate::vector::get_embedder();
+        let embedding = match embedder.embed(query).await {
+            Ok(e) => e,
+            Err(err) => {
+                tracing::debug!(error = %err, "Failed to embed query for memory recall");
+                return Vec::new();
+            }
+        };
+
+        // Search the vector store
+        let results = match store.search(MEMORY_COLLECTION, embedding, MAX_MEMORIES * 2) {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::debug!(error = %err, "Memory search failed");
+                return Vec::new();
+            }
+        };
+
+        // Filter by minimum score and take top results
+        results
+            .into_iter()
+            .filter(|r| r.score >= MIN_SCORE)
+            .take(MAX_MEMORIES)
+            .filter_map(|r| {
+                r.text.or_else(|| {
+                    r.payload
+                        .as_ref()
+                        .and_then(|p| p.get("text"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                })
+            })
+            .collect()
+    }
+
+    /// Save a task summary to the vector store for cross-session memory.
+    async fn save_task_memory(&self, user_input: &str, answer: &str) {
+        const MEMORY_COLLECTION: &str = "memories";
+
+        let store = match &self.vector_store {
+            Some(s) => s,
+            None => return,
+        };
+
+        // Ensure collection exists
+        if let Err(e) = store.get_or_create_collection(MEMORY_COLLECTION) {
+            tracing::debug!(error = %e, "Failed to get/create memories collection");
+            return;
+        }
+
+        // Build a concise summary for embedding
+        let summary_answer = if answer.len() > 500 {
+            &answer[..500]
+        } else {
+            answer
+        };
+        let content = format!(
+            "Task: {}\nResult: {}",
+            user_input, summary_answer
+        );
+
+        // Generate embedding
+        let embedder = crate::vector::get_embedder();
+        let embedding = match embedder.embed(&content).await {
+            Ok(e) => e,
+            Err(err) => {
+                tracing::debug!(error = %err, "Failed to embed task memory");
+                return;
+            }
+        };
+
+        // Generate a unique ID
+        let id = {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(content.as_bytes());
+            hasher.update(chrono::Utc::now().to_rfc3339().as_bytes());
+            hasher.finalize().to_hex()[..16].to_string()
+        };
+
+        let now = chrono::Utc::now();
+        let payload = serde_json::json!({
+            "text": content,
+            "category": "agent_task",
+            "agent_name": self.config.name,
+            "source_peer": self.tool_context.peer_id,
+            "created_at": now.to_rfc3339(),
+            "modified_at": now.to_rfc3339(),
+        });
+
+        if let Err(e) = store.upsert(MEMORY_COLLECTION, &id, embedding, Some(payload)) {
+            tracing::debug!(error = %e, "Failed to save task memory");
+        } else {
+            tracing::info!(
+                agent = %self.config.name,
+                memory_id = %id,
+                "Saved task memory for cross-session recall"
+            );
+        }
     }
 
     /// Log a message to the task log.
