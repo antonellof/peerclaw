@@ -325,6 +325,9 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             peer_dial_tx: Some(peer_dial_tx),
             p2p_network_hints,
             inference: Some(runtime.inference.clone()),
+            channel_registry: None,
+            wallet: None,
+            vector_store: None,
         }));
         (Some(peer_dial_rx), state)
     } else {
@@ -611,6 +614,86 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         result["transactions"] = serde_json::json!(txn_json);
                     }
                     let _ = reply.send(result);
+                }
+                NodeToolCommand::InferenceRequest {
+                    prompt,
+                    model,
+                    max_tokens,
+                    temperature,
+                    system_prompt,
+                    reply,
+                } => {
+                    use crate::executor::task::ChatMessage as TaskChatMessage;
+                    let model_name = model.unwrap_or_else(|| {
+                        if let Some(ref agent_rt) = agent_runtime {
+                            if let Ok(guard) = agent_rt.try_read() {
+                                return guard.config.model.clone();
+                            }
+                        }
+                        "default".to_string()
+                    });
+                    let mut messages = Vec::new();
+                    if let Some(sys) = system_prompt {
+                        messages.push(TaskChatMessage::system(sys));
+                    }
+                    messages.push(TaskChatMessage::user(prompt));
+                    let task = crate::executor::task::InferenceTask {
+                        model: model_name,
+                        messages,
+                        max_tokens,
+                        temperature,
+                        stop_sequences: vec![],
+                        stream: false,
+                    };
+                    let exec_result = runtime
+                        .executor
+                        .execute(ExecutionTask::Inference(task))
+                        .await;
+                    let response = match exec_result {
+                        Ok(task_result) => match &task_result.data {
+                            TaskData::Inference(r) => Ok(r.text.clone()),
+                            TaskData::Error(e) => Err(e.clone()),
+                            _ => Err("unexpected task result type".to_string()),
+                        },
+                        Err(e) => Err(format!("inference failed: {}", e)),
+                    };
+                    let _ = reply.send(response);
+                }
+                NodeToolCommand::SpawnSubAgent {
+                    goal,
+                    task_type: _task_type,
+                    budget: _budget,
+                    model,
+                    reply,
+                } => {
+                    if let Some(ref agent_rt) = agent_runtime {
+                        let task_id = uuid::Uuid::new_v4().to_string();
+                        tracing::info!(task_id = %task_id, goal = %goal, "Spawning sub-agent");
+                        let mut sub_agent = agent_rt.write().await;
+                        if let Some(ref m) = model {
+                            sub_agent.config.model = m.clone();
+                        }
+                        sub_agent.clear_log().await;
+                        let result = sub_agent.run_task(&goal, None).await;
+                        let response = if result.success {
+                            Ok(serde_json::json!({
+                                "task_id": task_id,
+                                "success": true,
+                                "answer": result.answer,
+                                "iterations": result.iterations,
+                                "total_tokens": result.total_tokens,
+                                "budget_spent": result.budget_spent,
+                                "tool_calls": result.tool_calls.len(),
+                            }))
+                        } else {
+                            Err(result.error.unwrap_or_else(|| "sub-agent failed".to_string()))
+                        };
+                        let _ = reply.send(response);
+                    } else {
+                        let _ = reply.send(Err(
+                            "no agent runtime available; start with --agent flag".to_string(),
+                        ));
+                    }
                 }
             }
         }

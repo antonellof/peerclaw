@@ -112,6 +112,18 @@ impl ToolRegistry {
         // Shell tool
         self.register_builtin(Arc::new(builtin::ShellTool::new()));
 
+        // Search tool
+        self.register_builtin(Arc::new(builtin::WebSearchTool::new()));
+
+        // Patch tool
+        self.register_builtin(Arc::new(builtin::ApplyPatchTool));
+
+        // Document tools
+        self.register_builtin(Arc::new(builtin::PdfReadTool));
+
+        // Browser tool
+        self.register_builtin(Arc::new(builtin::BrowserTool));
+
         // P2P-native tools
         self.register_builtin(Arc::new(builtin::MemorySearchTool::new()));
         self.register_builtin(Arc::new(builtin::MemoryWriteTool::new()));
@@ -119,6 +131,10 @@ impl ToolRegistry {
         self.register_builtin(Arc::new(builtin::JobStatusTool::new()));
         self.register_builtin(Arc::new(builtin::PeerDiscoveryTool::new()));
         self.register_builtin(Arc::new(builtin::WalletBalanceTool::new()));
+
+        // LLM delegation and sub-agent tools
+        self.register_builtin(Arc::new(builtin::LlmTaskTool));
+        self.register_builtin(Arc::new(builtin::SubAgentTool));
     }
 
     /// Register a builtin tool.

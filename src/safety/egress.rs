@@ -217,7 +217,7 @@ impl EgressRule {
 
 /// Convenience: set of tool names that make network requests (builtin).
 /// Used to decide whether an egress check is needed.
-pub const NETWORK_TOOLS: &[&str] = &["http", "web_fetch"];
+pub const NETWORK_TOOLS: &[&str] = &["http", "web_fetch", "web_search", "browser"];
 
 /// Returns true if the given tool name is known to make network requests.
 pub fn is_network_tool(name: &str) -> bool {

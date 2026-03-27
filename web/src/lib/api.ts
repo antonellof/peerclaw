@@ -553,6 +553,20 @@ export type SkillInfo = {
   available: boolean
   provider: string
   price: number
+  keywords: string[]
+  tags: string[]
+  enabled: boolean
+}
+
+export type SkillTemplate = {
+  name: string
+  version: string
+  description: string
+  author: string
+  keywords: string[]
+  tags: string[]
+  trust: string
+  content: string
 }
 
 export async function fetchSkillsLocal(): Promise<SkillInfo[]> {
@@ -584,6 +598,17 @@ export async function fetchSkillsMeta(): Promise<SkillsMetaResponse> {
 
 export async function scanSkills(): Promise<{ ok: boolean; loaded?: number; error?: string }> {
   const r = await apiFetch("/api/skills/scan", { method: "POST" })
+  return r.json()
+}
+
+export async function fetchSkillTemplates(): Promise<SkillTemplate[]> {
+  const r = await apiFetch("/api/skills/templates")
+  if (!r.ok) throw new Error(`skills templates ${r.status}`)
+  return r.json()
+}
+
+export async function toggleSkill(name: string): Promise<{ ok: boolean; enabled?: boolean; error?: string }> {
+  const r = await apiFetch(`/api/skills/${encodeURIComponent(name)}/toggle`, { method: "POST" })
   return r.json()
 }
 
@@ -841,4 +866,183 @@ export async function fetchOpenAiModels(): Promise<OpenAiModel[]> {
   if (!r.ok) throw new Error(`models ${r.status}`)
   const j: ModelsListResponse = await r.json()
   return j.data ?? []
+}
+
+// ── Channel management ──────────────────────────────────────────────────────
+
+export type ChannelInfo = {
+  id: string
+  name: string
+  platform: string
+  status: string
+  messages_sent: number
+  messages_received: number
+  message_count: number
+  last_active: string | null
+  config: Record<string, unknown>
+}
+
+export async function fetchChannels(): Promise<ChannelInfo[]> {
+  const r = await apiFetch("/api/channels")
+  if (!r.ok) return []
+  const j = await r.json() as { channels?: ChannelInfo[] }
+  return j.channels ?? []
+}
+
+export async function createChannel(payload: {
+  platform: string
+  name?: string
+  config: Record<string, unknown>
+}): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const r = await apiFetch("/api/channels", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  return r.json()
+}
+
+export async function toggleChannel(id: string, action: "connect" | "disconnect"): Promise<{ ok: boolean }> {
+  const r = await apiFetch(`/api/channels/${encodeURIComponent(id)}/${action}`, { method: "POST" })
+  return r.json().catch(() => ({ ok: r.ok }))
+}
+
+export async function deleteChannel(id: string): Promise<{ ok: boolean }> {
+  const r = await apiFetch(`/api/channels/${encodeURIComponent(id)}`, { method: "DELETE" })
+  return r.json().catch(() => ({ ok: r.ok }))
+}
+
+// ── Wallet ──────────────────────────────────────────────────────────────────
+
+export type WalletResponse = {
+  balance: number
+  escrowed: number
+  total: number
+  address: string
+}
+
+export type WalletTransaction = {
+  id: string
+  tx_type: string
+  amount: number
+  peer: string | null
+  description: string
+  timestamp: string
+}
+
+export async function fetchWallet(): Promise<WalletResponse> {
+  const r = await apiFetch("/api/wallet")
+  if (!r.ok) return { balance: 0, escrowed: 0, total: 0, address: "" }
+  return r.json()
+}
+
+export async function fetchWalletTransactions(): Promise<WalletTransaction[]> {
+  const r = await apiFetch("/api/wallet/transactions")
+  if (!r.ok) return []
+  const j = await r.json() as { transactions?: WalletTransaction[] }
+  return j.transactions ?? []
+}
+
+// ── Vector memory ───────────────────────────────────────────────────────────
+
+export type VectorCollection = {
+  name: string
+  dimension: number
+  point_count: number
+  distance_metric: string
+}
+
+export type VectorSearchResult = {
+  id: string
+  score: number
+  text: string
+  metadata: Record<string, unknown>
+}
+
+export async function fetchVectorCollections(): Promise<VectorCollection[]> {
+  const r = await apiFetch("/api/vector/collections")
+  if (!r.ok) return []
+  const j = await r.json() as { collections?: VectorCollection[] }
+  return j.collections ?? []
+}
+
+export async function createVectorCollection(payload: {
+  name: string
+  dimension?: number
+}): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/vector/collections", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  return r.json()
+}
+
+export async function vectorSearch(payload: {
+  collection: string
+  query: string
+  top_k?: number
+}): Promise<VectorSearchResult[]> {
+  const r = await apiFetch("/api/vector/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!r.ok) return []
+  const j = await r.json() as { results?: VectorSearchResult[] }
+  return j.results ?? []
+}
+
+export async function vectorInsert(payload: {
+  collection: string
+  text: string
+  metadata?: Record<string, unknown>
+}): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const r = await apiFetch("/api/vector/insert", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  return r.json()
+}
+
+// ── Tools ───────────────────────────────────────────────────────────────────
+
+export type ToolInfo = {
+  name: string
+  description: string
+  location: string
+  category?: string
+}
+
+export type ToolExecResult = {
+  ok: boolean
+  success: boolean
+  data: unknown
+  output: unknown
+  error: string | null
+  message: string | null
+  duration_ms: number
+}
+
+export async function fetchTools(): Promise<{ tools: ToolInfo[]; count: number }> {
+  const r = await apiFetch("/api/tools")
+  if (!r.ok) return { tools: [], count: 0 }
+  return r.json()
+}
+
+export async function executeTool(payload: {
+  name: string
+  args: Record<string, unknown>
+}): Promise<ToolExecResult> {
+  const r = await apiFetch("/api/tools/execute", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!r.ok) {
+    const t = await r.text().catch(() => "Tool execution failed")
+    return { ok: false, success: false, data: null, output: null, error: t, message: t, duration_ms: 0 }
+  }
+  return r.json()
 }

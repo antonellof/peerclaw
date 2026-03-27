@@ -28,6 +28,9 @@ pub struct ToolContext {
     pub node_tool_tx: Option<NodeToolTx>,
     /// Network egress policy for this agent (if any).
     pub egress_policy: Option<EgressPolicy>,
+    /// Current agent nesting depth (0 = top-level agent).
+    /// Sub-agents increment this; used to enforce MAX_DEPTH.
+    pub agent_depth: u32,
 }
 
 impl ToolContext {
@@ -42,6 +45,7 @@ impl ToolContext {
             available_secrets: vec![],
             node_tool_tx: None,
             egress_policy: None,
+            agent_depth: 0,
         }
     }
 
@@ -56,6 +60,7 @@ impl ToolContext {
             available_secrets: vec![],
             node_tool_tx: None,
             egress_policy: None,
+            agent_depth: 0,
         }
     }
 }

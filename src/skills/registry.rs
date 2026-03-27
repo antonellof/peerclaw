@@ -1,6 +1,6 @@
 //! Skill registry for managing and discovering skills.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -21,6 +21,8 @@ pub struct SkillRegistry {
     local_skills: RwLock<HashMap<String, Arc<LoadedSkill>>>,
     /// Network skills (from other peers)
     network_skills: RwLock<HashMap<String, Vec<SkillAnnouncement>>>,
+    /// Disabled skill names (toggled off by the user).
+    disabled_skills: RwLock<HashSet<String>>,
 }
 
 impl SkillRegistry {
@@ -33,7 +35,30 @@ impl SkillRegistry {
             skills_dir,
             local_skills: RwLock::new(HashMap::new()),
             network_skills: RwLock::new(HashMap::new()),
+            disabled_skills: RwLock::new(HashSet::new()),
         })
+    }
+
+    /// Toggle a skill on or off. Returns the new enabled state, or `None` if not found.
+    pub async fn toggle_skill(&self, name: &str) -> Option<bool> {
+        let exists = self.local_skills.read().await.contains_key(name)
+            || self.network_skills.read().await.contains_key(name);
+        if !exists {
+            return None;
+        }
+        let mut disabled = self.disabled_skills.write().await;
+        if disabled.contains(name) {
+            disabled.remove(name);
+            Some(true)
+        } else {
+            disabled.insert(name.to_string());
+            Some(false)
+        }
+    }
+
+    /// Check whether a skill is currently enabled.
+    pub async fn is_enabled(&self, name: &str) -> bool {
+        !self.disabled_skills.read().await.contains(name)
     }
 
     /// Scan skills directory and load all skills.
@@ -98,17 +123,22 @@ impl SkillRegistry {
     /// List all available skills (local + network).
     pub async fn list_all(&self) -> Vec<SkillInfo> {
         let mut skills = Vec::new();
+        let disabled = self.disabled_skills.read().await;
 
         // Local skills
         for skill in self.local_skills.read().await.values() {
+            let name = skill.name().to_string();
             skills.push(SkillInfo {
-                name: skill.name().to_string(),
+                enabled: !disabled.contains(&name),
+                name,
                 version: skill.manifest.version.clone(),
                 description: skill.description().to_string(),
                 trust: skill.trust,
                 available: skill.is_available(),
                 provider: self.local_peer_id.clone(),
                 price: skill.manifest.sharing.price,
+                keywords: skill.manifest.activation.keywords.clone(),
+                tags: skill.manifest.activation.tags.clone(),
             });
         }
 
@@ -116,6 +146,7 @@ impl SkillRegistry {
         for (name, announcements) in self.network_skills.read().await.iter() {
             if let Some(best) = announcements.first() {
                 skills.push(SkillInfo {
+                    enabled: !disabled.contains(name),
                     name: name.clone(),
                     version: best.version.clone(),
                     description: best.description.clone(),
@@ -123,6 +154,8 @@ impl SkillRegistry {
                     available: true,
                     provider: best.provider.clone(),
                     price: best.price,
+                    keywords: best.keywords.clone(),
+                    tags: best.tags.clone(),
                 });
             }
         }
@@ -284,6 +317,9 @@ pub struct SkillInfo {
     pub available: bool,
     pub provider: String,
     pub price: u64,
+    pub keywords: Vec<String>,
+    pub tags: Vec<String>,
+    pub enabled: bool,
 }
 
 /// Error scanning skills directory.

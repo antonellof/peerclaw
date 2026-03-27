@@ -74,6 +74,9 @@ pub async fn run(cmd: SkillCommand) -> anyhow::Result<()> {
                         available: s.is_available(),
                         provider: "local".to_string(),
                         price: s.manifest.sharing.price,
+                        keywords: s.manifest.activation.keywords.clone(),
+                        tags: s.manifest.activation.tags.clone(),
+                        enabled: true,
                     })
                     .collect()
             };

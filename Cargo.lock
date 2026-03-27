@@ -4749,6 +4749,7 @@ dependencies = [
  "dirs 5.0.1",
  "dotenvy",
  "ed25519-dalek",
+ "flate2",
  "futures",
  "hex",
  "hf-hub",

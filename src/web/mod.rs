@@ -27,7 +27,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Json, Response,
     },
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Router,
 };
 use libp2p::{Multiaddr, PeerId};
@@ -199,6 +199,12 @@ pub struct WebState {
     pub p2p_network_hints: Arc<P2pNetworkHints>,
     /// Wired on `peerclaw serve` for model downloads and `/api/inference/settings`.
     pub inference: Option<Arc<crate::inference::InferenceEngine>>,
+    /// Channel registry for messaging channel management.
+    pub channel_registry: Option<Arc<crate::messaging::ChannelRegistry>>,
+    /// Full wallet instance for balance + transactions.
+    pub wallet: Option<Arc<crate::wallet::Wallet>>,
+    /// Vector store for semantic search / memory.
+    pub vector_store: Option<Arc<crate::vector::VectorStore>>,
 }
 
 fn new_ws_control_plane() -> broadcast::Sender<serde_json::Value> {
@@ -305,6 +311,8 @@ fn api_router() -> Router<Arc<WebState>> {
         .route("/skills/network", get(api_skills_network))
         .route("/skills/meta", get(api_skills_meta))
         .route("/skills/scan", post(api_skills_scan))
+        .route("/skills/templates", get(api_skills_templates))
+        .route("/skills/:name/toggle", post(api_skills_toggle))
         .route("/skills/studio/ai", post(api_skills_studio_ai))
         .route("/skills/studio", get(api_skills_studio_list))
         .route(
@@ -328,6 +336,26 @@ fn api_router() -> Router<Arc<WebState>> {
             get(api_inference_settings_get).put(api_inference_settings_put),
         )
         .route("/models/download", post(api_models_download))
+        // Channel management
+        .route("/channels", get(api_list_channels))
+        .route("/channels", post(api_register_channel))
+        .route("/channels/:id", delete(api_remove_channel))
+        .route("/channels/:id/test", post(api_test_channel))
+        // Wallet
+        .route("/wallet", get(api_wallet_balance))
+        .route("/wallet/transactions", get(api_wallet_transactions))
+        // Vector memory
+        .route("/vector/collections", get(api_vector_list_collections))
+        .route("/vector/collections", post(api_vector_create_collection))
+        .route(
+            "/vector/collections/:name",
+            delete(api_vector_delete_collection),
+        )
+        .route("/vector/search", post(api_vector_search))
+        .route("/vector/insert", post(api_vector_insert))
+        // Tool execution
+        .route("/tools/execute", post(api_tool_execute))
+        .route("/tools/:name", get(api_tool_detail))
 }
 
 /// Create the web router.
@@ -389,6 +417,9 @@ pub fn create_web_state(
         peer_dial_tx: None,
         p2p_network_hints: Arc::new(P2pNetworkHints::default()),
         inference: None,
+        channel_registry: None,
+        wallet: None,
+        vector_store: None,
     })
 }
 
@@ -426,6 +457,9 @@ pub fn create_web_state_with_channels(
         peer_dial_tx: None,
         p2p_network_hints: Arc::new(P2pNetworkHints::default()),
         inference: None,
+        channel_registry: None,
+        wallet: None,
+        vector_store: None,
     })
 }
 
@@ -462,6 +496,9 @@ pub fn create_web_state_with_inference(
         peer_dial_tx: None,
         p2p_network_hints: Arc::new(P2pNetworkHints::default()),
         inference: None,
+        channel_registry: None,
+        wallet: None,
+        vector_store: None,
     })
 }
 
@@ -498,6 +535,9 @@ pub fn create_web_state_with_swarm(
         peer_dial_tx: None,
         p2p_network_hints: Arc::new(P2pNetworkHints::default()),
         inference: None,
+        channel_registry: None,
+        wallet: None,
+        vector_store: None,
     })
 }
 
@@ -717,6 +757,107 @@ async fn api_skills_scan(State(state): State<Arc<WebState>>) -> Json<serde_json:
         Err(e) => Json(serde_json::json!({
             "ok": false,
             "error": e.to_string()
+        })),
+    }
+}
+
+// ---- Skill templates: bundled example skills from examples/skills/ ----
+
+#[derive(Serialize)]
+struct SkillTemplate {
+    name: String,
+    version: String,
+    description: String,
+    author: String,
+    keywords: Vec<String>,
+    tags: Vec<String>,
+    trust: &'static str,
+    content: String,
+}
+
+fn load_bundled_templates() -> Vec<SkillTemplate> {
+    let candidates: Vec<std::path::PathBuf> = {
+        let mut v = Vec::new();
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                v.push(parent.join("../../examples/skills"));
+                v.push(parent.join("examples/skills"));
+            }
+        }
+        v.push(std::path::PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/skills"
+        )));
+        v
+    };
+
+    let skills_dir = match candidates.iter().find(|p| p.is_dir()) {
+        Some(d) => d.clone(),
+        None => return vec![],
+    };
+
+    let mut templates = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&skills_dir) else {
+        return templates;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let skill_file = if path.is_dir() {
+            path.join("SKILL.md")
+        } else if path.extension().is_some_and(|e| e == "md") {
+            path.clone()
+        } else {
+            continue;
+        };
+        if !skill_file.exists() {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&skill_file) else {
+            continue;
+        };
+        let Ok(skill) = crate::skills::parser::parse_skill_content(
+            &content,
+            crate::skills::SkillSource::Bundled("examples".into()),
+            crate::skills::SkillTrust::Local,
+        ) else {
+            continue;
+        };
+        templates.push(SkillTemplate {
+            name: skill.manifest.name.clone(),
+            version: skill.manifest.version.clone(),
+            description: skill.manifest.description.clone(),
+            author: skill.manifest.author.clone().unwrap_or_default(),
+            keywords: skill.manifest.activation.keywords.clone(),
+            tags: skill.manifest.activation.tags.clone(),
+            trust: "local",
+            content,
+        });
+    }
+
+    templates.sort_by(|a, b| a.name.cmp(&b.name));
+    templates
+}
+
+async fn api_skills_templates() -> Json<Vec<SkillTemplate>> {
+    Json(load_bundled_templates())
+}
+
+async fn api_skills_toggle(
+    State(state): State<Arc<WebState>>,
+    Path(name): Path<String>,
+) -> Json<serde_json::Value> {
+    let Some(reg) = &state.skills else {
+        return Json(serde_json::json!({
+            "ok": false,
+            "error": "Skill registry not attached."
+        }));
+    };
+    match reg.toggle_skill(&name).await {
+        Some(enabled) => Json(serde_json::json!({ "ok": true, "enabled": enabled })),
+        None => Json(serde_json::json!({
+            "ok": false,
+            "error": format!("Skill '{}' not found.", name)
         })),
     }
 }
@@ -1311,6 +1452,7 @@ async fn run_unified_agentic_inference(
                             available_secrets: vec![],
                             node_tool_tx: state.node_tool_tx.clone(),
                             egress_policy: None,
+                            agent_depth: 0,
                         };
                         match reg
                             .execute_local(&call.name, call.args.clone(), &ctx)
@@ -3541,6 +3683,602 @@ async fn api_node_detail(
         action_count,
         success_rate,
     })
+}
+
+// === Channel Management Endpoints ===
+
+#[derive(Serialize)]
+struct ChannelInfoResponse {
+    id: String,
+    platform: String,
+    name: String,
+    enabled: bool,
+    connected: bool,
+    messages_sent: u64,
+    messages_received: u64,
+}
+
+async fn api_list_channels(State(state): State<Arc<WebState>>) -> Json<serde_json::Value> {
+    let Some(registry) = &state.channel_registry else {
+        return Json(serde_json::json!({
+            "channels": [],
+            "hint": "No channel registry (node not started with messaging)"
+        }));
+    };
+
+    let handles = registry.list().await;
+    let mut channels = Vec::new();
+
+    for handle in &handles {
+        let connected = handle.is_connected().await;
+        let stats = handle.stats();
+        let config = handle.config();
+        channels.push(ChannelInfoResponse {
+            id: handle.id().to_string(),
+            platform: config.platform.to_string(),
+            name: config.name.clone(),
+            enabled: config.enabled,
+            connected,
+            messages_sent: stats.messages_sent,
+            messages_received: stats.messages_received,
+        });
+    }
+
+    Json(serde_json::json!({
+        "channels": channels,
+        "count": channels.len()
+    }))
+}
+
+#[derive(Deserialize)]
+struct RegisterChannelPayload {
+    platform: String,
+    name: String,
+    enabled: Option<bool>,
+    settings: Option<serde_json::Value>,
+}
+
+async fn api_register_channel(
+    State(state): State<Arc<WebState>>,
+    Json(payload): Json<RegisterChannelPayload>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(registry) = &state.channel_registry else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "No channel registry available" })),
+        );
+    };
+
+    let platform = match payload.platform.as_str() {
+        "repl" => crate::messaging::Platform::Repl,
+        "webhook" => crate::messaging::Platform::Webhook,
+        "websocket" => crate::messaging::Platform::WebSocket,
+        "telegram" => crate::messaging::Platform::Telegram,
+        "discord" => crate::messaging::Platform::Discord,
+        "slack" => crate::messaging::Platform::Slack,
+        "matrix" => crate::messaging::Platform::Matrix,
+        "p2p" => crate::messaging::Platform::P2p,
+        "wasm" => crate::messaging::Platform::Wasm,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!("Unknown platform: {}", payload.platform)
+                })),
+            );
+        }
+    };
+
+    let config = crate::messaging::ChannelConfig {
+        platform,
+        name: payload.name.clone(),
+        enabled: payload.enabled.unwrap_or(true),
+        settings: payload.settings.unwrap_or(serde_json::Value::Null),
+        ..Default::default()
+    };
+
+    registry
+        .add_config(payload.name.clone(), config.clone())
+        .await;
+
+    let channel_id = crate::messaging::ChannelId::from_parts(&payload.platform, &payload.name);
+
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": channel_id.to_string(),
+            "platform": payload.platform,
+            "name": payload.name,
+            "status": "config_registered"
+        })),
+    )
+}
+
+async fn api_remove_channel(
+    State(state): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(registry) = &state.channel_registry else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "No channel registry available" })),
+        );
+    };
+
+    let channel_id = crate::messaging::ChannelId(id.clone());
+    let removed = registry.remove(&channel_id).await;
+
+    if removed {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({ "removed": true, "id": id })),
+        )
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Channel not found", "id": id })),
+        )
+    }
+}
+
+async fn api_test_channel(
+    State(state): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(registry) = &state.channel_registry else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "No channel registry available" })),
+        );
+    };
+
+    let channel_id = crate::messaging::ChannelId(id.clone());
+    let handle = registry.get(&channel_id).await;
+
+    let Some(handle) = handle else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Channel not found", "id": id })),
+        );
+    };
+
+    let test_message = crate::messaging::ChannelMessage::response(
+        channel_id.clone(),
+        "PeerClaw test message".to_string(),
+    );
+
+    match handle.send(test_message).await {
+        Ok(msg_id) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": true,
+                "message_id": msg_id.to_string(),
+                "channel_id": id
+            })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "success": false,
+                "error": e.to_string(),
+                "channel_id": id
+            })),
+        ),
+    }
+}
+
+// === Wallet Endpoints ===
+
+async fn api_wallet_balance(State(state): State<Arc<WebState>>) -> Json<serde_json::Value> {
+    if let Some(wallet) = &state.wallet {
+        let snapshot = wallet.balance().await;
+        Json(serde_json::json!({
+            "available_micro": snapshot.available,
+            "escrowed_micro": snapshot.in_escrow,
+            "staked_micro": snapshot.staked,
+            "total_micro": snapshot.total,
+            "available": from_micro(snapshot.available),
+            "escrowed": from_micro(snapshot.in_escrow),
+            "staked": from_micro(snapshot.staked),
+            "total": from_micro(snapshot.total),
+            "currency": "PCLAW"
+        }))
+    } else {
+        let balance_micro = *state.wallet_balance.read().await;
+        Json(serde_json::json!({
+            "available_micro": balance_micro,
+            "escrowed_micro": 0,
+            "staked_micro": 0,
+            "total_micro": balance_micro,
+            "available": from_micro(balance_micro),
+            "escrowed": 0.0,
+            "staked": 0.0,
+            "total": from_micro(balance_micro),
+            "currency": "PCLAW"
+        }))
+    }
+}
+
+#[derive(Deserialize)]
+struct TransactionQuery {
+    limit: Option<usize>,
+}
+
+async fn api_wallet_transactions(
+    State(state): State<Arc<WebState>>,
+    axum::extract::Query(query): axum::extract::Query<TransactionQuery>,
+) -> Json<serde_json::Value> {
+    let Some(wallet) = &state.wallet else {
+        return Json(serde_json::json!({
+            "transactions": [],
+            "hint": "Full wallet not available (no transaction history)"
+        }));
+    };
+
+    let limit = query.limit.unwrap_or(50).min(500);
+    let txs = wallet.transactions(limit).await;
+
+    let items: Vec<serde_json::Value> = txs
+        .iter()
+        .map(|tx| {
+            serde_json::json!({
+                "id": tx.id.to_string(),
+                "type": tx.tx_type.to_string(),
+                "amount_micro": tx.amount,
+                "amount": from_micro(tx.amount),
+                "direction": tx.direction.to_string(),
+                "timestamp": tx.timestamp.to_rfc3339(),
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "transactions": items,
+        "count": items.len()
+    }))
+}
+
+// === Vector Memory Endpoints ===
+
+async fn api_vector_list_collections(
+    State(state): State<Arc<WebState>>,
+) -> Json<serde_json::Value> {
+    let store = state
+        .vector_store
+        .as_ref()
+        .cloned()
+        .or_else(|| crate::vector::get_vector_store());
+
+    let Some(store) = store else {
+        return Json(serde_json::json!({
+            "collections": [],
+            "hint": "No vector store initialized"
+        }));
+    };
+
+    let collections = store.list_collections();
+    let items: Vec<serde_json::Value> = collections
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "name": c.name,
+                "count": c.count,
+                "dimension": c.dimension
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "collections": items,
+        "count": items.len()
+    }))
+}
+
+#[derive(Deserialize)]
+struct CreateCollectionPayload {
+    name: String,
+    dimension: Option<usize>,
+}
+
+async fn api_vector_create_collection(
+    State(state): State<Arc<WebState>>,
+    Json(payload): Json<CreateCollectionPayload>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let store = state
+        .vector_store
+        .as_ref()
+        .cloned()
+        .or_else(|| crate::vector::get_vector_store());
+
+    let Some(store) = store else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "No vector store initialized" })),
+        );
+    };
+
+    let result = if let Some(dim) = payload.dimension {
+        store.create_collection_with_dim(&payload.name, dim)
+    } else {
+        store.create_collection(&payload.name)
+    };
+
+    match result {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "name": payload.name,
+                "dimension": payload.dimension.unwrap_or(crate::vector::DEFAULT_EMBEDDING_DIM),
+                "created": true
+            })),
+        ),
+        Err(e) => {
+            let status = if matches!(e, crate::vector::VectorError::CollectionExists(_)) {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, Json(serde_json::json!({ "error": e.to_string() })))
+        }
+    }
+}
+
+async fn api_vector_delete_collection(
+    State(state): State<Arc<WebState>>,
+    Path(name): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let store = state
+        .vector_store
+        .as_ref()
+        .cloned()
+        .or_else(|| crate::vector::get_vector_store());
+
+    let Some(store) = store else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "No vector store initialized" })),
+        );
+    };
+
+    match store.delete_collection(&name) {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "deleted": true, "name": name })),
+        ),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Collection not found", "name": name })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct VectorSearchPayload {
+    collection: String,
+    query: Vec<f32>,
+    top_k: Option<usize>,
+}
+
+async fn api_vector_search(
+    State(state): State<Arc<WebState>>,
+    Json(payload): Json<VectorSearchPayload>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let store = state
+        .vector_store
+        .as_ref()
+        .cloned()
+        .or_else(|| crate::vector::get_vector_store());
+
+    let Some(store) = store else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "No vector store initialized" })),
+        );
+    };
+
+    let top_k = payload.top_k.unwrap_or(10).min(100);
+
+    match store.search(&payload.collection, payload.query, top_k) {
+        Ok(results) => {
+            let items: Vec<serde_json::Value> = results
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.id,
+                        "score": r.score,
+                        "text": r.text,
+                        "payload": r.payload,
+                    })
+                })
+                .collect();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "results": items,
+                    "count": items.len(),
+                    "collection": payload.collection
+                })),
+            )
+        }
+        Err(e) => {
+            let status = if matches!(e, crate::vector::VectorError::CollectionNotFound(_)) {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            (status, Json(serde_json::json!({ "error": e.to_string() })))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct VectorInsertPayload {
+    collection: String,
+    id: String,
+    vector: Vec<f32>,
+    text: Option<String>,
+    payload: Option<serde_json::Value>,
+}
+
+async fn api_vector_insert(
+    State(state): State<Arc<WebState>>,
+    Json(payload): Json<VectorInsertPayload>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let store = state
+        .vector_store
+        .as_ref()
+        .cloned()
+        .or_else(|| crate::vector::get_vector_store());
+
+    let Some(store) = store else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "No vector store initialized" })),
+        );
+    };
+
+    let result = if let Some(text) = &payload.text {
+        store.upsert_text(
+            &payload.collection,
+            &payload.id,
+            text,
+            payload.vector,
+            payload.payload,
+        )
+    } else {
+        store.upsert(
+            &payload.collection,
+            &payload.id,
+            payload.vector,
+            payload.payload,
+        )
+    };
+
+    match result {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "inserted": true,
+                "id": payload.id,
+                "collection": payload.collection
+            })),
+        ),
+        Err(e) => {
+            let status = match &e {
+                crate::vector::VectorError::CollectionNotFound(_) => StatusCode::NOT_FOUND,
+                crate::vector::VectorError::InvalidDimension { .. } => StatusCode::BAD_REQUEST,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (status, Json(serde_json::json!({ "error": e.to_string() })))
+        }
+    }
+}
+
+// === Tool Execution Endpoints ===
+
+#[derive(Deserialize)]
+struct ToolExecutePayload {
+    name: String,
+    args: Option<serde_json::Value>,
+}
+
+async fn api_tool_execute(
+    State(state): State<Arc<WebState>>,
+    Json(payload): Json<ToolExecutePayload>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(registry) = &state.tools else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "No tool registry (node not started with serve)"
+            })),
+        );
+    };
+
+    let params = payload.args.unwrap_or(serde_json::json!({}));
+    let ctx = crate::tools::ToolContext::local(state.local_peer_id.to_string());
+
+    match registry.execute_local(&payload.name, params, &ctx).await {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "success": result.output.success,
+                "data": result.output.data,
+                "message": result.output.message,
+                "duration_ms": result.execution_time_ms,
+                "executed_by": result.executed_by,
+                "warnings": result.output.warnings,
+            })),
+        ),
+        Err(e) => {
+            let status = match &e {
+                crate::tools::ToolError::NotFound(_) => StatusCode::NOT_FOUND,
+                crate::tools::ToolError::InvalidParameters(_) => StatusCode::BAD_REQUEST,
+                crate::tools::ToolError::NotAuthorized(_) => StatusCode::FORBIDDEN,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (
+                status,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        }
+    }
+}
+
+async fn api_tool_detail(
+    State(state): State<Arc<WebState>>,
+    Path(name): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(registry) = &state.tools else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "No tool registry (node not started with serve)"
+            })),
+        );
+    };
+
+    let infos = registry.list_tools().await;
+    let tool_info = infos.iter().find(|t| t.name == name);
+
+    let Some(info) = tool_info else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Tool not found", "name": name })),
+        );
+    };
+
+    let schema = registry
+        .get(&name)
+        .map(|t| t.parameters_schema())
+        .unwrap_or(serde_json::json!({}));
+
+    let stats = registry.get_stats(&name).await;
+
+    let mut response = serde_json::json!({
+        "name": info.name,
+        "description": info.description,
+        "domain": format!("{:?}", info.domain),
+        "location": format!("{:?}", info.location),
+        "price": info.price,
+        "peer_id": info.peer_id,
+        "parameters_schema": schema,
+    });
+
+    if let Some(stats) = stats {
+        response["stats"] = serde_json::json!({
+            "total_calls": stats.total_calls,
+            "successful_calls": stats.successful_calls,
+            "failed_calls": stats.failed_calls,
+            "total_time_ms": stats.total_time_ms,
+        });
+    }
+
+    (StatusCode::OK, Json(response))
 }
 
 #[cfg(test)]

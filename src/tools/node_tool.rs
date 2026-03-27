@@ -37,6 +37,23 @@ pub enum NodeToolCommand {
         history_limit: usize,
         reply: oneshot::Sender<serde_json::Value>,
     },
+    /// Run an LLM inference request from a tool (llm_task).
+    InferenceRequest {
+        prompt: String,
+        model: Option<String>,
+        max_tokens: u32,
+        temperature: f32,
+        system_prompt: Option<String>,
+        reply: oneshot::Sender<Result<String, String>>,
+    },
+    /// Spawn a sub-agent to work on a goal.
+    SpawnSubAgent {
+        goal: String,
+        task_type: String,
+        budget: f64,
+        model: Option<String>,
+        reply: oneshot::Sender<Result<serde_json::Value, String>>,
+    },
 }
 
 pub type NodeToolTx = mpsc::Sender<NodeToolCommand>;

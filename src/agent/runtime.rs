@@ -114,6 +114,7 @@ impl AgentRuntime {
             available_secrets: vec![],
             node_tool_tx,
             egress_policy: None,
+            agent_depth: 0,
         };
 
         Self {
