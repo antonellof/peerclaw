@@ -1160,20 +1160,11 @@ async fn build_agentic_system_prefix(
 ) -> String {
     use crate::tools::ToolLocation;
     let mut s = String::from(
-        "IMPORTANT: You MUST use the exact XML format below to call tools. Do NOT just describe what you would do — actually call the tool.\n\n\
-         Tool call format:\n\
-         <tool_call>\nname: tool_name\nargs: {\"key\": \"value\"}\n</tool_call>\n\n\
-         Example — searching the web:\n\
-         <tool_call>\nname: web_search\nargs: {\"query\": \"latest AI agent trends 2026\"}\n</tool_call>\n\n\
-         Example — fetching a URL:\n\
-         <tool_call>\nname: web_fetch\nargs: {\"url\": \"https://example.com\"}\n</tool_call>\n\n\
-         Rules:\n\
-         - ALWAYS include <tool_call> blocks when you need information. Do NOT just plan or list questions.\n\
-         - 1-3 tool calls per turn. All required args must be present.\n\
-         - If a tool fails, do NOT retry it. Answer from your own knowledge.\n\
-         - web_fetch: only use real URLs the user gave or from prior results. Never guess URLs.\n\
-         - For research tasks, use web_search first, then web_fetch on interesting results.\n\
-         - Your final reply must answer the user's question, not describe tool failures.\n\n",
+        "To use a tool, write:\n\
+         <tool_call>\nname: TOOL_NAME\nargs: {\"param\": \"value\"}\n</tool_call>\n\n\
+         Example:\n\
+         <tool_call>\nname: web_search\nargs: {\"query\": \"AI agents 2026\"}\n</tool_call>\n\n\
+         Rules: Use 1-3 tool calls per turn. If a tool fails, answer from knowledge. Never guess URLs.\n\n",
     );
     if let Some(registry) = registry {
         s.push_str("You are a helpful assistant with local tools. Use exact tool names.\n\nTools:\n");
@@ -1355,55 +1346,59 @@ async fn run_unified_agentic_inference(
         let mut calls = crate::agent::parse_tool_calls(&text);
         if calls.is_empty() {
             // Detect "plan without action" — model describes what it *would* do but
-            // doesn't emit tool_call blocks.  On the first pass, nudge it to act.
-            let looks_like_plan = iter == 1
-                && (text.contains("let me search")
-                    || text.contains("Let me search")
-                    || text.contains("I'll search")
-                    || text.contains("I'll research")
-                    || text.contains("Let me gather")
-                    || text.contains("I'll fetch")
-                    || text.contains("Let me look")
-                    || text.contains("Sub-questions")
-                    || text.contains("I'll start by"));
+            // doesn't emit tool_call blocks. Auto-generate a web_search from the user's goal.
+            if iter == 1 {
+                let plan_phrases = ["let me search", "let me gather", "let me look",
+                    "i'll search", "i'll research", "i'll fetch", "i'll start by",
+                    "sub-questions", "let me find", "let me check"];
+                let lower = text.to_lowercase();
+                let is_plan = plan_phrases.iter().any(|p| lower.contains(p));
 
-            if looks_like_plan {
-                // Don't return — push the plan as assistant, nudge with a user message, loop again.
-                conversation.push_str("\n\nAssistant:\n");
-                conversation.push_str(&text);
-                conversation.push_str("\n\nUser:\n");
-                conversation.push_str(
-                    "(System: You described a plan but did not call any tools. \
-                     You MUST use <tool_call> blocks to actually execute your plan. \
-                     Start with a web_search or web_fetch call NOW.)\n",
-                );
-                if let Some(ref sink) = progress {
-                    sink.append_log(format!(
-                        "[{}] Pass {}: plan detected without tool calls — nudging model to act",
-                        chrono::Utc::now().format("%H:%M:%S"),
-                        iter,
-                    )).await;
+                if is_plan {
+                    // Extract the original user goal from conversation to build a search query.
+                    let goal = conversation_body.lines()
+                        .find(|l| !l.starts_with('#') && !l.starts_with("Tool ") && l.len() > 10)
+                        .unwrap_or(&conversation_body)
+                        .trim()
+                        .chars().take(200).collect::<String>();
+
+                    // Auto-create a web_search tool call from the user's intent.
+                    let auto_call = crate::agent::ParsedToolCall {
+                        name: "web_search".to_string(),
+                        args: serde_json::json!({ "query": goal }),
+                    };
+                    calls = vec![auto_call];
+
+                    if let Some(ref sink) = progress {
+                        sink.append_log(format!(
+                            "[{}] Pass {}: model planned but didn't call tools — auto-searching",
+                            chrono::Utc::now().format("%H:%M:%S"),
+                            iter,
+                        )).await;
+                    }
+                    // Fall through to the tool execution below with our auto-generated call
                 }
-                continue;
             }
 
-            let cleaned = crate::agent::extract_answer(&text);
-            let text_out = if cleaned.trim().is_empty() {
-                "(No text in the model's final reply after stripping tool markup. See task steps / logs for tool results, or retry.)"
-                    .to_string()
-            } else {
-                cleaned
-            };
-            return Ok((
-                InferenceResponse {
-                    text: text_out,
-                    tokens_generated: total_tokens,
-                    tokens_per_second: inf.tokens_per_second,
-                    location: inf.location,
-                    provider_peer_id: inf.provider_peer_id,
-                },
-                tool_logs,
-            ));
+            if calls.is_empty() {
+                let cleaned = crate::agent::extract_answer(&text);
+                let text_out = if cleaned.trim().is_empty() {
+                    "(No text in the model's final reply after stripping tool markup. See task steps / logs for tool results, or retry.)"
+                        .to_string()
+                } else {
+                    cleaned
+                };
+                return Ok((
+                    InferenceResponse {
+                        text: text_out,
+                        tokens_generated: total_tokens,
+                        tokens_per_second: inf.tokens_per_second,
+                        location: inf.location,
+                        provider_peer_id: inf.provider_peer_id,
+                    },
+                    tool_logs,
+                ));
+            }
         }
         // Small models often repeat the same tool_call many times; merge before execute/log.
         let model_tool_call_count = calls.len();
