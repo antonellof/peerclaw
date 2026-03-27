@@ -258,6 +258,147 @@ impl OllamaProvider {
             model_used: ollama_model,
         })
     }
+
+    /// Stream chat completion; `on_delta` receives each `message.content` fragment from Ollama's NDJSON stream.
+    pub async fn generate_streaming<F>(
+        &self,
+        model: &str,
+        prompt: &str,
+        max_tokens: u32,
+        temperature: f32,
+        system_prompt: Option<&str>,
+        mut on_delta: F,
+    ) -> Result<OllamaGenerateResult, String>
+    where
+        F: FnMut(&str),
+    {
+        use futures::StreamExt;
+
+        let ollama_model = self
+            .resolve_model(model)
+            .await
+            .unwrap_or_else(|| model.to_string());
+
+        let mut messages = Vec::new();
+        if let Some(sys) = system_prompt {
+            messages.push(OllamaMessage {
+                role: "system".to_string(),
+                content: sys.to_string(),
+            });
+        }
+        messages.push(OllamaMessage {
+            role: "user".to_string(),
+            content: prompt.to_string(),
+        });
+
+        let request = OllamaChatRequest {
+            model: ollama_model.clone(),
+            messages,
+            stream: true,
+            options: OllamaOptions {
+                temperature,
+                num_predict: max_tokens,
+                top_p: None,
+                stop: None,
+            },
+        };
+
+        let start = std::time::Instant::now();
+        let resp = self
+            .client
+            .post(format!("{}/api/chat", self.config.base_url))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("Ollama request failed: {e}"))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("Ollama returned {status}: {body}"));
+        }
+
+        #[derive(Deserialize)]
+        struct OllamaChatStreamLine {
+            message: Option<OllamaStreamDeltaMessage>,
+            #[serde(default)]
+            done: bool,
+            #[serde(default)]
+            eval_count: u32,
+            #[serde(default)]
+            eval_duration: u64,
+        }
+        #[derive(Deserialize)]
+        struct OllamaStreamDeltaMessage {
+            #[serde(default)]
+            content: String,
+        }
+
+        let mut stream = resp.bytes_stream();
+        let mut line_buf = String::new();
+        let mut full_text = String::new();
+        let mut tokens: u32 = 0;
+        let mut eval_ns: u64 = 0;
+
+        while let Some(item) = stream.next().await {
+            let chunk = item.map_err(|e| format!("Ollama stream read failed: {e}"))?;
+            line_buf.push_str(&String::from_utf8_lossy(&chunk));
+            loop {
+                let Some(pos) = line_buf.find('\n') else {
+                    break;
+                };
+                let raw = line_buf[..pos].trim().to_string();
+                line_buf.drain(..=pos);
+                if raw.is_empty() {
+                    continue;
+                }
+                if let Ok(obj) = serde_json::from_str::<OllamaChatStreamLine>(&raw) {
+                    if let Some(m) = obj.message {
+                        if !m.content.is_empty() {
+                            on_delta(&m.content);
+                            full_text.push_str(&m.content);
+                        }
+                    }
+                    if obj.done {
+                        tokens = obj.eval_count;
+                        eval_ns = obj.eval_duration;
+                    }
+                }
+            }
+        }
+        let tail = line_buf.trim();
+        if !tail.is_empty() {
+            if let Ok(obj) = serde_json::from_str::<OllamaChatStreamLine>(tail) {
+                if let Some(m) = obj.message {
+                    if !m.content.is_empty() {
+                        on_delta(&m.content);
+                        full_text.push_str(&m.content);
+                    }
+                }
+                if obj.done {
+                    tokens = obj.eval_count;
+                    eval_ns = obj.eval_duration;
+                }
+            }
+        }
+
+        let elapsed = start.elapsed();
+        let tps = if eval_ns > 0 {
+            tokens as f64 / (eval_ns as f64 / 1_000_000_000.0)
+        } else if elapsed.as_secs_f64() > 0.0 {
+            tokens as f64 / elapsed.as_secs_f64()
+        } else {
+            0.0
+        };
+
+        Ok(OllamaGenerateResult {
+            text: full_text,
+            tokens_generated: tokens,
+            tokens_per_second: tps,
+            total_time_ms: elapsed.as_millis() as u64,
+            model_used: ollama_model,
+        })
+    }
 }
 
 /// Result from Ollama generation.

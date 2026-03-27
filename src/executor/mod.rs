@@ -385,7 +385,11 @@ impl TaskExecutor {
         let task_id = Uuid::new_v4().to_string();
         let start = Instant::now();
         let exec_task = ExecutionTask::Inference(task.clone());
-        let decision = self.router.route(&exec_task).await;
+        let requirements = self.routing_requirements_for_task(&exec_task).await;
+        let decision = self
+            .router
+            .route_with_requirements(&exec_task, requirements)
+            .await;
 
         match decision {
             RoutingDecision::InsufficientResources { reason } => {
@@ -527,18 +531,19 @@ impl TaskExecutor {
                 stop_sequences: task.stop_sequences.clone(),
             };
 
+            let stream_tx = delta_tx.clone();
             let response = engine
-                .generate(&request)
+                .generate_streaming(&request, move |s| {
+                    let _ = stream_tx.send(s.to_string());
+                })
                 .await
                 .map_err(|e| ExecutorError::InferenceError(e.to_string()))?;
-
-            let _ = delta_tx.send(response.text.clone());
 
             tracing::info!(
                 tokens = response.tokens_generated,
                 tps = format!("{:.1}", response.tokens_per_second),
                 model_id = %response.model_id,
-                "Inference complete (streaming path, batched output)"
+                "Inference complete (streaming path)"
             );
 
             let finish_reason = match response.finish_reason {

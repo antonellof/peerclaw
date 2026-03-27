@@ -42,6 +42,8 @@ type ChatMessage = {
   agentTaskId?: string
   agentLogs?: string[]
   agentStatusLine?: string
+  /** Streaming assistant text while an agent task runs (WebSocket `task_stream_delta`). */
+  agentStreamPreview?: string
 }
 
 function newId() {
@@ -373,6 +375,10 @@ export function ChatPanel({ onRegisterControls }: Props) {
       const t = detail.task
       failuresRef.current.delete(taskId)
 
+      const runningLike = t.status === "running" || t.status === "queued"
+      const streamed =
+        runningLike && typeof t.result === "string" && t.result.length > 0 ? t.result : undefined
+
       setMessages((prev) =>
         prev.map((m) =>
           m.agentTaskId === taskId
@@ -380,6 +386,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
                 ...m,
                 agentStatusLine: `${t.status} · pass ${t.iterations ?? 0} · ${t.tokens_used ?? 0} tok`,
                 agentLogs: Array.isArray(t.logs) ? [...t.logs] : m.agentLogs,
+                agentStreamPreview: runningLike ? (streamed ?? m.agentStreamPreview) : undefined,
               }
             : m,
         ),
@@ -430,6 +437,15 @@ export function ChatPanel({ onRegisterControls }: Props) {
   useControlWebSocket({
     onTasksChanged: () => {
       pollingRef.current.forEach((tid) => void pollTaskOnce(tid))
+    },
+    onTaskStreamDelta: (taskId, text) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.agentTaskId === taskId
+            ? { ...m, agentStreamPreview: (m.agentStreamPreview ?? "") + text }
+            : m,
+        ),
+      )
     },
   })
 
@@ -752,6 +768,17 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   ) : (
                     <div className="whitespace-pre-wrap break-words">{m.content}</div>
                   )}
+                  {m.agentTaskId && m.agentStreamPreview ? (
+                    <div className="mt-2 border-t border-border/50 pt-2">
+                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Live answer
+                      </div>
+                      <ChatMessageMarkdown
+                        content={m.agentStreamPreview}
+                        isAnimating
+                      />
+                    </div>
+                  ) : null}
                   {m.agentTaskId ? (
                     <AgentTaskLiveLogs
                       logs={m.agentLogs ?? []}

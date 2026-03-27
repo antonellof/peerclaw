@@ -69,6 +69,7 @@ pub use distribution::{
 pub use failover::{BackendId, ErrorKind, FailoverChain};
 pub use gguf::{
     AsyncGgufEngine, GgufBackend, GgufConfig, GgufEngine, GgufError, GgufModelHandle, GgufModelInfo,
+    TokenCallback,
 };
 pub use live_settings::InferenceLiveSettings;
 pub use model::{ModelArchitecture, ModelId, ModelInfo, ModelRequirements, Quantization};
@@ -401,6 +402,159 @@ impl InferenceEngine {
         Err(InferenceError::ModelNotFound(hint))
     }
 
+    /// Same routing as [`Self::generate`], but streams text: `on_delta` is called for each chunk
+    /// (GGUF token callbacks; Ollama NDJSON deltas; remote API and failover fall back to one chunk).
+    pub async fn generate_streaming<F>(
+        &self,
+        request: &GenerateRequest,
+        mut on_delta: F,
+    ) -> Result<GenerateResponse, InferenceError>
+    where
+        F: FnMut(&str) + Send + 'static,
+    {
+        if let Some(_) = &self.failover {
+            let r = self.generate(request).await?;
+            if !r.text.is_empty() {
+                on_delta(&r.text);
+            }
+            return Ok(r);
+        }
+
+        let start = Instant::now();
+        let live = self.live.read().await;
+
+        if live.remote_api_enabled
+            && !live.remote_api_base_url.trim().is_empty()
+            && !live.remote_api_key.trim().is_empty()
+        {
+            let remote_model = if live.remote_api_model.trim().is_empty() {
+                request.model.as_str()
+            } else {
+                live.remote_api_model.trim()
+            };
+            let r = remote_openai::chat_completion(
+                live.remote_api_base_url.trim(),
+                live.remote_api_key.trim(),
+                remote_model,
+                &request.prompt,
+                request.max_tokens,
+                request.temperature,
+            )
+            .await
+            .map_err(InferenceError::GenerationFailed)?;
+
+            on_delta(&r.text);
+            let elapsed = start.elapsed();
+            return Ok(GenerateResponse {
+                text: r.text.clone(),
+                tokens_generated: r.tokens_generated,
+                tokens_per_second: if elapsed.as_secs_f64() > 0.0 {
+                    r.tokens_generated as f64 / elapsed.as_secs_f64()
+                } else {
+                    0.0
+                },
+                time_to_first_token_ms: 0,
+                total_time_ms: elapsed.as_millis() as u64,
+                finish_reason: FinishReason::Stop,
+                model_id: remote_model.to_string(),
+            });
+        }
+
+        let has_local =
+            live.use_local_gguf && self.registry.read().await.get(&request.model).is_some();
+
+        if has_local {
+            let model_path = {
+                let reg = self.registry.read().await;
+                reg.get(&request.model).map(|info| info.path.clone())
+            };
+
+            if let Some(path) = model_path {
+                drop(live);
+                tracing::info!(
+                    model = %request.model,
+                    path = %path.display(),
+                    "Running local GGUF inference (streaming)"
+                );
+
+                self.gguf
+                    .load(&path)
+                    .map_err(|e| InferenceError::LoadFailed(format!("GGUF load failed: {e}")))?;
+
+                let cb: TokenCallback = Box::new(move |t| on_delta(t));
+                let result = self.gguf.generate_streaming(request, cb).map_err(|e| {
+                    InferenceError::GenerationFailed(format!("GGUF stream failed: {e}"))
+                })?;
+
+                return Ok(result);
+            }
+        }
+
+        if live.use_ollama {
+            let ollama_url = live.ollama_url.clone();
+            drop(live);
+            tracing::info!(
+                model = %request.model,
+                prompt_len = request.prompt.len(),
+                "Routing to Ollama (streaming)"
+            );
+
+            let prov = ollama::OllamaProvider::new(ollama::OllamaConfig {
+                base_url: ollama_url,
+                timeout_secs: 120,
+            });
+
+            let result = prov
+                .generate_streaming(
+                    &request.model,
+                    &request.prompt,
+                    request.max_tokens,
+                    request.temperature,
+                    None,
+                    |s| on_delta(s),
+                )
+                .await
+                .map_err(InferenceError::GenerationFailed)?;
+
+            return Ok(GenerateResponse {
+                text: result.text,
+                tokens_generated: result.tokens_generated,
+                tokens_per_second: result.tokens_per_second,
+                time_to_first_token_ms: 0,
+                total_time_ms: result.total_time_ms,
+                finish_reason: FinishReason::Stop,
+                model_id: result.model_used,
+            });
+        }
+
+        let no_gguf = std::fs::read_dir(&self.models_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().is_some_and(|ext| ext == "gguf"))
+                    .count()
+            })
+            .unwrap_or(0)
+            == 0;
+
+        let hint = if no_gguf {
+            format!(
+                "No inference backend available for '{}'. \
+                Enable Ollama (Settings → Inference → Ollama) or a remote API, \
+                or download a GGUF model. Models dir: {:?}",
+                request.model, self.models_dir
+            )
+        } else {
+            format!(
+                "Model '{}' not found. Available GGUF files exist but may need Ollama \
+                (llama.cpp not wired yet). Enable Ollama in Settings → Inference.",
+                request.model
+            )
+        };
+
+        Err(InferenceError::ModelNotFound(hint))
+    }
+
     /// Resource profile for [`crate::executor::TaskRouter`]: use GGUF-sized RAM/VRAM only when this
     /// node will actually run **local** GGUF for `model_id` per current live settings and registry.
     ///
@@ -632,8 +786,51 @@ pub enum InferenceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::executor::task::ResourceRequirements;
     use std::sync::Arc;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn routing_requirements_minimal_when_ollama_only_no_local_registry_match() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("local-8b.gguf"), b"x").unwrap();
+        let config = InferenceConfig {
+            models_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+        let live = Arc::new(tokio::sync::RwLock::new(InferenceLiveSettings {
+            use_local_gguf: true,
+            use_ollama: true,
+            ..Default::default()
+        }));
+        let engine = InferenceEngine::new(config, live).unwrap();
+        engine.scan_models().await.unwrap();
+        // Chat model id is an Ollama name, not the scanned GGUF stem → no local GGUF run
+        let req = engine.routing_resource_requirements("glm-4.7:cloud").await;
+        let minimal = ResourceRequirements::minimal();
+        assert_eq!(req.ram_mb, minimal.ram_mb);
+        assert_eq!(req.vram_mb, minimal.vram_mb);
+    }
+
+    #[tokio::test]
+    async fn routing_requirements_heavy_when_local_gguf_matches_model_id() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("local-8b.gguf"), b"x").unwrap();
+        let config = InferenceConfig {
+            models_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+        let live = Arc::new(tokio::sync::RwLock::new(InferenceLiveSettings {
+            use_local_gguf: true,
+            use_ollama: true,
+            ..Default::default()
+        }));
+        let engine = InferenceEngine::new(config, live).unwrap();
+        engine.scan_models().await.unwrap();
+        let req = engine.routing_resource_requirements("local-8b").await;
+        assert!(req.vram_mb.is_some());
+        assert!(req.ram_mb > ResourceRequirements::minimal().ram_mb);
+    }
 
     #[tokio::test]
     async fn test_inference_engine_creation() {

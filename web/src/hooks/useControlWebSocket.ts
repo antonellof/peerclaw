@@ -13,6 +13,8 @@ type WsStatusPayload = {
 export function useControlWebSocket(handlers: {
   onStatus?: (data: WsStatusPayload) => void
   onTasksChanged?: () => void
+  /** Live LLM text chunks for dashboard agent tasks (`task_stream_delta` on `/ws`). */
+  onTaskStreamDelta?: (taskId: string, text: string) => void
 }) {
   const handlersRef = useRef(handlers)
 
@@ -25,12 +27,20 @@ export function useControlWebSocket(handlers: {
 
     ws.onmessage = (ev) => {
       try {
-        const msg = JSON.parse(ev.data as string) as { type?: string; data?: WsStatusPayload }
+        const msg = JSON.parse(ev.data as string) as {
+          type?: string
+          data?: WsStatusPayload
+          task_id?: string
+          text?: string
+        }
         if (msg.type === "status" && msg.data) {
           handlersRef.current.onStatus?.(msg.data)
         }
         if (msg.type === "tasks_changed") {
           handlersRef.current.onTasksChanged?.()
+        }
+        if (msg.type === "task_stream_delta" && msg.task_id && msg.text != null) {
+          handlersRef.current.onTaskStreamDelta?.(msg.task_id, msg.text)
         }
       } catch {
         /* ignore */

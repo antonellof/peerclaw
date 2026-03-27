@@ -18,6 +18,17 @@ use crate::web::{
     InferenceRequest, InferenceResponse, JobSubmitRequest, JobSubmitResponse, WebJobInfo,
 };
 
+fn eprint_llm_io(kind: &str, model: &str, max_tokens: u32, temperature: f32, body: &str) {
+    eprintln!(
+        "\n======== PEERCLAW {kind} (model={model}, max_tokens={max_tokens}, temperature={temperature}) ========"
+    );
+    eprintln!("{body}");
+    eprintln!(
+        "======== END {kind} ({} chars) ========\n",
+        body.chars().count()
+    );
+}
+
 #[derive(Args)]
 pub struct ServeArgs {
     /// Advertise GPU resources
@@ -75,6 +86,10 @@ pub struct ServeArgs {
     /// Maximum tokens per day when sharing (default: 100000)
     #[arg(long, default_value = "100000")]
     pub provider_max_tokens_day: u64,
+
+    /// Print each dashboard/agentic LLM prompt and full completion to stderr (debugging).
+    #[arg(long, visible_alias = "verbose", short = 'V')]
+    pub verbose_agentic: bool,
 }
 
 pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
@@ -221,6 +236,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         let inference_sink_web: Arc<dyn crate::agent::AgenticInferenceSink> =
                             Arc::new(crate::web::WebChannelInferenceSink {
                                 tx: inference_tx.clone(),
+                                stream_delta_tx: None,
                             });
                         let agent_rt = crate::agent::AgentRuntime::from_spec(
                             &spec,
@@ -363,6 +379,13 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     // Main loop
     tracing::info!("Node running. Press Ctrl+C to stop.");
 
+    let verbose_llm_io = args.verbose_agentic;
+    if verbose_llm_io {
+        tracing::info!(
+            "Verbose LLM I/O enabled: each web/agentic prompt and completion is printed to stderr (peerclaw serve --verbose-agentic)"
+        );
+    }
+
     let stats = runtime.stats().await;
     tracing::info!(
         "Balance: {:.6} PCLAW | Connected peers: {}",
@@ -442,6 +465,15 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         // Streaming uses the same inline await as non-streaming: `TaskExecutor` is not `Send`, so we
         // cannot `tokio::spawn` it; deltas still reach the SSE bridge concurrently while this awaits.
         if let Ok(request) = inference_rx.try_recv() {
+            if verbose_llm_io {
+                eprint_llm_io(
+                    "LLM_PROMPT",
+                    &request.model,
+                    request.max_tokens,
+                    request.temperature,
+                    &request.prompt,
+                );
+            }
             match request.stream_delta_tx {
                 Some(delta_tx) => {
                     let task = InferenceTask::new(&request.model, &request.prompt)
@@ -490,6 +522,15 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                             provider_peer_id: None,
                         },
                     };
+                    if verbose_llm_io {
+                        eprint_llm_io(
+                            "LLM_RESPONSE",
+                            &request.model,
+                            request.max_tokens,
+                            request.temperature,
+                            &response.text,
+                        );
+                    }
                     let _ = request.response_tx.send(response);
                 }
                 None => {
@@ -538,6 +579,15 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         },
                     };
 
+                    if verbose_llm_io {
+                        eprint_llm_io(
+                            "LLM_RESPONSE",
+                            &request.model,
+                            request.max_tokens,
+                            request.temperature,
+                            &response.text,
+                        );
+                    }
                     let _ = request.response_tx.send(response);
                 }
             }

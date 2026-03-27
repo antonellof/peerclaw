@@ -85,6 +85,8 @@ pub async fn build_agentic_system_prefix(
          args: {\"query\": \"latest AI news 2026\"}\n\
          </tool_call>\n\n\
          Do NOT describe what you will do. Just call the tool directly.\n\
+         If the user asks for research, sources, or up-to-date facts, you MUST emit <tool_call> \
+         (e.g. web_search) in the same turn — do not only say you will search later.\n\
          After tool results, continue reasoning. When done, write your answer without tool_call blocks.\n\n",
     );
     if let Some(registry) = registry {
@@ -129,6 +131,52 @@ pub async fn build_agentic_system_prefix(
     s
 }
 
+/// Whether the agent could call at least one tool (local registry and/or MCP).
+async fn agentic_action_tools_available(
+    registry: Option<&ToolRegistry>,
+    mcp: Option<&McpManager>,
+    allowed_local_tools: Option<&[String]>,
+) -> bool {
+    if mcp.is_some_and(|m| m.tool_count() > 0) {
+        return true;
+    }
+    let Some(reg) = registry else {
+        return false;
+    };
+    let mut infos = reg.list_tools().await;
+    infos.retain(|t| matches!(t.location, ToolLocation::Local));
+    if let Some(allowed) = allowed_local_tools {
+        if !allowed.is_empty() {
+            let allow: HashSet<_> = allowed.iter().cloned().collect();
+            infos.retain(|t| allow.contains(&t.name));
+        }
+    }
+    !infos.is_empty()
+}
+
+/// Model promised work or research but did not deliver structured content (no tool calls in this turn).
+fn response_looks_like_intent_without_delivery(response: &str) -> bool {
+    let t = response.trim();
+    let n = t.chars().count();
+    if n > 2800 {
+        return false;
+    }
+    if (t.contains("(1)") && t.contains("(2)")) || t.matches("##").count() >= 2 {
+        return false;
+    }
+    let lower = t.to_lowercase();
+    let preamble = lower.contains("i'll ")
+        || lower.contains("i will ")
+        || lower.contains("let me ")
+        || lower.contains("i'm going to ")
+        || lower.contains("i am going to ")
+        || lower.contains("gathering information")
+        || lower.contains("authoritative sources")
+        || lower.contains("i'll start")
+        || lower.contains("i'll begin");
+    preamble && n < 1400
+}
+
 /// Run the unified ReAct loop. Returns final outcome (accumulated token count), tool log lines, and structured tool records.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_unified_agentic_loop(
@@ -169,6 +217,9 @@ pub async fn run_unified_agentic_loop(
     const MAX_CONSECUTIVE_FAIL_PASSES: u32 = 2;
     let mut consecutive_all_fail_passes: u32 = 0;
     let mut tool_call_history: Vec<(String, u64)> = Vec::new();
+    // Nudge when the model promises tools/work but emits no `<tool_call>` (common with some cloud models).
+    const MAX_TOOL_PREAMBLE_NUDGES: u32 = 2;
+    let mut tool_preamble_nudges: u32 = 0;
 
     for iter in 1..=AGENTIC_MAX_ITERS {
         if conversation.len() > conv_max_chars {
@@ -246,6 +297,31 @@ pub async fn run_unified_agentic_loop(
 
         let mut calls = parse_tool_calls(&text);
         if calls.is_empty() {
+            if tool_preamble_nudges < MAX_TOOL_PREAMBLE_NUDGES
+                && iter < AGENTIC_MAX_ITERS
+                && agentic_action_tools_available(registry.as_deref(), mcp.as_deref(), allowed_local_tools)
+                    .await
+                && response_looks_like_intent_without_delivery(&text)
+            {
+                tool_preamble_nudges += 1;
+                conversation.push_str("\n\nAssistant:\n");
+                conversation.push_str(text.trim());
+                conversation.push_str(
+                    "\n\n(System: You sent no <tool_call> blocks and did not produce the full deliverable. \
+                     Either call tools now (e.g. web_search with real queries) or write the complete structured answer the user asked for. \
+                     Do not reply with only an introduction, plan, or promise to act later.)\n",
+                );
+                if let Some(ref p) = progress {
+                    p.append_log(format!(
+                        "[{}] Pass {}: model replied without tools (preamble-style); nudging to continue…",
+                        chrono::Utc::now().format("%H:%M:%S"),
+                        iter
+                    ))
+                    .await;
+                }
+                continue;
+            }
+
             let trimmed_raw = text.trim();
             let cleaned = extract_answer(&text);
             let text_out = if !cleaned.trim().is_empty() {
@@ -624,5 +700,19 @@ mod tests {
         let prefix = build_agentic_system_prefix(Some(&reg), None, false, Some(&allowed)).await;
         assert!(prefix.contains("web_search"));
         assert!(!prefix.contains("web_fetch"));
+    }
+
+    #[test]
+    fn intent_without_delivery_detects_research_preamble() {
+        let s = "I'll research AI agents for you by gathering information from authoritative sources and structuring it according to your requirements.";
+        assert!(response_looks_like_intent_without_delivery(s));
+    }
+
+    #[test]
+    fn intent_without_delivery_skips_plain_final() {
+        assert!(!response_looks_like_intent_without_delivery("Hello, no tools."));
+        assert!(!response_looks_like_intent_without_delivery(
+            "(1) Overview\n\nFoo.\n\n(2) Terms\n\nBar."
+        ));
     }
 }

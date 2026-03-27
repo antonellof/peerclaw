@@ -8,6 +8,7 @@
 //! ## Control plane (WebSocket `/ws`)
 //! - Tick: `{ "type": "status", "data": { ... } }` (resource + peers + job counts)
 //! - Push: `{ "type": "tasks_changed" }` when agent tasks are created or updated (console debounces `GET /api/tasks`)
+//! - `{ "type": "task_stream_delta", "task_id": "…", "text": "…" }` — live LLM chunks during agentic tasks (chat UI)
 
 pub mod openai;
 
@@ -1151,6 +1152,8 @@ fn default_chat_agentic() -> bool {
 /// Routes dashboard inference through the same `mpsc` queue as `peerclaw serve`.
 pub struct WebChannelInferenceSink {
     pub tx: mpsc::Sender<InferenceRequest>,
+    /// When set, each LLM completion forwards token/text chunks here (SSE / WebSocket bridges).
+    pub stream_delta_tx: Option<mpsc::UnboundedSender<String>>,
 }
 
 #[async_trait]
@@ -1169,7 +1172,7 @@ impl crate::agent::unified_loop::AgenticInferenceSink for WebChannelInferenceSin
             max_tokens,
             temperature,
             response_tx,
-            stream_delta_tx: None,
+            stream_delta_tx: self.stream_delta_tx.clone(),
         };
         self.tx
             .send(request)
@@ -1219,6 +1222,7 @@ async fn run_unified_agentic_inference(
     temperature: f32,
     progress: Option<AgenticTaskProgressSink>,
     cancel: Option<Arc<AtomicBool>>,
+    llm_stream_tx: Option<mpsc::UnboundedSender<String>>,
 ) -> Result<(InferenceResponse, Vec<String>), String> {
     let Some(tx) = &state.inference_tx else {
         return Err("Inference not available".into());
@@ -1228,7 +1232,10 @@ async fn run_unified_agentic_inference(
         .as_ref()
         .map(|inf| inf.config_context_size() as usize * 4)
         .unwrap_or(48_000);
-    let sink = WebChannelInferenceSink { tx: tx.clone() };
+    let sink = WebChannelInferenceSink {
+        tx: tx.clone(),
+        stream_delta_tx: llm_stream_tx,
+    };
     let progress_dyn: Option<Arc<dyn crate::agent::unified_loop::AgenticProgressSink>> =
         progress.map(|p| Arc::new(p) as Arc<dyn crate::agent::unified_loop::AgenticProgressSink>);
     let cancel_ref = cancel.as_deref();
@@ -1808,6 +1815,7 @@ async fn api_chat(
                     temperature,
                     None,
                     None,
+                    None,
                 )
                 .await
                 {
@@ -1857,6 +1865,7 @@ async fn api_chat(
                     model.clone(),
                     max_tokens,
                     temperature,
+                    None,
                     None,
                     None,
                 )
@@ -2018,7 +2027,24 @@ async fn api_chat_stream(
                 let mcp_clone = mcp_for_agentic.clone();
                 let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(128);
                 tokio::spawn(async move {
-                    match run_unified_agentic_inference(
+                    let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<String>();
+                    let sse_forward = {
+                        let sse_tx = sse_tx.clone();
+                        async move {
+                            while let Some(chunk) = llm_rx.recv().await {
+                                let payload =
+                                    serde_json::json!({ "type": "delta", "text": chunk }).to_string();
+                                if sse_tx
+                                    .send(Ok(Event::default().data(payload)))
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                    };
+                    let run_infer = run_unified_agentic_inference(
                         state_spawn.as_ref(),
                         Some(registry),
                         mcp_clone,
@@ -2029,20 +2055,11 @@ async fn api_chat_stream(
                         temperature,
                         None,
                         None,
-                    )
-                    .await
-                    {
+                        Some(llm_tx),
+                    );
+                    let (_, infer_out) = tokio::join!(sse_forward, run_infer);
+                    match infer_out {
                         Ok((response, _)) => {
-                            let payload =
-                                serde_json::json!({ "type": "delta", "text": response.text })
-                                    .to_string();
-                            if sse_tx
-                                .send(Ok(Event::default().data(payload)))
-                                .await
-                                .is_err()
-                            {
-                                return;
-                            }
                             if let Some(ref sid) = session_id {
                                 save_session_turn_persistent(
                                     &sessions,
@@ -2108,7 +2125,24 @@ async fn api_chat_stream(
                 let model_spawn = model.clone();
                 let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(128);
                 tokio::spawn(async move {
-                    match run_unified_agentic_inference(
+                    let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<String>();
+                    let sse_forward = {
+                        let sse_tx = sse_tx.clone();
+                        async move {
+                            while let Some(chunk) = llm_rx.recv().await {
+                                let payload =
+                                    serde_json::json!({ "type": "delta", "text": chunk }).to_string();
+                                if sse_tx
+                                    .send(Ok(Event::default().data(payload)))
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                    };
+                    let run_infer = run_unified_agentic_inference(
                         state_spawn.as_ref(),
                         None,
                         Some(mcp),
@@ -2119,20 +2153,11 @@ async fn api_chat_stream(
                         temperature,
                         None,
                         None,
-                    )
-                    .await
-                    {
+                        Some(llm_tx),
+                    );
+                    let (_, infer_out) = tokio::join!(sse_forward, run_infer);
+                    match infer_out {
                         Ok((response, _)) => {
-                            let payload =
-                                serde_json::json!({ "type": "delta", "text": response.text })
-                                    .to_string();
-                            if sse_tx
-                                .send(Ok(Event::default().data(payload)))
-                                .await
-                                .is_err()
-                            {
-                                return;
-                            }
                             if let Some(ref sid) = session_id {
                                 save_session_turn_persistent(
                                     &sessions,
@@ -3063,6 +3088,27 @@ async fn api_create_task(
                 ws_tx: ws_tx.clone(),
             };
 
+            let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<String>();
+            let store_llm = store.clone();
+            let tid_llm = tid.clone();
+            let ws_llm = ws_tx.clone();
+            tokio::spawn(async move {
+                while let Some(chunk) = llm_rx.recv().await {
+                    let _ = ws_llm.send(serde_json::json!({
+                        "type": "task_stream_delta",
+                        "task_id": tid_llm,
+                        "text": &chunk,
+                    }));
+                    let mut tasks = store_llm.write().await;
+                    if let Some(t) = tasks.iter_mut().find(|t| t.id == tid_llm) {
+                        match &mut t.result {
+                            Some(s) => s.push_str(&chunk),
+                            None => t.result = Some(chunk),
+                        }
+                    }
+                }
+            });
+
             let infer_outcome = run_unified_agentic_inference(
                 state_spawn.as_ref(),
                 Some(registry),
@@ -3074,6 +3120,7 @@ async fn api_create_task(
                 0.35,
                 Some(progress_sink),
                 Some(cancel),
+                Some(llm_tx),
             )
             .await;
 
@@ -3181,6 +3228,27 @@ async fn api_create_task(
                 ws_tx: ws_tx.clone(),
             };
 
+            let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<String>();
+            let store_llm = store.clone();
+            let tid_llm = tid.clone();
+            let ws_llm = ws_tx.clone();
+            tokio::spawn(async move {
+                while let Some(chunk) = llm_rx.recv().await {
+                    let _ = ws_llm.send(serde_json::json!({
+                        "type": "task_stream_delta",
+                        "task_id": tid_llm,
+                        "text": &chunk,
+                    }));
+                    let mut tasks = store_llm.write().await;
+                    if let Some(t) = tasks.iter_mut().find(|t| t.id == tid_llm) {
+                        match &mut t.result {
+                            Some(s) => s.push_str(&chunk),
+                            None => t.result = Some(chunk),
+                        }
+                    }
+                }
+            });
+
             let infer_outcome = run_unified_agentic_inference(
                 state_spawn.as_ref(),
                 None,
@@ -3192,6 +3260,7 @@ async fn api_create_task(
                 0.35,
                 Some(progress_sink),
                 Some(cancel),
+                Some(llm_tx),
             )
             .await;
 
