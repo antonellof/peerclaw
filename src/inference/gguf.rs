@@ -850,8 +850,15 @@ impl AsyncGgufEngine {
         &self,
         request: &GenerateRequest,
     ) -> Result<GenerateResponse, GgufError> {
-        let engine = self.inner.lock().await;
-        engine.generate(request)
+        let engine = self.inner.clone();
+        let request = request.clone();
+        tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Handle::current();
+            let guard = rt.block_on(engine.lock());
+            guard.generate(&request)
+        })
+        .await
+        .map_err(|e| GgufError::GenerationFailed(format!("spawn_blocking join: {e}")))?
     }
 
     /// Generate with streaming via an mpsc channel.

@@ -1351,8 +1351,20 @@ async fn run_unified_agentic_inference(
         if calls.is_empty() {
             // Detect "plan without action" — model describes what it *would* do but
             // doesn't emit tool_call blocks. Auto-generate tool calls from context.
-            // After 2 auto-actions (search + fetch), force the model to answer instead.
-            if auto_action_count < 2 {
+            // Only for goals that look like research tasks (long enough, mentions research-like words).
+            let goal_lower = conversation_body.to_lowercase();
+            let is_research_goal = conversation_body.len() > 30
+                || goal_lower.contains("research")
+                || goal_lower.contains("search")
+                || goal_lower.contains("find")
+                || goal_lower.contains("summarize")
+                || goal_lower.contains("latest")
+                || goal_lower.contains("trends")
+                || goal_lower.contains("analyze")
+                || goal_lower.contains("compare")
+                || goal_lower.contains("review");
+
+            if auto_action_count < 2 && is_research_goal {
                 let plan_phrases = ["let me search", "let me gather", "let me look",
                     "i'll search", "i'll research", "i'll fetch", "i'll start by",
                     "sub-questions", "let me find", "let me check", "i'll gather",
