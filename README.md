@@ -36,7 +36,7 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **Decentralized** — No central server, peers discover each other
 - **libp2p stack** — Kademlia DHT, GossipSub, mDNS, Noise encryption
 - **Job marketplace** — Request → Bid → Execute → Settle workflow; signed job messages (Ed25519)
-- **Job resource types** — Inference, web fetch, WASM tool runs, CPU compute, and storage-style requests
+- **Job resource types** — Inference, web fetch, WASM tool runs, CPU compute, and storage-style requests; local **web search** jobs use the same DuckDuckGo HTML path as the `web_search` tool
 - **Multi-peer clusters** — Test distributed execution locally
 
 ### Token Economy

@@ -181,8 +181,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     let (node_tool_tx, mut node_tool_rx) = mpsc::channel::<crate::tools::NodeToolCommand>(64);
 
     // Create job broadcast channel so JobManager can publish to GossipSub
-    let (job_broadcast_tx, mut job_broadcast_rx) =
-        mpsc::channel::<crate::job::JobBroadcast>(64);
+    let (job_broadcast_tx, mut job_broadcast_rx) = mpsc::channel::<crate::job::JobBroadcast>(64);
     runtime
         .job_manager
         .write()
@@ -219,12 +218,17 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         let model = spec.model.name.clone();
 
                         // Create the agent runtime with real executor and tools
+                        let inference_sink_web: Arc<dyn crate::agent::AgenticInferenceSink> =
+                            Arc::new(crate::web::WebChannelInferenceSink {
+                                tx: inference_tx.clone(),
+                            });
                         let agent_rt = crate::agent::AgentRuntime::from_spec(
                             &spec,
                             runtime.executor.clone(),
                             runtime.tools.clone(),
                             runtime.local_peer_id.to_string(),
                             Some(node_tool_tx.clone()),
+                            Some(inference_sink_web),
                         );
 
                         let agent_id = agent_rt.config.id.clone();
@@ -306,7 +310,9 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             job_submit_tx: Some(job_submit_tx),
             swarm_manager: Some(swarm_manager.clone()),
             task_store: Arc::new(tokio::sync::RwLock::new(Vec::new())),
-            agent_task_cancels: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            agent_task_cancels: Arc::new(
+                tokio::sync::RwLock::new(std::collections::HashMap::new()),
+            ),
             provider_tracker: Some(runtime.provider_tracker.clone()),
             agent_task_tx: agent_task_tx_opt,
             ws_control_tx,
@@ -539,9 +545,13 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
 
         // Handle job submission requests from web UI
         if let Ok(request) = job_submit_rx.try_recv() {
-            let response =
-                handle_job_submit(runtime.as_ref(), request.job_type, request.budget, request.payload)
-                    .await;
+            let response = handle_job_submit(
+                runtime.as_ref(),
+                request.job_type,
+                request.budget,
+                request.payload,
+            )
+            .await;
             let _ = request.response_tx.send(response);
         }
 
@@ -586,7 +596,11 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         .collect();
                     let _ = reply.send(peers_json);
                 }
-                NodeToolCommand::QueryWallet { include_history, history_limit, reply } => {
+                NodeToolCommand::QueryWallet {
+                    include_history,
+                    history_limit,
+                    reply,
+                } => {
                     let bal = runtime.wallet.balance().await;
                     let mut result = serde_json::json!({
                         "peer_id": runtime.local_peer_id.to_string(),
@@ -687,13 +701,16 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                                 "tool_calls": result.tool_calls.len(),
                             }))
                         } else {
-                            Err(result.error.unwrap_or_else(|| "sub-agent failed".to_string()))
+                            Err(result
+                                .error
+                                .unwrap_or_else(|| "sub-agent failed".to_string()))
                         };
                         let _ = reply.send(response);
                     } else {
-                        let _ = reply.send(Err(
-                            "no agent runtime available; start with --agent flag".to_string(),
-                        ));
+                        let _ =
+                            reply
+                                .send(Err("no agent runtime available; start with --agent flag"
+                                    .to_string()));
                     }
                 }
             }
@@ -702,6 +719,10 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         // Drain job broadcasts from the JobManager and publish on the network
         while let Ok(broadcast) = job_broadcast_rx.try_recv() {
             let mut network = runtime.network.write().await;
+            if network.connected_peers().is_empty() {
+                tracing::debug!(topic = %broadcast.topic, "Skipping job broadcast (no P2P peers)");
+                continue;
+            }
             if let Err(e) = network.publish(&broadcast.topic, broadcast.data) {
                 tracing::warn!(topic = %broadcast.topic, error = %e, "Failed to publish job broadcast");
             }
@@ -738,7 +759,17 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                 });
 
                 let result = agent
-                    .run_task(&request.description, Some(&*request.cancel))
+                    .run_task_with_session(
+                        &request.description,
+                        Some(&*request.cancel),
+                        request.session_id.as_deref(),
+                        crate::agent::AgentTaskExtras {
+                            use_mcp: request.use_mcp,
+                            mcp: request.mcp_manager.clone(),
+                            skill_block: request.skill_block.clone(),
+                            model_ctx_chars: request.model_ctx_chars,
+                        },
+                    )
                     .await;
 
                 // Stop the log syncer

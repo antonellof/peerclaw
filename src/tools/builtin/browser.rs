@@ -110,9 +110,7 @@ impl Tool for BrowserTool {
         ssrf::validate_url(url).map_err(|e| ToolError::NotAuthorized(e.to_string()))?;
 
         match action {
-            "snapshot" => {
-                execute_snapshot(url, selector, wait_ms, ctx, start).await
-            }
+            "snapshot" => execute_snapshot(url, selector, wait_ms, ctx, start).await,
             "screenshot" => {
                 let output_path = optional_str(&params, "output_path");
                 execute_screenshot(url, output_path, wait_ms, ctx, start).await
@@ -171,12 +169,7 @@ async fn execute_snapshot(
         let (html, final_url) = fetch_with_reqwest(url).await?;
         let title = extract_title(&html);
         let text = html_to_text(&html, MAX_TEXT_LENGTH);
-        (
-            text,
-            title,
-            final_url,
-            "fallback_http",
-        )
+        (text, title, final_url, "fallback_http")
     };
 
     let truncated = text.len() >= MAX_TEXT_LENGTH;
@@ -209,12 +202,12 @@ async fn execute_screenshot(
         )
     })?;
 
-    let screenshot_path = output_path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            ctx.working_dir
-                .join(format!("screenshot_{}.png", chrono::Utc::now().format("%Y%m%d_%H%M%S")))
-        });
+    let screenshot_path = output_path.map(PathBuf::from).unwrap_or_else(|| {
+        ctx.working_dir.join(format!(
+            "screenshot_{}.png",
+            chrono::Utc::now().format("%Y%m%d_%H%M%S")
+        ))
+    });
 
     let mut cmd = Command::new(&chrome_path);
     cmd.args([
@@ -239,9 +232,7 @@ async fn execute_screenshot(
     let output = tokio::time::timeout(Duration::from_secs(30), cmd.output())
         .await
         .map_err(|_| ToolError::Timeout(30))?
-        .map_err(|e| {
-            ToolError::ExecutionFailed(format!("Failed to run Chrome: {}", e))
-        })?;
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to run Chrome: {}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -350,9 +341,7 @@ async fn run_chrome_dump_dom(
     let output = tokio::time::timeout(Duration::from_secs(30), cmd.output())
         .await
         .map_err(|_| ToolError::Timeout(30))?
-        .map_err(|e| {
-            ToolError::ExecutionFailed(format!("Failed to run Chrome: {}", e))
-        })?;
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to run Chrome: {}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -393,10 +382,7 @@ async fn fetch_with_reqwest(url: &str) -> Result<(String, String), ToolError> {
         return Err(ToolError::ExternalService(format!(
             "HTTP {}: {}",
             response.status().as_u16(),
-            response
-                .status()
-                .canonical_reason()
-                .unwrap_or("Error")
+            response.status().canonical_reason().unwrap_or("Error")
         )));
     }
 
@@ -511,8 +497,7 @@ mod tests {
 
     #[test]
     fn test_html_to_text_strips_scripts() {
-        let html =
-            "<html><body><script>alert('xss')</script><p>Safe text</p></body></html>";
+        let html = "<html><body><script>alert('xss')</script><p>Safe text</p></body></html>";
         let text = html_to_text(html, 1000);
         assert!(!text.contains("alert"));
         assert!(text.contains("Safe text"));

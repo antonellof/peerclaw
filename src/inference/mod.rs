@@ -223,8 +223,8 @@ impl InferenceEngine {
             "Loading model"
         );
 
-        // TODO: Actually load the model using llama.cpp
-        // For now, create a placeholder LoadedModel
+        // GGUF weights are loaded lazily when generation runs (`GgufEngine` / `generate_streaming`).
+        // The cache entry records residency for LRU eviction and `is_loaded`.
         let loaded = LoadedModel {
             info,
             loaded_at: Instant::now(),
@@ -307,20 +307,14 @@ impl InferenceEngine {
         }
 
         // Try local GGUF model first when enabled
-        let has_local = live.use_local_gguf
-            && self
-                .registry
-                .read()
-                .await
-                .get(&request.model)
-                .is_some();
+        let has_local =
+            live.use_local_gguf && self.registry.read().await.get(&request.model).is_some();
 
         if has_local {
             // Get model path from registry
             let model_path = {
                 let reg = self.registry.read().await;
-                reg.get(&request.model)
-                    .map(|info| info.path.clone())
+                reg.get(&request.model).map(|info| info.path.clone())
             };
 
             if let Some(path) = model_path {
@@ -331,9 +325,9 @@ impl InferenceEngine {
                 );
 
                 // Load (or reuse cached) model, then generate.
-                self.gguf.load(&path).map_err(|e| {
-                    InferenceError::LoadFailed(format!("GGUF load failed: {e}"))
-                })?;
+                self.gguf
+                    .load(&path)
+                    .map_err(|e| InferenceError::LoadFailed(format!("GGUF load failed: {e}")))?;
 
                 let result = self.gguf.generate(request).map_err(|e| {
                     InferenceError::GenerationFailed(format!("GGUF generate failed: {e}"))
@@ -407,6 +401,46 @@ impl InferenceEngine {
         Err(InferenceError::ModelNotFound(hint))
     }
 
+    /// Resource profile for [`crate::executor::TaskRouter`]: use GGUF-sized RAM/VRAM only when this
+    /// node will actually run **local** GGUF for `model_id` per current live settings and registry.
+    ///
+    /// Ollama-only, remote API, and “model not in local registry” paths use minimal requirements so
+    /// the executor does not treat them like a loaded multi‑GB GGUF.
+    pub async fn routing_resource_requirements(
+        &self,
+        model_id: &str,
+    ) -> crate::executor::task::ResourceRequirements {
+        use crate::executor::task::{InferenceTask, ResourceRequirements};
+
+        if self.failover.is_some() {
+            let live = self.live.read().await;
+            let will_run_local_gguf = live.use_local_gguf
+                && self.registry.read().await.get(model_id).is_some();
+            return if will_run_local_gguf {
+                InferenceTask::new(model_id, "").estimate_requirements()
+            } else {
+                ResourceRequirements::minimal()
+            };
+        }
+
+        let live = self.live.read().await;
+
+        // Legacy `generate` order: remote API → local GGUF → Ollama
+        if live.remote_api_enabled
+            && !live.remote_api_base_url.trim().is_empty()
+            && !live.remote_api_key.trim().is_empty()
+        {
+            return ResourceRequirements::minimal();
+        }
+
+        let has_local = live.use_local_gguf && self.registry.read().await.get(model_id).is_some();
+        if has_local {
+            InferenceTask::new(model_id, "").estimate_requirements()
+        } else {
+            ResourceRequirements::minimal()
+        }
+    }
+
     /// Get memory usage stats.
     pub async fn memory_stats(&self) -> MemoryStats {
         MemoryStats {
@@ -440,7 +474,9 @@ impl ModelRegistry {
         }
         // Prefix match: `llama-3.2-3b` matches `llama-3.2-3b-q4_k_m`
         // Pick the first (arbitrary but stable since HashMap).
-        self.models.values().find(|info| info.id.starts_with(model_id))
+        self.models
+            .values()
+            .find(|info| info.id.starts_with(model_id))
     }
 
     pub fn list(&self) -> Vec<ModelInfo> {

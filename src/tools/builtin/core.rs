@@ -442,7 +442,10 @@ mod tests {
         let ctx = ToolContext::local("test".to_string());
         let fenced = "```json\n{\"x\": 1}\n```";
         let result = tool
-            .execute(serde_json::json!({"action": "parse", "input": fenced}), &ctx)
+            .execute(
+                serde_json::json!({"action": "parse", "input": fenced}),
+                &ctx,
+            )
             .await
             .unwrap();
         assert!(result.success);

@@ -74,7 +74,8 @@ pub async fn submit_p2p_job_via_node(
     })
     .await
     .map_err(|_| "node tool channel closed".to_string())?;
-    rx.await.map_err(|_| "node dropped job submit reply".to_string())
+    rx.await
+        .map_err(|_| "node dropped job submit reply".to_string())
 }
 
 /// Look up a job by id across pending requests, active jobs, and recent completed.
@@ -91,15 +92,12 @@ pub async fn describe_p2p_job_via_node(
 }
 
 /// Query connected peers from the running node.
-pub async fn query_peers_via_node(
-    tx: &NodeToolTx,
-) -> Result<Vec<serde_json::Value>, String> {
+pub async fn query_peers_via_node(tx: &NodeToolTx) -> Result<Vec<serde_json::Value>, String> {
     let (reply, rx) = oneshot::channel();
     tx.send(NodeToolCommand::QueryPeers { reply })
         .await
         .map_err(|_| "node tool channel closed".to_string())?;
-    rx.await
-        .map_err(|_| "node dropped peers reply".to_string())
+    rx.await.map_err(|_| "node dropped peers reply".to_string())
 }
 
 /// Query wallet balance from the running node.

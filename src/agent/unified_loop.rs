@@ -145,8 +145,8 @@ pub async fn run_unified_agentic_loop(
     local_peer_id: String,
     node_tool_tx: Option<NodeToolTx>,
     progress: Option<Arc<dyn AgenticProgressSink>>,
-    cancel: Option<Arc<AtomicBool>>,
-) -> Result<(AgenticTurnOutcome, Vec<String>, Vec<ToolCallRecord>), String> {
+    cancel: Option<&AtomicBool>,
+) -> Result<(AgenticTurnOutcome, Vec<String>, Vec<ToolCallRecord>, u32), String> {
     let max_tokens = max_tokens.min(16384);
     let prefix = build_agentic_system_prefix(
         registry.as_deref(),
@@ -170,17 +170,10 @@ pub async fn run_unified_agentic_loop(
     let mut consecutive_all_fail_passes: u32 = 0;
     let mut tool_call_history: Vec<(String, u64)> = Vec::new();
 
-    let mut last_location = String::from("Local");
-    let mut last_peer: Option<String> = None;
-    let mut last_tps = 0.0_f32;
-
     for iter in 1..=AGENTIC_MAX_ITERS {
         if conversation.len() > conv_max_chars {
-            conversation = compaction::prune_string_conversation(
-                &conversation,
-                prefix_len,
-                conv_max_chars,
-            );
+            conversation =
+                compaction::prune_string_conversation(&conversation, prefix_len, conv_max_chars);
         }
 
         if iter == AGENTIC_MAX_ITERS {
@@ -189,10 +182,7 @@ pub async fn run_unified_agentic_loop(
                  Write your complete answer directly to the user NOW.)\n",
             );
         }
-        if cancel
-            .as_ref()
-            .is_some_and(|c| c.load(Ordering::Acquire))
-        {
+        if cancel.is_some_and(|c| c.load(Ordering::Acquire)) {
             return Err("Stopped by user".into());
         }
         if let Some(ref p) = progress {
@@ -212,17 +202,9 @@ pub async fn run_unified_agentic_loop(
         }
 
         let inf = sink
-            .infer(
-                prompt_for_model,
-                model.clone(),
-                max_tokens,
-                temperature,
-            )
+            .infer(prompt_for_model, model.clone(), max_tokens, temperature)
             .await?;
         total_tokens = total_tokens.saturating_add(inf.tokens_generated);
-        last_location = inf.location.clone();
-        last_peer = inf.provider_peer_id.clone();
-        last_tps = inf.tokens_per_second;
 
         if let Some(ref p) = progress {
             p.set_tokens(total_tokens).await;
@@ -230,7 +212,10 @@ pub async fn run_unified_agentic_loop(
 
         let text = inf.text;
 
-        if inf.location == "error" || text.starts_with("Error: Inference error:") || text.starts_with("Error: ") {
+        if inf.location == "error"
+            || text.starts_with("Error: Inference error:")
+            || text.starts_with("Error: ")
+        {
             if let Some(ref p) = progress {
                 p.append_log(format!(
                     "[{}] Inference error on pass {}: {} — compacting and retrying",
@@ -261,23 +246,27 @@ pub async fn run_unified_agentic_loop(
 
         let mut calls = parse_tool_calls(&text);
         if calls.is_empty() {
+            let trimmed_raw = text.trim();
             let cleaned = extract_answer(&text);
-            let text_out = if cleaned.trim().is_empty() {
+            let text_out = if !cleaned.trim().is_empty() {
+                cleaned
+            } else if !trimmed_raw.is_empty() {
+                trimmed_raw.to_string()
+            } else {
                 "(No text in the model's final reply after stripping tool markup. See task steps / logs for tool results, or retry.)"
                     .to_string()
-            } else {
-                cleaned
             };
             return Ok((
                 AgenticTurnOutcome {
                     text: text_out,
                     tokens_generated: total_tokens,
-                    tokens_per_second: *last_tps.lock().unwrap(),
-                    location: last_location.lock().unwrap().clone(),
-                    provider_peer_id: last_peer.lock().unwrap().clone(),
+                    tokens_per_second: inf.tokens_per_second,
+                    location: inf.location.clone(),
+                    provider_peer_id: inf.provider_peer_id.clone(),
                 },
                 tool_logs,
                 tool_records,
+                iter,
             ));
         }
 
@@ -323,23 +312,27 @@ pub async fn run_unified_agentic_loop(
                 }
             }
             if calls.is_empty() {
+                let trimmed_raw = text.trim();
                 let cleaned = extract_answer(&text);
-                let text_out = if cleaned.trim().is_empty() {
+                let text_out = if !cleaned.trim().is_empty() {
+                    cleaned
+                } else if !trimmed_raw.is_empty() {
+                    trimmed_raw.to_string()
+                } else {
                     "(All tool calls were blocked due to repeated identical calls. See logs for details.)"
                         .to_string()
-                } else {
-                    cleaned
                 };
                 return Ok((
                     AgenticTurnOutcome {
                         text: text_out,
                         tokens_generated: total_tokens,
-                        tokens_per_second: *last_tps.lock().unwrap(),
-                        location: last_location.lock().unwrap().clone(),
-                        provider_peer_id: last_peer.lock().unwrap().clone(),
+                        tokens_per_second: inf.tokens_per_second,
+                        location: inf.location.clone(),
+                        provider_peer_id: inf.provider_peer_id.clone(),
                     },
                     tool_logs,
                     tool_records,
+                    iter,
                 ));
             }
         }
@@ -413,7 +406,8 @@ pub async fn run_unified_agentic_loop(
                         let res = m.call_tool(&call.name, call.args.clone()).await;
                         match res {
                             Ok(r) => (
-                                serde_json::to_string(&r).unwrap_or_else(|_| "(unserializable result)".into()),
+                                serde_json::to_string(&r)
+                                    .unwrap_or_else(|_| "(unserializable result)".into()),
                                 true,
                             ),
                             Err(e) => {
@@ -432,12 +426,14 @@ pub async fn run_unified_agentic_loop(
                     }
                 }
             } else {
-                let allowed_ok = allowed_local_tools.map_or(true, |a| {
-                    a.is_empty() || a.iter().any(|n| n == &call.name)
-                });
+                let allowed_ok = allowed_local_tools
+                    .map_or(true, |a| a.is_empty() || a.iter().any(|n| n == &call.name));
                 if !allowed_ok {
                     pass_failures += 1;
-                    let msg = format!("ERROR: Tool '{}' is not in the allowed tools list", call.name);
+                    let msg = format!(
+                        "ERROR: Tool '{}' is not in the allowed tools list",
+                        call.name
+                    );
                     tool_records.push(ToolCallRecord {
                         tool_name: call.name.clone(),
                         args: call.args.clone(),
@@ -473,10 +469,7 @@ pub async fn run_unified_agentic_loop(
                             egress_policy: None,
                             agent_depth: 0,
                         };
-                        match reg
-                            .execute_local(&call.name, call.args.clone(), &ctx)
-                            .await
-                        {
+                        match reg.execute_local(&call.name, call.args.clone(), &ctx).await {
                             Ok(r) => {
                                 let s = serde_json::to_string(&r.output)
                                     .unwrap_or_else(|_| "(unserializable)".into());
@@ -484,7 +477,10 @@ pub async fn run_unified_agentic_loop(
                             }
                             Err(e) => {
                                 pass_failures += 1;
-                                (serde_json::json!({ "error": e.to_string() }).to_string(), false)
+                                (
+                                    serde_json::json!({ "error": e.to_string() }).to_string(),
+                                    false,
+                                )
                             }
                         }
                     }
@@ -561,4 +557,72 @@ pub async fn run_unified_agentic_loop(
     }
 
     Err("Agentic: max tool iterations reached".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::ToolRegistry;
+
+    struct FinalAnswerSink {
+        text: String,
+    }
+
+    #[async_trait::async_trait]
+    impl AgenticInferenceSink for FinalAnswerSink {
+        async fn infer(
+            &self,
+            _prompt: String,
+            _model: String,
+            _max_tokens: u32,
+            _temperature: f32,
+        ) -> Result<AgenticTurnOutcome, String> {
+            Ok(AgenticTurnOutcome {
+                text: self.text.clone(),
+                tokens_generated: 3,
+                tokens_per_second: 1.0,
+                location: "Local".to_string(),
+                provider_peer_id: Some("local".into()),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn unified_loop_ends_on_plain_answer() {
+        let sink = FinalAnswerSink {
+            text: "Hello, no tools.".to_string(),
+        };
+        let reg = Arc::new(ToolRegistry::new("test_peer".into()));
+        let (out, logs, records, passes) = run_unified_agentic_loop(
+            &sink,
+            Some(reg),
+            None,
+            false,
+            None,
+            "### Task\nping\n".to_string(),
+            "m".into(),
+            64,
+            0.0,
+            8000,
+            "test_peer".into(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("loop");
+        assert_eq!(out.text, "Hello, no tools.");
+        assert!(logs.is_empty());
+        assert!(records.is_empty());
+        assert_eq!(passes, 1);
+    }
+
+    #[tokio::test]
+    async fn build_prefix_respects_allowed_local_tools() {
+        let reg = ToolRegistry::new("p".into());
+        let allowed = vec!["web_search".to_string()];
+        let prefix = build_agentic_system_prefix(Some(&reg), None, false, Some(&allowed)).await;
+        assert!(prefix.contains("web_search"));
+        assert!(!prefix.contains("web_fetch"));
+    }
 }

@@ -150,10 +150,8 @@ pub fn parse_duckduckgo_results(html: &str, max_results: usize) -> Vec<serde_jso
     // We look for <a class="result__a" ...> for title/URL
     // and <a class="result__snippet"> for snippet text
     let result_title_re =
-        regex::Regex::new(r#"<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#)
-            .unwrap();
-    let snippet_re =
-        regex::Regex::new(r#"<a[^>]*class="result__snippet"[^>]*>(.*?)</a>"#).unwrap();
+        regex::Regex::new(r#"<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#).unwrap();
+    let snippet_re = regex::Regex::new(r#"<a[^>]*class="result__snippet"[^>]*>(.*?)</a>"#).unwrap();
 
     // Find all result blocks by splitting on result__a anchors
     let title_matches: Vec<_> = result_title_re.captures_iter(html).collect();

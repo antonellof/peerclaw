@@ -11,7 +11,7 @@
 
 pub mod openai;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::{Path, State},
@@ -275,6 +276,13 @@ pub struct AgentTaskRequest {
     pub cancel: Arc<AtomicBool>,
     /// Session id for conversation history continuity.
     pub session_id: Option<String>,
+    /// Honor dashboard MCP toggle (unified loop).
+    pub use_mcp: bool,
+    pub mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    /// Skill markdown for `task_type` (same as unified tasks).
+    pub skill_block: String,
+    /// Prompt char budget from inference engine (0 = default inside runtime).
+    pub model_ctx_chars: usize,
 }
 
 /// Static UI: `PEERCLAW_WEB_DIST` if set and valid, else `web/dist` under the crate root (after `npm run build` in `web/`).
@@ -553,10 +561,7 @@ pub async fn start_server(addr: SocketAddr, state: Arc<WebState>) -> anyhow::Res
     // Layer order: **NormalizePath outermost** so the URI is fixed before CORS and the router.
     // If CORS is outermost, some requests no longer match `/api/tasks/:id` and fall through to SPA HTML.
     let app = create_router(state)
-        .layer(
-            CorsLayer::very_permissive()
-                .allow_private_network(true),
-        )
+        .layer(CorsLayer::very_permissive().allow_private_network(true))
         .layer(NormalizePathLayer::trim_trailing_slash());
 
     if spa {
@@ -910,10 +915,7 @@ fn studio_err_json(
     status: StatusCode,
     msg: impl Into<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        status,
-        Json(serde_json::json!({ "error": msg.into() })),
-    )
+    (status, Json(serde_json::json!({ "error": msg.into() })))
 }
 
 fn resolve_skill_read_path(
@@ -921,7 +923,10 @@ fn resolve_skill_read_path(
     slug: &str,
 ) -> Result<(std::path::PathBuf, &'static str), (StatusCode, Json<serde_json::Value>)> {
     if !crate::skills::validate_skill_name(slug) {
-        return Err(studio_err_json(StatusCode::BAD_REQUEST, "invalid skill slug"));
+        return Err(studio_err_json(
+            StatusCode::BAD_REQUEST,
+            "invalid skill slug",
+        ));
     }
     let root = std::fs::canonicalize(skills_dir).map_err(|e| {
         studio_err_json(
@@ -932,17 +937,15 @@ fn resolve_skill_read_path(
     let nested = root.join(slug).join("SKILL.md");
     let flat = root.join(format!("{slug}.md"));
     if nested.is_file() {
-        let c = std::fs::canonicalize(&nested).map_err(|e| {
-            studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+        let c = std::fs::canonicalize(&nested)
+            .map_err(|e| studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         if !c.starts_with(&root) {
             return Err(studio_err_json(StatusCode::FORBIDDEN, "path escape"));
         }
         Ok((c, "nested"))
     } else if flat.is_file() {
-        let c = std::fs::canonicalize(&flat).map_err(|e| {
-            studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+        let c = std::fs::canonicalize(&flat)
+            .map_err(|e| studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         if !c.starts_with(&root) {
             return Err(studio_err_json(StatusCode::FORBIDDEN, "path escape"));
         }
@@ -960,7 +963,10 @@ fn resolve_skill_write_path(
     slug: &str,
 ) -> Result<std::path::PathBuf, (StatusCode, Json<serde_json::Value>)> {
     if !crate::skills::validate_skill_name(slug) {
-        return Err(studio_err_json(StatusCode::BAD_REQUEST, "invalid skill slug"));
+        return Err(studio_err_json(
+            StatusCode::BAD_REQUEST,
+            "invalid skill slug",
+        ));
     }
     let root = std::fs::canonicalize(skills_dir).map_err(|e| {
         studio_err_json(
@@ -970,9 +976,8 @@ fn resolve_skill_write_path(
     })?;
     let dir = root.join(slug);
     if dir.exists() {
-        let c = std::fs::canonicalize(&dir).map_err(|e| {
-            studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+        let c = std::fs::canonicalize(&dir)
+            .map_err(|e| studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         if !c.starts_with(&root) {
             return Err(studio_err_json(StatusCode::FORBIDDEN, "path escape"));
         }
@@ -988,12 +993,8 @@ async fn api_skills_studio_list(
     State(state): State<Arc<WebState>>,
 ) -> Result<Json<Vec<SkillStudioListEntry>>, (StatusCode, Json<serde_json::Value>)> {
     let root = &state.skills_dir;
-    let rd = std::fs::read_dir(root).map_err(|e| {
-        studio_err_json(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            e.to_string(),
-        )
-    })?;
+    let rd = std::fs::read_dir(root)
+        .map_err(|e| studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let mut items = Vec::new();
     for e in rd.flatten() {
         let path = e.path();
@@ -1028,18 +1029,16 @@ async fn api_skills_studio_get(
     State(state): State<Arc<WebState>>,
 ) -> Result<Json<SkillStudioGetResponse>, (StatusCode, Json<serde_json::Value>)> {
     let (path, layout) = resolve_skill_read_path(&state.skills_dir, &slug)?;
-    let meta = std::fs::metadata(&path).map_err(|e| {
-        studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-    })?;
+    let meta = std::fs::metadata(&path)
+        .map_err(|e| studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     if meta.len() > crate::skills::MAX_SKILL_SIZE {
         return Err(studio_err_json(
             StatusCode::PAYLOAD_TOO_LARGE,
             "SKILL.md too large",
         ));
     }
-    let content = std::fs::read_to_string(&path).map_err(|e| {
-        studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-    })?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(SkillStudioGetResponse {
         slug,
         content,
@@ -1061,13 +1060,11 @@ async fn api_skills_studio_put(
     }
     let path = resolve_skill_write_path(&state.skills_dir, &slug)?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
-    std::fs::write(&path, &body.content).map_err(|e| {
-        studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-    })?;
+    std::fs::write(&path, &body.content)
+        .map_err(|e| studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(serde_json::json!({
         "ok": true,
         "slug": slug,
@@ -1097,9 +1094,12 @@ async fn run_studio_inference(
         response_tx,
         stream_delta_tx: None,
     };
-    tx.send(request)
-        .await
-        .map_err(|_| studio_err_json(StatusCode::INTERNAL_SERVER_ERROR, "failed to queue inference"))?;
+    tx.send(request).await.map_err(|_| {
+        studio_err_json(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to queue inference",
+        )
+    })?;
     match tokio::time::timeout(Duration::from_secs(120), response_rx).await {
         Ok(Ok(r)) => Ok(r),
         Ok(Err(_)) => Err(studio_err_json(
@@ -1144,66 +1144,67 @@ Output rules:
     }))
 }
 
-/// Upper bound on LLM↔tool rounds (avoids unbounded memory growth on the conversation).
-const AGENTIC_MAX_ITERS: u32 = 20;
-/// Cap parallel tool calls per model response so one bad turn cannot flood the executor / UI.
-const AGENTIC_MAX_TOOL_CALLS_PER_PASS: usize = 10;
-
 fn default_chat_agentic() -> bool {
     true
 }
 
-async fn build_agentic_system_prefix(
-    registry: Option<&crate::tools::ToolRegistry>,
-    mcp: Option<&crate::mcp::McpManager>,
-    include_mcp_catalog: bool,
-) -> String {
-    use crate::tools::ToolLocation;
-    let mut s = String::from(
-        "You are a helpful AI assistant with tools.\n\n\
-         To use a tool, write EXACTLY this format:\n\
-         <tool_call>\n\
-         name: tool_name\n\
-         args: {\"param\": \"value\"}\n\
-         </tool_call>\n\n\
-         Example:\n\
-         <tool_call>\n\
-         name: web_search\n\
-         args: {\"query\": \"latest AI news 2026\"}\n\
-         </tool_call>\n\n\
-         Do NOT describe what you will do. Just call the tool directly.\n\
-         After tool results, continue reasoning. When done, write your answer without tool_call blocks.\n\n",
-    );
-    if let Some(registry) = registry {
-        s.push_str("Available tools:\n");
-        let mut infos = registry.list_tools().await;
-        infos.retain(|t| matches!(t.location, ToolLocation::Local));
-        infos.sort_by(|a, b| a.name.cmp(&b.name));
-        for t in &infos {
-            // One-line description, keep it short for small models
-            let desc: String = t.description.chars().take(80).collect();
-            s.push_str(&format!("- {}: {}\n", t.name, desc));
-        }
-    } else {
-        s.push_str(
-            "You have MCP tools only. Tool names MUST use `server:tool_name` format as listed below.\n",
-        );
-    }
-    if include_mcp_catalog {
-        if let Some(manager) = mcp {
-            if manager.tool_count() > 0 {
-                s.push_str("\nMCP tools:\n");
-                let mut entries = manager.list_tools_with_ids();
-                entries.sort_by(|a, b| a.0.cmp(&b.0));
-                for (id, tool) in entries {
-                    let desc: String = tool.description.as_deref().unwrap_or("(no description)")
-                        .chars().take(80).collect();
-                    s.push_str(&format!("- {}: {}\n", id, desc));
-                }
-            }
+/// Routes dashboard inference through the same `mpsc` queue as `peerclaw serve`.
+pub struct WebChannelInferenceSink {
+    pub tx: mpsc::Sender<InferenceRequest>,
+}
+
+#[async_trait]
+impl crate::agent::unified_loop::AgenticInferenceSink for WebChannelInferenceSink {
+    async fn infer(
+        &self,
+        prompt: String,
+        model: String,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> Result<crate::agent::unified_loop::AgenticTurnOutcome, String> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        let request = InferenceRequest {
+            prompt,
+            model,
+            max_tokens,
+            temperature,
+            response_tx,
+            stream_delta_tx: None,
+        };
+        self.tx
+            .send(request)
+            .await
+            .map_err(|_| "failed to queue inference".to_string())?;
+        match response_rx.await {
+            Ok(r) => Ok(crate::agent::unified_loop::AgenticTurnOutcome {
+                text: r.text,
+                tokens_generated: r.tokens_generated,
+                tokens_per_second: r.tokens_per_second,
+                location: r.location,
+                provider_peer_id: r.provider_peer_id,
+            }),
+            Err(_) => Err("inference cancelled".into()),
         }
     }
-    s
+}
+
+#[async_trait]
+impl crate::agent::unified_loop::AgenticProgressSink for AgenticTaskProgressSink {
+    async fn set_react_pass(&self, pass: u32) {
+        AgenticTaskProgressSink::set_react_pass(self, pass).await;
+    }
+
+    async fn append_log(&self, line: String) {
+        AgenticTaskProgressSink::append_log(self, line).await;
+    }
+
+    async fn set_tokens(&self, tokens: u32) {
+        AgenticTaskProgressSink::set_tokens(self, tokens).await;
+    }
+
+    async fn record_tool_step(&self, line: String, tokens: u32) {
+        AgenticTaskProgressSink::record_tool_step(self, line, tokens).await;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1219,383 +1220,46 @@ async fn run_unified_agentic_inference(
     progress: Option<AgenticTaskProgressSink>,
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<(InferenceResponse, Vec<String>), String> {
-    // Cap max_tokens to prevent runaway inference (user might send millions)
-    let max_tokens = max_tokens.min(16384);
     let Some(tx) = &state.inference_tx else {
         return Err("Inference not available".into());
     };
-    let prefix = build_agentic_system_prefix(
-        registry.as_deref(),
-        mcp.as_deref(),
-        include_mcp_catalog,
-    )
-    .await;
-    let mut conversation = format!("{prefix}\n\n{conversation_body}");
-    let prefix_len = prefix.len();
-    let mut tool_logs: Vec<String> = Vec::new();
-    let mut total_tokens: u32 = 0;
-    let tool_session = uuid::Uuid::new_v4().to_string();
-
-    // Estimate prompt budget: model context size (chars ≈ tokens * 4) minus output tokens.
-    // For small local GGUF models (4096 ctx), this is critical.
-    // For remote APIs with large contexts, 48k chars is a safe upper bound.
     let model_ctx_chars = state
         .inference
         .as_ref()
         .map(|inf| inf.config_context_size() as usize * 4)
         .unwrap_or(48_000);
-    let output_budget_chars = (max_tokens as usize) * 4;
-    let prompt_budget = model_ctx_chars.saturating_sub(output_budget_chars + 200);
-    // At least 2k chars for the prompt, otherwise skip agentic entirely.
-    let conv_max_chars = prompt_budget.max(2_000);
-
-    /// Bail out after this many consecutive passes where every tool call fails.
-    const MAX_CONSECUTIVE_FAIL_PASSES: u32 = 2;
-    let mut consecutive_all_fail_passes: u32 = 0;
-    // Tool loop detection: track recent (name, args_hash) pairs to detect repetitive calls.
-    let mut tool_call_history: Vec<(String, u64)> = Vec::new();
-
-    for iter in 1..=AGENTIC_MAX_ITERS {
-        // Compact conversation to fit model context using smart pruning.
-        if conversation.len() > conv_max_chars {
-            conversation = crate::agent::compaction::prune_string_conversation(
-                &conversation,
-                prefix_len,
-                conv_max_chars,
-            );
-        }
-
-        // On the last allowed iteration, force text: tell the model to stop using tools.
-        if iter == AGENTIC_MAX_ITERS {
-            conversation.push_str(
-                "\n\n(System: This is your FINAL turn. Do NOT call any tools. \
-                 Write your complete answer directly to the user NOW.)\n",
-            );
-        }
-        if cancel
-            .as_ref()
-            .is_some_and(|c| c.load(Ordering::Acquire))
-        {
-            return Err("Stopped by user".into());
-        }
-        if let Some(ref sink) = progress {
-            sink.set_react_pass(iter).await;
-            sink.append_log(format!(
-                "[{}] Pass {}/{}: requesting model…",
-                chrono::Utc::now().format("%H:%M:%S"),
-                iter,
-                AGENTIC_MAX_ITERS
-            ))
-            .await;
-        }
-        // Add a generation prompt at the end so the model knows it should respond as Assistant
-        // and use tool_call blocks if it needs tools.
-        let mut prompt_for_model = conversation.clone();
-        if iter == 1 {
-            prompt_for_model.push_str("\n\nAssistant:");
-        }
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        let request = InferenceRequest {
-            prompt: prompt_for_model,
-            model: model.clone(),
+    let sink = WebChannelInferenceSink { tx: tx.clone() };
+    let progress_dyn: Option<Arc<dyn crate::agent::unified_loop::AgenticProgressSink>> =
+        progress.map(|p| Arc::new(p) as Arc<dyn crate::agent::unified_loop::AgenticProgressSink>);
+    let cancel_ref = cancel.as_deref();
+    let (out, tool_logs, _tool_records, _passes) =
+        crate::agent::unified_loop::run_unified_agentic_loop(
+            &sink,
+            registry,
+            mcp,
+            include_mcp_catalog,
+            None,
+            conversation_body,
+            model,
             max_tokens,
             temperature,
-            response_tx,
-            stream_delta_tx: None,
-        };
-        tx.send(request)
-            .await
-            .map_err(|_| "failed to queue inference".to_string())?;
-        // Wait until inference finishes — no wall-clock cap (long local/remote runs, large max_tokens).
-        // Stops on engine error/cancel via channel drop or Err from oneshot.
-        let inf = match response_rx.await {
-            Ok(r) => r,
-            Err(_) => return Err("inference cancelled".into()),
-        };
-        total_tokens = total_tokens.saturating_add(inf.tokens_generated);
-        if let Some(ref sink) = progress {
-            sink.set_tokens(total_tokens).await;
-        }
-        let text = inf.text;
-
-        // Detect inference errors (e.g. context overflow, model crash) — retry with compacted context.
-        if inf.location == "error" || text.starts_with("Error: Inference error:") || text.starts_with("Error: ") {
-            if let Some(ref sink) = progress {
-                sink.append_log(format!(
-                    "[{}] Inference error on pass {}: {} — compacting and retrying",
-                    chrono::Utc::now().format("%H:%M:%S"),
-                    iter,
-                    text.chars().take(120).collect::<String>()
-                ))
-                .await;
-            }
-            // Aggressively compact: keep only prefix + the original goal.
-            let goal_start = conversation.find("Goal:").or_else(|| conversation.find("### Agent goal"))
-                .or_else(|| conversation.find("### User thread"))
-                .unwrap_or(prefix_len);
-            let goal_end = conversation[goal_start..].find("\n\nAssistant:")
-                .map(|i| goal_start + i)
-                .unwrap_or(conversation.len().min(goal_start + 2000));
-            let goal_section = conversation[goal_start..goal_end].to_string();
-            conversation = format!(
-                "{}\n\n{}\n\n(System: Earlier tool results were dropped due to context limits. Answer from your knowledge now. Do NOT call tools.)\n",
-                &conversation[..prefix_len],
-                goal_section
-            );
-            continue;
-        }
-
-        let mut calls = crate::agent::parse_tool_calls(&text);
-        // No tool calls detected — return the response as the final answer.
-        if calls.is_empty() {
-            let cleaned = crate::agent::extract_answer(&text);
-            let text_out = if cleaned.trim().is_empty() {
-                "(No text in the model's final reply after stripping tool markup. See task steps / logs for tool results, or retry.)"
-                    .to_string()
-            } else {
-                cleaned
-            };
-            return Ok((
-                InferenceResponse {
-                    text: text_out,
-                    tokens_generated: total_tokens,
-                    tokens_per_second: inf.tokens_per_second,
-                    location: inf.location,
-                    provider_peer_id: inf.provider_peer_id,
-                },
-                tool_logs,
-            ));
-        }
-
-        // Tool loop detection: check each call against history.
-        {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut filtered_calls = Vec::new();
-            let mut loop_warnings: Vec<String> = Vec::new();
-            for call in calls {
-                let mut hasher = DefaultHasher::new();
-                call.args.to_string().hash(&mut hasher);
-                let args_hash = hasher.finish();
-                let sig = (call.name.clone(), args_hash);
-                let repeat_count = tool_call_history.iter().filter(|s| **s == sig).count();
-                if repeat_count >= 4 {
-                    // 5+ times total (4 in history + this one): block the call entirely
-                    if let Some(ref sink) = progress {
-                        sink.append_log(format!(
-                            "[{}] Pass {}: BLOCKED repeated call to '{}' ({} prior identical calls)",
-                            chrono::Utc::now().format("%H:%M:%S"),
-                            iter, call.name, repeat_count + 1,
-                        )).await;
-                    }
-                    continue;
-                } else if repeat_count >= 2 {
-                    // 3+ times: warn the model
-                    loop_warnings.push(format!(
-                        "(System: You called '{}' with the same args {} times. Try a different approach or answer from what you have.)",
-                        call.name, repeat_count + 1,
-                    ));
-                }
-                tool_call_history.push(sig);
-                filtered_calls.push(call);
-            }
-            calls = filtered_calls;
-            if !loop_warnings.is_empty() {
-                conversation.push_str("\n");
-                for w in &loop_warnings {
-                    conversation.push_str(w);
-                    conversation.push('\n');
-                }
-            }
-            // If all calls were blocked, return current text as answer
-            if calls.is_empty() {
-                let cleaned = crate::agent::extract_answer(&text);
-                let text_out = if cleaned.trim().is_empty() {
-                    "(All tool calls were blocked due to repeated identical calls. See logs for details.)"
-                        .to_string()
-                } else {
-                    cleaned
-                };
-                return Ok((
-                    InferenceResponse {
-                        text: text_out,
-                        tokens_generated: total_tokens,
-                        tokens_per_second: inf.tokens_per_second,
-                        location: inf.location,
-                        provider_peer_id: inf.provider_peer_id,
-                    },
-                    tool_logs,
-                ));
-            }
-        }
-        // Small models often repeat the same tool_call many times; merge before execute/log.
-        let model_tool_call_count = calls.len();
-        let mut seen_sig: HashSet<(String, String)> = HashSet::new();
-        calls.retain(|call| {
-            let sig = (call.name.clone(), call.args.to_string());
-            seen_sig.insert(sig)
-        });
-        let duplicate_calls_merged = model_tool_call_count.saturating_sub(calls.len());
-
-        if let Some(ref sink) = progress {
-            let mut msg = format!(
-                "[{}] Pass {}: {} tool call(s)",
-                chrono::Utc::now().format("%H:%M:%S"),
-                iter,
-                model_tool_call_count
-            );
-            if duplicate_calls_merged > 0 {
-                msg.push_str(&format!(
-                    " → {} unique (merged {} duplicate(s))",
-                    calls.len(),
-                    duplicate_calls_merged
-                ));
-            }
-            sink.append_log(msg).await;
-        }
-        let dropped_calls = if calls.len() > AGENTIC_MAX_TOOL_CALLS_PER_PASS {
-            let n = calls.len() - AGENTIC_MAX_TOOL_CALLS_PER_PASS;
-            calls.truncate(AGENTIC_MAX_TOOL_CALLS_PER_PASS);
-            if let Some(ref sink) = progress {
-                sink.append_log(format!(
-                    "[{}] Pass {}: executing first {} of {} tool call(s) (max {} per turn)",
-                    chrono::Utc::now().format("%H:%M:%S"),
-                    iter,
-                    AGENTIC_MAX_TOOL_CALLS_PER_PASS,
-                    AGENTIC_MAX_TOOL_CALLS_PER_PASS + n,
-                    AGENTIC_MAX_TOOL_CALLS_PER_PASS
-                ))
-                .await;
-            }
-            Some(n)
-        } else {
-            None
-        };
-
-        conversation.push_str("\n\nAssistant:\n");
-        conversation.push_str(&text);
-        conversation.push_str("\n\nUser:\n");
-        if duplicate_calls_merged > 0 {
-            conversation.push_str(&format!(
-                "(System: {duplicate_calls_merged} repeated tool call(s) with identical name+args were merged; each unique call runs once. Prefer a single well-formed call per intent.)\n"
-            ));
-        }
-        if let Some(d) = dropped_calls {
-            conversation.push_str(&format!(
-                "(System: {d} tool call(s) in this reply were skipped — max {AGENTIC_MAX_TOOL_CALLS_PER_PASS} per turn. Use fewer, complete calls.)\n"
-            ));
-        }
-        conversation.push_str("Here are the tool results:\n");
-        let mut pass_failures = 0u32;
-        let call_count = calls.len();
-        for call in calls {
-            let summary = if call.name.contains(':') {
-                match &mcp {
-                    Some(m) => {
-                        let res = m.call_tool(&call.name, call.args.clone()).await;
-                        match res {
-                            Ok(r) => serde_json::to_string(&r)
-                                .unwrap_or_else(|_| "(unserializable result)".into()),
-                            Err(e) => {
-                                pass_failures += 1;
-                                format!("ERROR: {e}")
-                            }
-                        }
-                    }
-                    None => {
-                        pass_failures += 1;
-                        "ERROR: MCP tool requested but MCP is not enabled or has no connected tools"
-                            .to_string()
-                    }
-                }
-            } else {
-                match &registry {
-                    Some(reg) => {
-                        let ctx = crate::tools::ToolContext {
-                            session_id: tool_session.clone(),
-                            job_id: None,
-                            peer_id: state.local_peer_id.to_string(),
-                            working_dir: std::env::current_dir().unwrap_or_default(),
-                            sandboxed: false,
-                            available_secrets: vec![],
-                            node_tool_tx: state.node_tool_tx.clone(),
-                            egress_policy: None,
-                            agent_depth: 0,
-                        };
-                        match reg
-                            .execute_local(&call.name, call.args.clone(), &ctx)
-                            .await
-                        {
-                            Ok(r) => serde_json::to_string(&r.output)
-                                .unwrap_or_else(|_| "(unserializable)".into()),
-                            Err(e) => {
-                                pass_failures += 1;
-                                serde_json::json!({ "error": e.to_string() }).to_string()
-                            }
-                        }
-                    }
-                    None => {
-                        pass_failures += 1;
-                        "ERROR: Local tool name used but only MCP tools are available; use server:tool_name from the MCP list."
-                            .to_string()
-                    }
-                }
-            };
-            let preview = if summary.chars().count() > 220 {
-                let short: String = summary.chars().take(217).collect();
-                format!("{short}…")
-            } else {
-                summary.clone()
-            };
-            let line = format!(
-                "[{}] {} → {}",
-                chrono::Utc::now().format("%H:%M:%S"),
-                call.name,
-                preview
-            );
-            tool_logs.push(line.clone());
-            if let Some(ref sink) = progress {
-                sink.record_tool_step(line, total_tokens).await;
-            }
-            // Truncate large tool results to save context for the answer.
-            let truncated = if summary.len() > 3000 {
-                format!("{}… (truncated)", &summary[..3000])
-            } else {
-                summary
-            };
-            conversation.push_str(&format!("Tool: {}\nResult: {}\n\n", call.name, truncated));
-        }
-
-        // After tool results, nudge the model to answer.
-        if pass_failures < call_count as u32 {
-            conversation.push_str(
-                "\nNow use the tool results above to write your answer to the user. If you need more info, call another tool. Otherwise answer directly without tool calls.\n",
-            );
-        }
-
-        // Track consecutive all-fail passes and bail out with a nudge.
-        if pass_failures as usize >= call_count {
-            consecutive_all_fail_passes += 1;
-            if consecutive_all_fail_passes >= MAX_CONSECUTIVE_FAIL_PASSES {
-                conversation.push_str(
-                    "\n(System: All tool calls have failed for multiple consecutive passes. \
-                     STOP calling tools. Answer the user's question directly from your own knowledge. \
-                     Do NOT make any more tool_call blocks.)\n",
-                );
-                if let Some(ref sink) = progress {
-                    sink.append_log(format!(
-                        "[{}] {} consecutive all-fail passes — forcing answer from knowledge",
-                        chrono::Utc::now().format("%H:%M:%S"),
-                        MAX_CONSECUTIVE_FAIL_PASSES
-                    ))
-                    .await;
-                }
-            }
-        } else {
-            consecutive_all_fail_passes = 0;
-        }
-    }
-    Err("Agentic: max tool iterations reached".into())
+            model_ctx_chars,
+            state.local_peer_id.to_string(),
+            state.node_tool_tx.clone(),
+            progress_dyn,
+            cancel_ref,
+        )
+        .await?;
+    Ok((
+        InferenceResponse {
+            text: out.text,
+            tokens_generated: out.tokens_generated,
+            tokens_per_second: out.tokens_per_second,
+            location: out.location,
+            provider_peer_id: out.provider_peer_id,
+        },
+        tool_logs,
+    ))
 }
 
 /// Disconnect existing MCP sessions and reconnect from the current [`WebState::mcp_config`].
@@ -1804,7 +1468,10 @@ async fn api_peers_dial(
     match tx.try_send(addr.to_string()) {
         Ok(()) => (
             StatusCode::ACCEPTED,
-            Json(DialPeerResponse { ok: true, error: None }),
+            Json(DialPeerResponse {
+                ok: true,
+                error: None,
+            }),
         )
             .into_response(),
         Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => (
@@ -1834,7 +1501,9 @@ async fn api_jobs(State(state): State<Arc<WebState>>) -> Json<Vec<WebJobInfo>> {
 /// GET /api/tools — list available tools from the node's ToolRegistry.
 async fn api_tools(State(state): State<Arc<WebState>>) -> Json<serde_json::Value> {
     let Some(registry) = &state.tools else {
-        return Json(serde_json::json!({ "tools": [], "hint": "No tool registry (node not started with serve)" }));
+        return Json(
+            serde_json::json!({ "tools": [], "hint": "No tool registry (node not started with serve)" }),
+        );
     };
     let infos = registry.list_tools().await;
     let tools: Vec<serde_json::Value> = infos
@@ -2016,7 +1685,11 @@ fn load_from_store(
             })
             .collect(),
         Err(e) => {
-            tracing::warn!(session = session_id, "Failed to load session from store: {}", e);
+            tracing::warn!(
+                session = session_id,
+                "Failed to load session from store: {}",
+                e
+            );
             Vec::new()
         }
     }
@@ -2063,7 +1736,11 @@ async fn save_session_turn_persistent(
             tracing::warn!(session = session_id, "Failed to persist user turn: {}", e);
         }
         if let Err(e) = store.save_turn(session_id, "assistant", assistant_text) {
-            tracing::warn!(session = session_id, "Failed to persist assistant turn: {}", e);
+            tracing::warn!(
+                session = session_id,
+                "Failed to persist assistant turn: {}",
+                e
+            );
         }
     }
 }
@@ -2099,12 +1776,17 @@ async fn api_chat(
             if state.inference_tx.is_some() {
                 // Auto-inject matching skill prompt if a skill registry is available.
                 let skill_inject = if let Some(ref skills) = state.skills {
-                    skills.select_best(&user_message).await
+                    skills
+                        .select_best(&user_message)
+                        .await
                         .filter(|s| s.is_available())
                         .map(|s| {
                             let body = s.prompt();
                             let clipped = if body.chars().count() > 6_000 {
-                                format!("{}…(truncated)", body.chars().take(6_000).collect::<String>())
+                                format!(
+                                    "{}…(truncated)",
+                                    body.chars().take(6_000).collect::<String>()
+                                )
                             } else {
                                 body.to_string()
                             };
@@ -2229,13 +1911,8 @@ async fn api_chat(
             match tokio::time::timeout(std::time::Duration::from_secs(60), response_rx).await {
                 Ok(Ok(response)) => {
                     if let Some(ref sid) = req.session_id {
-                        save_session_turn(
-                            &state.chat_sessions,
-                            sid,
-                            &user_message,
-                            &response.text,
-                        )
-                        .await;
+                        save_session_turn(&state.chat_sessions, sid, &user_message, &response.text)
+                            .await;
                     }
                     return Json(ChatResponse {
                         response: response.text,
@@ -2310,7 +1987,28 @@ async fn api_chat_stream(
     if req.agentic {
         if let Some(registry) = state.tools.clone() {
             if state.inference_tx.is_some() {
-                let body = format!("### User thread\n{prompt_for_model}");
+                let skill_inject = if let Some(ref skills) = state.skills {
+                    skills
+                        .select_best(&user_message)
+                        .await
+                        .filter(|s| s.is_available())
+                        .map(|s| {
+                            let body = s.prompt();
+                            let clipped = if body.chars().count() > 6_000 {
+                                format!(
+                                    "{}…(truncated)",
+                                    body.chars().take(6_000).collect::<String>()
+                                )
+                            } else {
+                                body.to_string()
+                            };
+                            format!("### Active Skill: {}\n{}\n\n", s.name(), clipped)
+                        })
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let body = format!("{skill_inject}### User thread\n{prompt_for_model}");
                 let state_spawn = state.clone();
                 let sessions = state.chat_sessions.clone();
                 let session_store_spawn = state.session_store.clone();
@@ -2336,7 +2034,8 @@ async fn api_chat_stream(
                     {
                         Ok((response, _)) => {
                             let payload =
-                                serde_json::json!({ "type": "delta", "text": response.text }).to_string();
+                                serde_json::json!({ "type": "delta", "text": response.text })
+                                    .to_string();
                             if sse_tx
                                 .send(Ok(Event::default().data(payload)))
                                 .await
@@ -2367,7 +2066,8 @@ async fn api_chat_stream(
                         }
                         Err(e) => {
                             let txt = format!("Agentic: {e}");
-                            let payload = serde_json::json!({ "type": "delta", "text": txt }).to_string();
+                            let payload =
+                                serde_json::json!({ "type": "delta", "text": txt }).to_string();
                             if sse_tx
                                 .send(Ok(Event::default().data(payload)))
                                 .await
@@ -2424,7 +2124,8 @@ async fn api_chat_stream(
                     {
                         Ok((response, _)) => {
                             let payload =
-                                serde_json::json!({ "type": "delta", "text": response.text }).to_string();
+                                serde_json::json!({ "type": "delta", "text": response.text })
+                                    .to_string();
                             if sse_tx
                                 .send(Ok(Event::default().data(payload)))
                                 .await
@@ -2455,7 +2156,8 @@ async fn api_chat_stream(
                         }
                         Err(e) => {
                             let txt = format!("Agentic: {e}");
-                            let payload = serde_json::json!({ "type": "delta", "text": txt }).to_string();
+                            let payload =
+                                serde_json::json!({ "type": "delta", "text": txt }).to_string();
                             if sse_tx
                                 .send(Ok(Event::default().data(payload)))
                                 .await
@@ -3044,7 +2746,7 @@ struct CreateTaskPayload {
     description: String,
     model: Option<String>,
     budget: Option<f64>,
-    /// When true, run the goal through the MCP tool loop instead of the loaded agent runtime.
+    /// When true, include MCP tools in the agentic loop (unified path and `--agent` tasks).
     #[serde(default)]
     use_mcp: bool,
     /// Optional session id for conversation continuity across agent tasks.
@@ -3150,6 +2852,13 @@ async fn api_create_task(
         let state_spawn = state.clone();
         let session_id = req.session_id.clone();
         let raw_description = req.description.clone();
+        let use_mcp_agent = req.use_mcp;
+        let skill_block_for_agent = skill_block.clone();
+        let model_ctx_chars = state
+            .inference
+            .as_ref()
+            .map(|i| i.config_context_size() as usize * 4)
+            .unwrap_or(0);
 
         tokio::spawn(async move {
             // Mark as running
@@ -3165,6 +2874,17 @@ async fn api_create_task(
             }
             broadcast_tasks_changed(&ws_tx);
 
+            let mcp_for_agent = if use_mcp_agent {
+                state_spawn
+                    .mcp_manager
+                    .read()
+                    .await
+                    .clone()
+                    .filter(|m| m.tool_count() > 0)
+            } else {
+                None
+            };
+
             // Send to agent runtime via channel
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
             let request = AgentTaskRequest {
@@ -3175,6 +2895,10 @@ async fn api_create_task(
                 ws_control_tx: ws_tx.clone(),
                 cancel: cancel.clone(),
                 session_id: session_id.clone(),
+                use_mcp: use_mcp_agent,
+                mcp_manager: mcp_for_agent,
+                skill_block: skill_block_for_agent,
+                model_ctx_chars,
             };
 
             tracing::info!(task_id = %tid, "Sending task to agent runtime");
@@ -3272,7 +2996,8 @@ async fn api_create_task(
                 if let Some(t) = tasks.iter_mut().find(|t| t.id == tid) {
                     t.status = "failed".to_string();
                     t.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                    t.result = Some("Could not queue task to agent runtime (channel closed)".to_string());
+                    t.result =
+                        Some("Could not queue task to agent runtime (channel closed)".to_string());
                     t.logs.push(format!(
                         "[{}] Failed to queue task",
                         chrono::Utc::now().format("%H:%M:%S")
@@ -3397,11 +3122,8 @@ async fn api_create_task(
                         } else {
                             format!("Agentic: {e}")
                         });
-                        t.logs.push(format!(
-                            "[{}] {}",
-                            chrono::Utc::now().format("%H:%M:%S"),
-                            e
-                        ));
+                        t.logs
+                            .push(format!("[{}] {}", chrono::Utc::now().format("%H:%M:%S"), e));
                     }
                     broadcast_tasks_changed(&ws_tx);
                 }
@@ -3516,11 +3238,8 @@ async fn api_create_task(
                         } else {
                             format!("Agentic: {e}")
                         });
-                        t.logs.push(format!(
-                            "[{}] {}",
-                            chrono::Utc::now().format("%H:%M:%S"),
-                            e
-                        ));
+                        t.logs
+                            .push(format!("[{}] {}", chrono::Utc::now().format("%H:%M:%S"), e));
                     }
                     broadcast_tasks_changed(&ws_tx);
                 }
@@ -4389,10 +4108,7 @@ async fn api_tool_execute(
                 crate::tools::ToolError::NotAuthorized(_) => StatusCode::FORBIDDEN,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
-            (
-                status,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
+            (status, Json(serde_json::json!({ "error": e.to_string() })))
         }
     }
 }
@@ -4500,7 +4216,9 @@ mod routing_tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["error"], "Task not found");
     }
@@ -4525,10 +4243,7 @@ mod routing_tests {
     #[tokio::test]
     async fn get_api_task_detail_is_json_when_spa_enabled() {
         let app = create_router(test_state())
-            .layer(
-                CorsLayer::very_permissive()
-                    .allow_private_network(true),
-            )
+            .layer(CorsLayer::very_permissive().allow_private_network(true))
             .layer(NormalizePathLayer::trim_trailing_slash());
 
         let res = app

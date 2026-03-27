@@ -61,7 +61,9 @@ pub const KNOWN_GGUF_PRESETS: &[(&str, &str, &str, &str)] = &[
 /// Some repos (Phi-3 Microsoft) use a shorter quant tag (`q4` instead of `Q4_K_M`); those are
 /// handled via a per-preset override table.
 pub fn preset_to_hf_url(preset: &str, quant: &str) -> Option<(String, String)> {
-    let (_, repo, stem, sep) = KNOWN_GGUF_PRESETS.iter().find(|(n, _, _, _)| *n == preset)?;
+    let (_, repo, stem, sep) = KNOWN_GGUF_PRESETS
+        .iter()
+        .find(|(n, _, _, _)| *n == preset)?;
 
     // Per-repo quant tag conventions:
     // - Phi-3 Microsoft: short tags (q4, fp16)
@@ -127,7 +129,11 @@ pub fn filename_from_hf_url(url: &str) -> String {
 }
 
 /// Destination path under `models_dir` for a custom URL download.
-pub fn dest_for_custom_url(models_dir: &Path, url: &str, filename_override: Option<&str>) -> PathBuf {
+pub fn dest_for_custom_url(
+    models_dir: &Path,
+    url: &str,
+    filename_override: Option<&str>,
+) -> PathBuf {
     let name = filename_override
         .filter(|s| !s.is_empty())
         .map(String::from)

@@ -124,13 +124,10 @@ impl Runtime {
             use_ollama: config.inference.use_ollama,
             ollama_url: config.inference.ollama_url.clone(),
         };
-        let inference_live = Arc::new(tokio::sync::RwLock::new(InferenceLiveSettings::from_config(
-            &config.inference,
-        )));
-        let inference = Arc::new(InferenceEngine::new(
-            inference_config,
-            inference_live,
-        )?);
+        let inference_live = Arc::new(tokio::sync::RwLock::new(
+            InferenceLiveSettings::from_config(&config.inference),
+        ));
+        let inference = Arc::new(InferenceEngine::new(inference_config, inference_live)?);
 
         // Scan existing models so they're available immediately
         match inference.scan_models().await {
@@ -314,10 +311,7 @@ impl Runtime {
             let mut network = self.network.write().await;
             network.publish(crate::skills::SKILLS_TOPIC, data)?;
 
-            tracing::info!(
-                skills = skill_count,
-                "Advertised skills to network"
-            );
+            tracing::info!(skills = skill_count, "Advertised skills to network");
         }
 
         Ok(())
@@ -539,7 +533,9 @@ impl Runtime {
                             let src = match source_peer {
                                 Some(s) => s,
                                 None => {
-                                    tracing::warn!("Rejecting skill batch with no GossipSub source");
+                                    tracing::warn!(
+                                        "Rejecting skill batch with no GossipSub source"
+                                    );
                                     return false;
                                 }
                             };

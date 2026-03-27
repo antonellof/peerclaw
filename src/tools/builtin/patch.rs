@@ -99,9 +99,9 @@ impl Tool for ApplyPatchTool {
                     })?;
                 }
 
-                fs::write(&path, new_text).await.map_err(|e| {
-                    ToolError::ExecutionFailed(format!("Cannot write file: {}", e))
-                })?;
+                fs::write(&path, new_text)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed(format!("Cannot write file: {}", e)))?;
 
                 let result = serde_json::json!({
                     "action": "created",
@@ -120,9 +120,9 @@ impl Tool for ApplyPatchTool {
         }
 
         // Read the file
-        let content = fs::read_to_string(&path).await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("Cannot read file: {}", e))
-        })?;
+        let content = fs::read_to_string(&path)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("Cannot read file: {}", e)))?;
 
         // Find old_text in the content
         let Some(match_pos) = content.find(old_text) else {
@@ -144,9 +144,9 @@ impl Tool for ApplyPatchTool {
         );
 
         // Write back to file
-        fs::write(&path, &new_content).await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("Cannot write file: {}", e))
-        })?;
+        fs::write(&path, &new_content)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("Cannot write file: {}", e)))?;
 
         // Generate a diff preview with context
         let diff = generate_diff_preview(&content, &new_content, match_pos, old_text, new_text);
@@ -337,12 +337,9 @@ mod tests {
     async fn test_apply_patch_multiline_replace() {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("multi.txt");
-        fs::write(
-            &file_path,
-            "fn main() {\n    println!(\"old\");\n}\n",
-        )
-        .await
-        .unwrap();
+        fs::write(&file_path, "fn main() {\n    println!(\"old\");\n}\n")
+            .await
+            .unwrap();
 
         let tool = ApplyPatchTool;
         let ctx = ToolContext::local("test".to_string());

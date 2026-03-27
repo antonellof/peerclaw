@@ -320,9 +320,12 @@ impl GgufBackend for LlamaCppBackend {
         let start = Instant::now();
 
         // Create model params — n_gpu_layers: -1 means offload all layers (auto).
-        let gpu_layers = if config.n_gpu_layers < 0 { 999 } else { config.n_gpu_layers as u32 };
-        let model_params =
-            LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
+        let gpu_layers = if config.n_gpu_layers < 0 {
+            999
+        } else {
+            config.n_gpu_layers as u32
+        };
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
 
         let model = LlamaModel::load_from_file(&self.backend, path, &model_params)
             .map_err(|e| GgufError::LoadFailed(format!("{:?}", e)))?;
@@ -339,9 +342,13 @@ impl GgufBackend for LlamaCppBackend {
 
         let gpu_info = if config.n_gpu_layers != 0 {
             #[cfg(target_os = "macos")]
-            { "Metal" }
+            {
+                "Metal"
+            }
             #[cfg(not(target_os = "macos"))]
-            { "CUDA (if available)" }
+            {
+                "CUDA (if available)"
+            }
         } else {
             "CPU only"
         };
@@ -780,10 +787,7 @@ impl GgufEngine {
     }
 
     /// Generate text using the cached model.
-    pub fn generate(
-        &self,
-        request: &GenerateRequest,
-    ) -> Result<GenerateResponse, GgufError> {
+    pub fn generate(&self, request: &GenerateRequest) -> Result<GenerateResponse, GgufError> {
         let guard = self.cached.lock().unwrap();
         let model = guard.as_ref().ok_or_else(|| {
             GgufError::GenerationFailed("No model loaded — call load() first".into())
@@ -846,10 +850,7 @@ impl AsyncGgufEngine {
         engine.load(path)
     }
 
-    pub async fn generate(
-        &self,
-        request: &GenerateRequest,
-    ) -> Result<GenerateResponse, GgufError> {
+    pub async fn generate(&self, request: &GenerateRequest) -> Result<GenerateResponse, GgufError> {
         let engine = self.inner.clone();
         let request = request.clone();
         tokio::task::spawn_blocking(move || {

@@ -8,8 +8,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::messaging::{
-    Channel, ChannelConfig, ChannelError, ChannelId, ChannelMessage, ChannelUser,
-    MessageDirection, MessageId, Platform, UserTrust,
+    Channel, ChannelConfig, ChannelError, ChannelId, ChannelMessage, ChannelUser, MessageDirection,
+    MessageId, Platform, UserTrust,
 };
 
 use super::TelegramConfig;
@@ -78,7 +78,10 @@ impl TelegramChannel {
 
     /// Build the full API URL for a method.
     fn api_url(&self, method: &str) -> String {
-        format!("{}/bot{}/{}", TELEGRAM_API, self.tg_config.bot_token, method)
+        format!(
+            "{}/bot{}/{}",
+            TELEGRAM_API, self.tg_config.bot_token, method
+        )
     }
 }
 

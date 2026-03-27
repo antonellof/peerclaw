@@ -437,9 +437,7 @@ impl ChannelManager {
             let channels = self.channels.read().await;
             let channel = channels
                 .get(&signed_update.update.channel_id)
-                .ok_or_else(|| {
-                    ChannelError::NotFound(signed_update.update.channel_id.clone())
-                })?;
+                .ok_or_else(|| ChannelError::NotFound(signed_update.update.channel_id.clone()))?;
             channel.remote_peer.clone()
         };
 
@@ -536,10 +534,7 @@ impl ChannelManager {
             .get_mut(channel_id)
             .ok_or_else(|| ChannelError::NotFound(channel_id.clone()))?;
 
-        if !matches!(
-            channel.status,
-            ChannelStatus::Closing | ChannelStatus::Open
-        ) {
+        if !matches!(channel.status, ChannelStatus::Closing | ChannelStatus::Open) {
             return Err(ChannelError::InvalidState(
                 "Channel is not in a closeable state".into(),
             ));
@@ -594,10 +589,7 @@ impl ChannelManager {
     ///
     /// Can only be called after the channel's expiration time has passed.
     /// Settles using the latest signed state we have.
-    pub async fn force_close_expired(
-        &self,
-        channel_id: &ChannelId,
-    ) -> Result<(), ChannelError> {
+    pub async fn force_close_expired(&self, channel_id: &ChannelId) -> Result<(), ChannelError> {
         let mut channels = self.channels.write().await;
         let channel = channels
             .get_mut(channel_id)

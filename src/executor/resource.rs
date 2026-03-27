@@ -240,7 +240,10 @@ fn probe_gpu_usage() -> Option<f64> {
     #[cfg(target_os = "linux")]
     {
         let out = std::process::Command::new("nvidia-smi")
-            .args(["--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"])
+            .args([
+                "--query-gpu=utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ])
             .output()
             .ok()?;
         let text = String::from_utf8_lossy(&out.stdout);

@@ -76,14 +76,11 @@ impl Tool for LlmTaskTool {
             .unwrap_or(0.7) as f32;
         let system_prompt = optional_str(&params, "system_prompt").map(|s| s.to_string());
 
-        let tx = ctx
-            .node_tool_tx
-            .as_ref()
-            .ok_or_else(|| {
-                ToolError::ExecutionFailed(
-                    "llm_task requires a running node (use `peerclaw serve --agent`)".to_string(),
-                )
-            })?;
+        let tx = ctx.node_tool_tx.as_ref().ok_or_else(|| {
+            ToolError::ExecutionFailed(
+                "llm_task requires a running node (use `peerclaw serve --agent`)".to_string(),
+            )
+        })?;
 
         let (reply, rx) = oneshot::channel();
         tx.send(NodeToolCommand::InferenceRequest {

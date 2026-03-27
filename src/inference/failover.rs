@@ -13,9 +13,7 @@ use super::gguf::GgufEngine;
 use super::live_settings::InferenceLiveSettings;
 use super::ollama::{OllamaConfig, OllamaProvider};
 use super::remote_openai;
-use super::{
-    FinishReason, GenerateRequest, GenerateResponse, InferenceError, ModelRegistry,
-};
+use super::{FinishReason, GenerateRequest, GenerateResponse, InferenceError, ModelRegistry};
 
 /// Identifies a backend in the failover chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -129,7 +127,9 @@ impl CircuitBreaker {
     /// Record a retriable failure — escalate cooldown.
     fn record_failure(&mut self) {
         self.error_count += 1;
-        let tier = (self.error_count as usize).saturating_sub(1).min(COOLDOWN_TIERS.len() - 1);
+        let tier = (self.error_count as usize)
+            .saturating_sub(1)
+            .min(COOLDOWN_TIERS.len() - 1);
         let cooldown = COOLDOWN_TIERS[tier];
         self.cooldown_until = Some(Instant::now() + cooldown);
         tracing::warn!(
@@ -251,9 +251,7 @@ impl FailoverChain {
                     match kind {
                         ErrorKind::Retriable => {
                             let mut backends = self.backends.write();
-                            if let Some(entry) =
-                                backends.iter_mut().find(|b| b.id == *backend_id)
-                            {
+                            if let Some(entry) = backends.iter_mut().find(|b| b.id == *backend_id) {
                                 entry.breaker.record_failure();
                             }
                         }
@@ -334,9 +332,7 @@ impl FailoverChain {
     ) -> Result<GenerateResponse, InferenceError> {
         let live = self.live.read().await;
         if !live.use_ollama {
-            return Err(InferenceError::ModelNotFound(
-                "Ollama disabled".to_string(),
-            ));
+            return Err(InferenceError::ModelNotFound("Ollama disabled".to_string()));
         }
 
         tracing::info!(
@@ -548,14 +544,26 @@ mod tests {
         // Without P2P
         let chain = FailoverChain::new(live.clone(), gguf.clone(), registry.clone(), false);
         let ids: Vec<BackendId> = chain.backends.read().iter().map(|b| b.id).collect();
-        assert_eq!(ids, vec![BackendId::LocalGguf, BackendId::Ollama, BackendId::RemoteApi]);
+        assert_eq!(
+            ids,
+            vec![
+                BackendId::LocalGguf,
+                BackendId::Ollama,
+                BackendId::RemoteApi
+            ]
+        );
 
         // With P2P
         let chain = FailoverChain::new(live, gguf, registry, true);
         let ids: Vec<BackendId> = chain.backends.read().iter().map(|b| b.id).collect();
         assert_eq!(
             ids,
-            vec![BackendId::LocalGguf, BackendId::PeerToPeer, BackendId::Ollama, BackendId::RemoteApi]
+            vec![
+                BackendId::LocalGguf,
+                BackendId::PeerToPeer,
+                BackendId::Ollama,
+                BackendId::RemoteApi
+            ]
         );
     }
 }

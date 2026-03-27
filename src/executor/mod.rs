@@ -111,13 +111,27 @@ impl TaskExecutor {
         self
     }
 
+    /// Resource estimate for routing: inference uses the inference engine's actual backend (GGUF vs Ollama/remote).
+    async fn routing_requirements_for_task(&self, task: &ExecutionTask) -> ResourceRequirements {
+        match task {
+            ExecutionTask::Inference(inf) => {
+                if let Some(engine) = &self.inference_engine {
+                    engine.routing_resource_requirements(&inf.model).await
+                } else {
+                    task.estimate_requirements()
+                }
+            }
+            _ => task.estimate_requirements(),
+        }
+    }
+
     /// Execute a task, routing automatically based on resources.
     pub async fn execute(&self, task: ExecutionTask) -> Result<TaskResult, ExecutorError> {
         let task_id = Uuid::new_v4().to_string();
         let start = Instant::now();
 
-        // Get routing decision
-        let decision = self.router.route(&task).await;
+        let requirements = self.routing_requirements_for_task(&task).await;
+        let decision = self.router.route_with_requirements(&task, requirements).await;
 
         tracing::debug!(
             task_id = %task_id,
@@ -204,6 +218,17 @@ impl TaskExecutor {
         peer_filter: PeerFilter,
         start: Instant,
     ) -> Result<TaskResult, ExecutorError> {
+        if let Some(net) = &self.network {
+            if net.read().await.connected_peers().is_empty() {
+                tracing::debug!(
+                    task_id = %task_id,
+                    task_type = %task.task_type(),
+                    "No connected P2P peers; executing locally"
+                );
+                return self.execute_local(task_id, task, start).await;
+            }
+        }
+
         // Use the RemoteExecutor if available
         if let Some(remote) = &self.remote_executor {
             tracing::info!(
@@ -557,11 +582,9 @@ impl TaskExecutor {
             let _ = stream_tx.send(token.to_string());
         });
 
-        let response = engine
-            .generate_streaming(&request, callback)
-            .map_err(|e| {
-                ExecutorError::InferenceError(format!("Streaming generation failed: {}", e))
-            })?;
+        let response = engine.generate_streaming(&request, callback).map_err(|e| {
+            ExecutorError::InferenceError(format!("Streaming generation failed: {}", e))
+        })?;
 
         tracing::info!(
             tokens = response.tokens_generated,
@@ -682,15 +705,61 @@ impl TaskExecutor {
         &self,
         task: WebSearchTask,
     ) -> Result<TaskData, ExecutorError> {
-        // TODO: Implement actual web search
-        // For now, return placeholder
+        use crate::tools::builtin::search::WebSearchTool;
+        use crate::tools::Tool;
+
+        let tool = WebSearchTool::new();
+        let ctx = crate::tools::ToolContext::local("executor".into());
+        let max_results = task.max_results.clamp(1, 20) as i64;
+        let params = serde_json::json!({
+            "query": task.query,
+            "max_results": max_results,
+        });
+        let out = tool
+            .execute(params, &ctx)
+            .await
+            .map_err(|e| ExecutorError::WebError(e.to_string()))?;
+
+        let results_val = out
+            .data
+            .get("results")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut results = Vec::new();
+        for r in results_val {
+            let title = r
+                .get("title")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            let url = r
+                .get("url")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            let snippet = r
+                .get("snippet")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !title.is_empty() || !url.is_empty() {
+                results.push(SearchResult {
+                    title,
+                    url,
+                    snippet,
+                });
+            }
+        }
+
         tracing::info!(
             query = %task.query,
+            count = results.len(),
             engine = ?task.engine,
-            "Would execute web search"
+            "Web search completed locally (DuckDuckGo HTML, same path as web_search tool)"
         );
 
-        Ok(TaskData::WebSearch(WebSearchResult { results: vec![] }))
+        Ok(TaskData::WebSearch(WebSearchResult { results }))
     }
 
     /// Execute WASM tool locally via the Wasmtime sandbox.
@@ -871,11 +940,9 @@ impl TaskExecutor {
             let _ = std::io::stdout().flush();
         });
 
-        let response = engine
-            .generate_streaming(&request, callback)
-            .map_err(|e| {
-                ExecutorError::InferenceError(format!("Streaming generation failed: {}", e))
-            })?;
+        let response = engine.generate_streaming(&request, callback).map_err(|e| {
+            ExecutorError::InferenceError(format!("Streaming generation failed: {}", e))
+        })?;
 
         let finish_reason = match response.finish_reason {
             crate::inference::FinishReason::Stop => FinishReason::Stop,

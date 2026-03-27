@@ -556,24 +556,24 @@ pub async fn embeddings(
     };
 
     let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-    let vectors = embedder
-        .embed_batch(&refs)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: ErrorDetail {
-                        message: format!("Embedding failed: {e}"),
-                        error_type: "embedding_error".to_string(),
-                        param: None,
-                        code: None,
-                    },
-                }),
-            )
-        })?;
+    let vectors = embedder.embed_batch(&refs).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: ErrorDetail {
+                    message: format!("Embedding failed: {e}"),
+                    error_type: "embedding_error".to_string(),
+                    param: None,
+                    code: None,
+                },
+            }),
+        )
+    })?;
 
-    let total_tokens = texts.iter().map(|t| t.split_whitespace().count() as u32).sum::<u32>();
+    let total_tokens = texts
+        .iter()
+        .map(|t| t.split_whitespace().count() as u32)
+        .sum::<u32>();
 
     let data: Vec<EmbeddingData> = vectors
         .into_iter()

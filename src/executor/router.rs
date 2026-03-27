@@ -19,24 +19,31 @@ impl TaskRouter {
         }
     }
 
-    /// Decide where to execute a task.
+    /// Decide where to execute a task (uses each task type's default resource estimate).
     pub async fn route(&self, task: &ExecutionTask) -> RoutingDecision {
         let requirements = task.estimate_requirements();
+        self.route_with_requirements(task, requirements).await
+    }
+
+    /// Decide where to execute a task using an explicit resource profile (e.g. inference aligned
+    /// with [`crate::inference::InferenceEngine::routing_resource_requirements`]).
+    pub async fn route_with_requirements(
+        &self,
+        task: &ExecutionTask,
+        requirements: ResourceRequirements,
+    ) -> RoutingDecision {
         let state = self.resource_monitor.current_state().await;
 
-        // Check if we can handle it locally
         if self.should_execute_locally(&state, &requirements, task) {
             return RoutingDecision::ExecuteLocally;
         }
 
-        // Check if we should offload to network
         if self.should_offload(&state, &requirements) {
             return RoutingDecision::OffloadToNetwork {
                 requirements: self.to_job_requirements(&requirements, task),
             };
         }
 
-        // Neither local nor network viable
         RoutingDecision::InsufficientResources {
             reason: self.build_insufficient_reason(&state, &requirements),
         }

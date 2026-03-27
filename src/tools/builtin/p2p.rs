@@ -15,8 +15,7 @@ use crate::tools::tool::{
     ToolDomain, ToolError, ToolOutput,
 };
 use crate::tools::{
-    describe_p2p_job_via_node, query_peers_via_node, query_wallet_via_node,
-    submit_p2p_job_via_node,
+    describe_p2p_job_via_node, query_peers_via_node, query_wallet_via_node, submit_p2p_job_via_node,
 };
 
 /// Job submission tool - submit work to the P2P network.

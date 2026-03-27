@@ -117,7 +117,8 @@ impl SkillRegistry {
 
     /// Select the best matching skill for the given user input text.
     pub async fn select_best(&self, input: &str) -> Option<Arc<LoadedSkill>> {
-        let skills: Vec<Arc<LoadedSkill>> = self.local_skills.read().await.values().cloned().collect();
+        let skills: Vec<Arc<LoadedSkill>> =
+            self.local_skills.read().await.values().cloned().collect();
         let scores = super::selector::select_skills(&skills, input, &[], 1, 0.3);
         scores.into_iter().next().map(|s| s.skill)
     }
@@ -248,10 +249,7 @@ impl SkillRegistry {
     /// Only includes skills that have `sharing.enabled = true`.
     /// The caller should serialize the result and publish it to the
     /// `peerclaw/skills/v1` GossipSub topic.
-    pub async fn build_announcement_batch<F>(
-        &self,
-        signer: F,
-    ) -> Option<SkillAnnouncementBatch>
+    pub async fn build_announcement_batch<F>(&self, signer: F) -> Option<SkillAnnouncementBatch>
     where
         F: FnOnce(&[u8]) -> Vec<u8>,
     {
@@ -260,8 +258,7 @@ impl SkillRegistry {
             return None;
         }
 
-        let mut batch =
-            SkillAnnouncementBatch::new(self.local_peer_id.clone(), announcements);
+        let mut batch = SkillAnnouncementBatch::new(self.local_peer_id.clone(), announcements);
         batch.sign(signer);
         Some(batch)
     }

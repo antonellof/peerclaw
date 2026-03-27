@@ -60,7 +60,11 @@ fn truncate_tool_result(content: &str, max_chars: usize) -> String {
         .rfind('\n')
         .or_else(|| content[..max_chars].rfind(' '))
         .unwrap_or(max_chars);
-    format!("{}...(truncated, {} chars omitted)", &content[..break_at], content.len() - break_at)
+    format!(
+        "{}...(truncated, {} chars omitted)",
+        &content[..break_at],
+        content.len() - break_at
+    )
 }
 
 /// **Strategy A: Pruning** -- fast, no LLM call required.
@@ -271,7 +275,8 @@ pub fn prune_string_conversation(
         }
         if owned_sections[i].len() > TOOL_RESULT_TRUNCATE_CHARS {
             let old_len = owned_sections[i].len();
-            owned_sections[i] = truncate_tool_result(&owned_sections[i], TOOL_RESULT_TRUNCATE_CHARS);
+            owned_sections[i] =
+                truncate_tool_result(&owned_sections[i], TOOL_RESULT_TRUNCATE_CHARS);
             size = size.saturating_sub(old_len - owned_sections[i].len());
         }
     }
@@ -419,7 +424,10 @@ mod tests {
         assert_eq!(msgs[0].role, MessageRole::System);
         // Conversation should be smaller.
         let new_size = conversation_char_size(&msgs);
-        assert!(new_size < original_size, "Expected compaction: {original_size} -> {new_size}");
+        assert!(
+            new_size < original_size,
+            "Expected compaction: {original_size} -> {new_size}"
+        );
         // Last message should still be present.
         assert_eq!(msgs.last().unwrap().content, "Recent answer 6");
     }
@@ -429,7 +437,10 @@ mod tests {
         let big_result = "x".repeat(5000);
         let mut msgs = vec![
             make_msg(MessageRole::System, "sys"),
-            make_msg(MessageRole::User, &format!("Tool result for fetch:\n{}", big_result)),
+            make_msg(
+                MessageRole::User,
+                &format!("Tool result for fetch:\n{}", big_result),
+            ),
             make_msg(MessageRole::User, "Recent question"),
             make_msg(MessageRole::Assistant, "Recent answer"),
         ];
@@ -438,7 +449,9 @@ mod tests {
         prune_conversation(&mut msgs, 2000);
 
         // The tool result message should still exist but be truncated.
-        let tool_msg = msgs.iter().find(|m| m.content.contains("Tool result for fetch"));
+        let tool_msg = msgs
+            .iter()
+            .find(|m| m.content.contains("Tool result for fetch"));
         if let Some(m) = tool_msg {
             assert!(m.content.len() < big_result.len());
             assert!(m.content.contains("truncated"));

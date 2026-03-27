@@ -117,7 +117,17 @@ fn check_requirements(req: &super::SkillRequirements) -> bool {
         }
     }
 
-    // TODO: Check tools and models availability
+    // `tools` / `models` are documented expectations; MCP and dynamic tools are not knowable here.
+    for t in &req.tools {
+        if t.trim().is_empty() {
+            return false;
+        }
+    }
+    for m in &req.models {
+        if m.trim().is_empty() {
+            return false;
+        }
+    }
     true
 }
 

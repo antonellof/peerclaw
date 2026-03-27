@@ -149,7 +149,11 @@ impl ToolRegistry {
 
     /// Validate `params` against the tool's JSON-schema `required` list before execution.
     /// Catches empty `{}` and missing keys so the model gets one clear hint instead of generic errors.
-    pub fn precheck_local_params(&self, name: &str, params: &serde_json::Value) -> Result<(), String> {
+    pub fn precheck_local_params(
+        &self,
+        name: &str,
+        params: &serde_json::Value,
+    ) -> Result<(), String> {
         let Some(tool) = self.get(name) else {
             return Ok(());
         };
@@ -277,12 +281,8 @@ impl ToolRegistry {
             if let Some(ref policy) = ctx.egress_policy {
                 // Extract URL from params (both `http` and `web_fetch` use "url").
                 if let Some(url) = params.get("url").and_then(|v| v.as_str()) {
-                    let method = params
-                        .get("method")
-                        .and_then(|v| v.as_str());
-                    if let Err(denied) =
-                        policy.check_egress_with_method(url, name, method)
-                    {
+                    let method = params.get("method").and_then(|v| v.as_str());
+                    if let Err(denied) = policy.check_egress_with_method(url, name, method) {
                         return Err(ToolError::NotAuthorized(denied.to_string()));
                     }
                 }

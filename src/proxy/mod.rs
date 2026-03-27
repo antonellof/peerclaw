@@ -3,6 +3,9 @@
 //! Implements a pay-per-request proxy that requires PCLAW token
 //! payment for API access. Supports both per-request payment
 //! and payment channel-based streaming access.
+//!
+//! **Experimental:** proof verification and channel settlement in [`payment`] are incomplete;
+//! do not expose this surface as security-critical until those `TODO`s are resolved.
 
 mod handler;
 mod payment;

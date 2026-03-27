@@ -86,7 +86,10 @@ impl Tool for PdfReadTool {
             )));
         }
 
-        if !path.extension().map_or(false, |ext| ext.eq_ignore_ascii_case("pdf")) {
+        if !path
+            .extension()
+            .map_or(false, |ext| ext.eq_ignore_ascii_case("pdf"))
+        {
             return Err(ToolError::InvalidParameters(
                 "File does not have a .pdf extension".to_string(),
             ));
@@ -582,7 +585,10 @@ mod tests {
     fn test_extract_pdf_string() {
         assert_eq!(extract_pdf_string("(Hello World)"), "Hello World");
         assert_eq!(extract_pdf_string("(nested (parens))"), "nested (parens)");
-        assert_eq!(extract_pdf_string("(escaped \\n newline)"), "escaped \n newline");
+        assert_eq!(
+            extract_pdf_string("(escaped \\n newline)"),
+            "escaped \n newline"
+        );
         assert_eq!(extract_pdf_string("(escaped \\( paren)"), "escaped ( paren");
     }
 

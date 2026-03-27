@@ -333,13 +333,7 @@ mod tests {
         let identity = NodeIdentity::generate();
         let channel_id = ChannelId::new();
 
-        let close_req = ChannelCloseRequest::new(
-            channel_id,
-            90_000_000,
-            10_000_000,
-            5,
-            &identity,
-        );
+        let close_req = ChannelCloseRequest::new(channel_id, 90_000_000, 10_000_000, 5, &identity);
 
         let hex_key = hex::encode(identity.public_key_bytes());
         assert!(close_req.verify(&hex_key));

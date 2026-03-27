@@ -317,9 +317,7 @@ mod tests {
     #[test]
     fn test_wildcard_matches_base_domain() {
         let policy = make_deny_policy(vec![allow_rule("*.openai.com")]);
-        assert!(policy
-            .check_egress("https://openai.com/", "http")
-            .is_ok());
+        assert!(policy.check_egress("https://openai.com/", "http").is_ok());
     }
 
     #[test]

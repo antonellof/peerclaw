@@ -7,12 +7,14 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
+use async_trait::async_trait;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use crate::executor::task::{ChatMessage, ExecutionTask, InferenceTask, MessageRole, TaskData};
 use crate::executor::TaskExecutor;
+use crate::mcp::McpManager;
 use crate::tools::{NodeToolTx, ToolContext, ToolRegistry};
 use crate::vector::VectorStore;
 
@@ -20,6 +22,7 @@ use super::budget::BudgetTracker;
 use super::compaction;
 use super::session::SessionStore;
 use super::spec::AgentSpec;
+use super::unified_loop::{run_unified_agentic_loop, AgenticInferenceSink, AgenticProgressSink};
 
 /// Configuration for an agent runtime instance.
 #[derive(Debug, Clone)]
@@ -87,6 +90,44 @@ pub struct ToolCallRecord {
     pub duration_ms: u64,
 }
 
+/// Extra options for dashboard tasks (MCP, skill block, context size) when using the unified loop.
+#[derive(Clone, Default)]
+pub struct AgentTaskExtras {
+    pub use_mcp: bool,
+    pub mcp: Option<Arc<McpManager>>,
+    pub skill_block: String,
+    /// Character budget for prompt (from inference engine ctx × 4); 0 = default 48k.
+    pub model_ctx_chars: usize,
+}
+
+/// Append agentic progress lines to [`AgentRuntime::task_log`].
+struct TaskLogProgressSink {
+    inner: Arc<RwLock<Vec<String>>>,
+}
+
+#[async_trait]
+impl AgenticProgressSink for TaskLogProgressSink {
+    async fn set_react_pass(&self, pass: u32) {
+        let line = format!(
+            "[{}] Pass {}/{}",
+            chrono::Utc::now().format("%H:%M:%S"),
+            pass,
+            super::unified_loop::AGENTIC_MAX_ITERS
+        );
+        self.inner.write().await.push(line);
+    }
+
+    async fn append_log(&self, line: String) {
+        self.inner.write().await.push(line);
+    }
+
+    async fn set_tokens(&self, _tokens: u32) {}
+
+    async fn record_tool_step(&self, line: String, _tokens: u32) {
+        self.inner.write().await.push(line);
+    }
+}
+
 /// Maximum number of iterations before stopping.
 const MAX_ITERATIONS: u32 = 20;
 
@@ -107,6 +148,8 @@ pub struct AgentRuntime {
     pub session_store: Option<Arc<SessionStore>>,
     /// Vector store for cross-session agent memory (optional).
     pub vector_store: Option<Arc<VectorStore>>,
+    /// When set (e.g. `peerclaw serve` with web), tasks use the shared unified tool+MCP loop.
+    pub inference_sink: Option<Arc<dyn AgenticInferenceSink>>,
 }
 
 impl AgentRuntime {
@@ -118,6 +161,7 @@ impl AgentRuntime {
         budget: BudgetTracker,
         peer_id: String,
         node_tool_tx: Option<NodeToolTx>,
+        inference_sink: Option<Arc<dyn AgenticInferenceSink>>,
     ) -> Self {
         let tool_context = ToolContext {
             session_id: config.id.clone(),
@@ -141,6 +185,7 @@ impl AgentRuntime {
             task_log: Arc::new(RwLock::new(Vec::new())),
             session_store: None,
             vector_store: None,
+            inference_sink,
         }
     }
 
@@ -163,6 +208,7 @@ impl AgentRuntime {
         tools: Arc<ToolRegistry>,
         peer_id: String,
         node_tool_tx: Option<NodeToolTx>,
+        inference_sink: Option<Arc<dyn AgenticInferenceSink>>,
     ) -> Self {
         let config = AgentConfig::from_spec(spec);
         let budget = BudgetTracker::new(
@@ -171,7 +217,15 @@ impl AgentRuntime {
             spec.budget.per_day,
             spec.budget.total,
         );
-        Self::new(config, executor, tools, budget, peer_id, node_tool_tx)
+        Self::new(
+            config,
+            executor,
+            tools,
+            budget,
+            peer_id,
+            node_tool_tx,
+            inference_sink,
+        )
     }
 
     /// Run a task through the agentic loop.
@@ -182,12 +236,9 @@ impl AgentRuntime {
     /// When `session_id` is provided and a [`SessionStore`] is attached, prior conversation turns
     /// are loaded into context before the task starts, and the user input + final answer are
     /// persisted after the task completes.
-    pub async fn run_task(
-        &mut self,
-        user_input: &str,
-        stop: Option<&AtomicBool>,
-    ) -> AgentResult {
-        self.run_task_with_session(user_input, stop, None).await
+    pub async fn run_task(&mut self, user_input: &str, stop: Option<&AtomicBool>) -> AgentResult {
+        self.run_task_with_session(user_input, stop, None, AgentTaskExtras::default())
+            .await
     }
 
     /// Like [`run_task`](Self::run_task) but with an explicit session id for conversation continuity.
@@ -196,7 +247,14 @@ impl AgentRuntime {
         user_input: &str,
         stop: Option<&AtomicBool>,
         session_id: Option<&str>,
+        extras: AgentTaskExtras,
     ) -> AgentResult {
+        if let Some(sink) = self.inference_sink.clone() {
+            return self
+                .run_task_via_unified_loop(user_input, stop, session_id, extras, sink.as_ref())
+                .await;
+        }
+
         self.budget.new_request();
         let mut tool_calls = Vec::new();
         let mut iterations = 0u32;
@@ -225,9 +283,9 @@ impl AgentRuntime {
                     for turn in &turns {
                         match turn.role.as_str() {
                             "user" => self.conversation.push(ChatMessage::user(&turn.content)),
-                            "assistant" => {
-                                self.conversation.push(ChatMessage::assistant(&turn.content))
-                            }
+                            "assistant" => self
+                                .conversation
+                                .push(ChatMessage::assistant(&turn.content)),
                             _ => self.conversation.push(ChatMessage::user(&turn.content)),
                         }
                     }
@@ -374,7 +432,16 @@ impl AgentRuntime {
             if parsed_calls.is_empty() {
                 // No tool calls → this is the final answer
                 self.log("Final answer produced").await;
-                let answer = extract_answer(&response_text);
+                let trimmed_raw = response_text.trim();
+                let cleaned = extract_answer(&response_text);
+                let answer = if !cleaned.trim().is_empty() {
+                    cleaned
+                } else if !trimmed_raw.is_empty() {
+                    trimmed_raw.to_string()
+                } else {
+                    "(No text in the model's final reply after stripping tool markup. See logs or retry.)"
+                        .to_string()
+                };
 
                 // Persist to session store if available.
                 if let (Some(sid), Some(store)) = (session_id, &self.session_store) {
@@ -522,6 +589,141 @@ impl AgentRuntime {
         }
     }
 
+    async fn run_task_via_unified_loop(
+        &mut self,
+        user_input: &str,
+        stop: Option<&AtomicBool>,
+        session_id: Option<&str>,
+        extras: AgentTaskExtras,
+        sink: &dyn AgenticInferenceSink,
+    ) -> AgentResult {
+        self.budget.new_request();
+        self.log(&format!("Task received: {}", user_input)).await;
+
+        let model_ctx = if extras.model_ctx_chars > 0 {
+            extras.model_ctx_chars
+        } else {
+            48_000
+        };
+
+        let mut history = String::new();
+        if let (Some(sid), Some(store)) = (session_id, &self.session_store) {
+            const MAX_HISTORY_TURNS: usize = 40;
+            if let Ok(turns) = store.load_session(sid, MAX_HISTORY_TURNS) {
+                if !turns.is_empty() {
+                    history.push_str("### Prior conversation\n");
+                    for turn in &turns {
+                        let label = match turn.role.as_str() {
+                            "user" => "User",
+                            "assistant" => "Assistant",
+                            _ => "Message",
+                        };
+                        history.push_str(&format!("{}: {}\n\n", label, turn.content));
+                    }
+                    history.push('\n');
+                    self.log(&format!(
+                        "Loaded {} prior turns from session '{}'",
+                        turns.len(),
+                        sid
+                    ))
+                    .await;
+                }
+            }
+        }
+
+        let spec_system = self.config.system_prompt.trim();
+        let system_block = if spec_system.is_empty() {
+            String::new()
+        } else {
+            format!("### Agent instructions\n{spec_system}\n\n")
+        };
+
+        let body = format!(
+            "{}{}{}### Task\n{}\n\n\
+             Use tools only when needed. If a tool fails, answer from your knowledge.\n\
+             Give a complete, useful answer.\n",
+            system_block, extras.skill_block, history, user_input
+        );
+
+        let mcp = if extras.use_mcp {
+            extras.mcp.clone()
+        } else {
+            None
+        };
+        let include_mcp = extras.use_mcp && mcp.as_ref().is_some_and(|m| m.tool_count() > 0);
+
+        let allowed = if self.config.allowed_tools.is_empty() {
+            None
+        } else {
+            Some(self.config.allowed_tools.as_slice())
+        };
+
+        let progress: Arc<dyn AgenticProgressSink> = Arc::new(TaskLogProgressSink {
+            inner: self.task_log.clone(),
+        });
+
+        match run_unified_agentic_loop(
+            sink,
+            Some(self.tools.clone()),
+            mcp,
+            include_mcp,
+            allowed,
+            body,
+            self.config.model.clone(),
+            self.config.max_tokens,
+            self.config.temperature,
+            model_ctx,
+            self.tool_context.peer_id.clone(),
+            self.tool_context.node_tool_tx.clone(),
+            Some(progress),
+            stop,
+        )
+        .await
+        {
+            Ok((out, _logs, tool_calls, iterations)) => {
+                let cost = (out.tokens_generated as f64 / 1000.0) * COST_PER_1K_TOKENS;
+                self.budget.spend(cost);
+                let answer = out.text.clone();
+                if let (Some(sid), Some(store)) = (session_id, &self.session_store) {
+                    if let Err(e) = store.save_turn(sid, "user", user_input) {
+                        tracing::warn!(session = sid, "Failed to save user turn: {}", e);
+                    }
+                    if let Err(e) = store.save_turn(sid, "assistant", &answer) {
+                        tracing::warn!(session = sid, "Failed to save assistant turn: {}", e);
+                    }
+                }
+                if self.vector_store.is_some() {
+                    self.save_task_memory(user_input, &answer).await;
+                }
+                AgentResult {
+                    answer,
+                    tool_calls,
+                    iterations,
+                    total_tokens: out.tokens_generated,
+                    budget_spent: self.budget.total_spent(),
+                    success: true,
+                    error: None,
+                }
+            }
+            Err(e) => {
+                let user_stop = e == "Stopped by user";
+                AgentResult {
+                    answer: if user_stop {
+                        "Stopped by user.".to_string()
+                    } else {
+                        String::new()
+                    },
+                    tool_calls: Vec::new(),
+                    iterations: 0,
+                    total_tokens: 0,
+                    budget_spent: self.budget.total_spent(),
+                    success: false,
+                    error: Some(e),
+                }
+            }
+        }
+    }
+
     /// Build the system prompt with tool descriptions and recalled memories.
     async fn build_system_prompt(&self, user_input: &str) -> String {
         let mut prompt = self.config.system_prompt.clone();
@@ -654,10 +856,7 @@ impl AgentRuntime {
         } else {
             answer
         };
-        let content = format!(
-            "Task: {}\nResult: {}",
-            user_input, summary_answer
-        );
+        let content = format!("Task: {}\nResult: {}", user_input, summary_answer);
 
         // Generate embedding
         let embedder = crate::vector::get_embedder();
@@ -881,11 +1080,7 @@ fn parse_loose_json_tool_tags(text: &str) -> Vec<ParsedToolCall> {
 
 fn json_tag_attrs_to_tool_args(attr_src: &str) -> Option<serde_json::Value> {
     let action_re = Regex::new(r#"(?i)action\s*=\s*"([^"]*)""#).ok()?;
-    let action = action_re
-        .captures(attr_src)?
-        .get(1)?
-        .as_str()
-        .to_string();
+    let action = action_re.captures(attr_src)?.get(1)?.as_str().to_string();
     if !matches!(action.as_str(), "parse" | "format" | "query" | "validate") {
         return None;
     }
@@ -979,8 +1174,7 @@ fn re_bare_tool_call() -> &'static Regex {
     R.get_or_init(|| {
         // Tool names must contain an underscore or colon (MCP) to reduce false positives.
         // No start-of-line anchor: models often emit tool calls inline after punctuation.
-        Regex::new(r#"([\w]+(?:[_:][\w]+)+)\s+args:\s*(\{[^\n]*\})"#)
-            .expect("regex")
+        Regex::new(r#"([\w]+(?:[_:][\w]+)+)\s+args:\s*(\{[^\n]*\})"#).expect("regex")
     })
 }
 
@@ -1101,9 +1295,7 @@ pub fn extract_answer(text: &str) -> String {
         }
     }
 
-    result = re_strip_loose_fetch()
-        .replace_all(&result, "")
-        .to_string();
+    result = re_strip_loose_fetch().replace_all(&result, "").to_string();
     result = re_strip_loose_job_status()
         .replace_all(&result, "")
         .to_string();
@@ -1114,12 +1306,8 @@ pub fn extract_answer(text: &str) -> String {
         .replace_all(&result, "")
         .to_string();
     // Strip inline `name: X args: {...}` and bare `tool_name args: {...}` lines.
-    result = re_inline_tool_call()
-        .replace_all(&result, "")
-        .to_string();
-    result = re_bare_tool_call()
-        .replace_all(&result, "")
-        .to_string();
+    result = re_inline_tool_call().replace_all(&result, "").to_string();
+    result = re_bare_tool_call().replace_all(&result, "").to_string();
 
     result.trim().to_string()
 }
@@ -1249,8 +1437,7 @@ More text."#;
 
     #[test]
     fn test_extract_answer_strips_wallet_balance_pseudo_tag() {
-        let text =
-            "Your balance:\n<wallet_balance>100 PCLAW</wallet_balance>\nDone.";
+        let text = "Your balance:\n<wallet_balance>100 PCLAW</wallet_balance>\nDone.";
         let answer = extract_answer(text);
         assert!(answer.contains("Your balance:"));
         assert!(answer.contains("Done."));
@@ -1285,7 +1472,8 @@ More text."#;
 
     #[test]
     fn test_extract_answer_strips_inline_tool_calls() {
-        let text = "Here is info.\n\nname: web_fetch\nargs: {\"url\": \"https://x.com\"}\n\nFinal answer.";
+        let text =
+            "Here is info.\n\nname: web_fetch\nargs: {\"url\": \"https://x.com\"}\n\nFinal answer.";
         let answer = extract_answer(text);
         assert!(answer.contains("Here is info."));
         assert!(answer.contains("Final answer."));

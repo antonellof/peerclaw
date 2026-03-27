@@ -84,10 +84,7 @@ impl Tool for SubAgentTool {
         let task_type = optional_str(&params, "task_type")
             .unwrap_or("general")
             .to_string();
-        let budget = params
-            .get("budget")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(2.0);
+        let budget = params.get("budget").and_then(|v| v.as_f64()).unwrap_or(2.0);
         let model = optional_str(&params, "model").map(|s| s.to_string());
         let wait = optional_bool(&params, "wait", true);
         let timeout_secs = params
@@ -122,18 +119,13 @@ impl Tool for SubAgentTool {
         if !wait {
             // Fire-and-forget: we still wait for the initial acknowledgement (task ID)
             // but not for completion.
-            let result = tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                rx,
-            )
-            .await
-            .map_err(|_| {
-                ToolError::Timeout(10)
-            })?
-            .map_err(|_| {
-                ToolError::ExecutionFailed("node dropped sub-agent reply".to_string())
-            })?
-            .map_err(|e| ToolError::ExecutionFailed(e))?;
+            let result = tokio::time::timeout(std::time::Duration::from_secs(10), rx)
+                .await
+                .map_err(|_| ToolError::Timeout(10))?
+                .map_err(|_| {
+                    ToolError::ExecutionFailed("node dropped sub-agent reply".to_string())
+                })?
+                .map_err(|e| ToolError::ExecutionFailed(e))?;
 
             return Ok(ToolOutput::success(
                 serde_json::json!({
@@ -146,18 +138,11 @@ impl Tool for SubAgentTool {
         }
 
         // Wait for completion with timeout
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            rx,
-        )
-        .await
-        .map_err(|_| {
-            ToolError::Timeout(timeout_secs)
-        })?
-        .map_err(|_| {
-            ToolError::ExecutionFailed("node dropped sub-agent reply".to_string())
-        })?
-        .map_err(|e| ToolError::ExecutionFailed(e))?;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx)
+            .await
+            .map_err(|_| ToolError::Timeout(timeout_secs))?
+            .map_err(|_| ToolError::ExecutionFailed("node dropped sub-agent reply".to_string()))?
+            .map_err(|e| ToolError::ExecutionFailed(e))?;
 
         Ok(ToolOutput::success(
             serde_json::json!({

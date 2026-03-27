@@ -93,8 +93,16 @@ impl InferenceTask {
 
     /// Estimate resource requirements based on model name.
     pub fn estimate_requirements(&self) -> ResourceRequirements {
-        // Parse model size from name (e.g., "llama-3.2-8b" -> 8B)
-        let params_billions = parse_model_size(&self.model);
+        let lower = self.model.to_lowercase();
+        // Ollama cloud / API-style names do not load a local GGUF; avoid false VRAM needs.
+        if lower.contains(":cloud") {
+            return ResourceRequirements::minimal();
+        }
+
+        // Parse model size from name (e.g., "llama-3.2-8b" -> 8B). If absent, assume remote or tiny.
+        let Some(params_billions) = parse_model_size(&self.model) else {
+            return ResourceRequirements::minimal();
+        };
 
         // Rough estimates for GGUF Q4 quantization
         let vram_mb = match params_billions {
@@ -425,21 +433,20 @@ pub struct TaskMetrics {
 }
 
 /// Parse model size from model name.
-/// E.g., "llama-3.2-8b" -> 8.0, "mistral-7b-v0.1" -> 7.0
-fn parse_model_size(model: &str) -> f32 {
+/// E.g., "llama-3.2-8b" -> Some(8.0), "mistral-7b-v0.1" -> Some(7.0), "glm-4.7:cloud" -> None
+fn parse_model_size(model: &str) -> Option<f32> {
     let lower = model.to_lowercase();
 
     // Look for patterns like "7b", "8b", "70b", "3.2b"
-    for part in lower.split(&['-', '_', ' '][..]) {
+    for part in lower.split(&['-', '_', ' ', ':'][..]) {
         if part.ends_with('b') {
             if let Ok(size) = part.trim_end_matches('b').parse::<f32>() {
-                return size;
+                return Some(size);
             }
         }
     }
 
-    // Default to medium size if we can't parse
-    7.0
+    None
 }
 
 #[cfg(test)]
@@ -448,10 +455,30 @@ mod tests {
 
     #[test]
     fn test_parse_model_size() {
-        assert_eq!(parse_model_size("llama-3.2-8b"), 8.0);
-        assert_eq!(parse_model_size("mistral-7b-v0.1"), 7.0);
-        assert_eq!(parse_model_size("llama-70b"), 70.0);
-        assert_eq!(parse_model_size("phi-3b"), 3.0);
+        assert_eq!(parse_model_size("llama-3.2-8b"), Some(8.0));
+        assert_eq!(parse_model_size("mistral-7b-v0.1"), Some(7.0));
+        assert_eq!(parse_model_size("llama-70b"), Some(70.0));
+        assert_eq!(parse_model_size("phi-3b"), Some(3.0));
+        assert_eq!(parse_model_size("glm-4.7:cloud"), None);
+        assert_eq!(parse_model_size("gpt-4o"), None);
+    }
+
+    #[test]
+    fn test_inference_cloud_minimal_requirements() {
+        let task = InferenceTask::new("glm-4.7:cloud", "Hello");
+        let req = task.estimate_requirements();
+        let m = ResourceRequirements::minimal();
+        assert_eq!(req.ram_mb, m.ram_mb);
+        assert_eq!(req.vram_mb, m.vram_mb);
+        assert_eq!(req.cpu_cores, m.cpu_cores);
+    }
+
+    #[test]
+    fn test_inference_unknown_name_minimal_requirements() {
+        let task = InferenceTask::new("some-api-model", "Hello");
+        let req = task.estimate_requirements();
+        assert!(req.vram_mb.is_none());
+        assert!(req.ram_mb <= 100);
     }
 
     #[test]
