@@ -1258,6 +1258,10 @@ async fn run_unified_agentic_inference(
     /// Bail out after this many consecutive passes where every tool call fails.
     const MAX_CONSECUTIVE_FAIL_PASSES: u32 = 2;
     let mut consecutive_all_fail_passes: u32 = 0;
+    /// Track how many times we auto-generated tool calls for a planning model.
+    let mut auto_action_count: u32 = 0;
+    /// Track URLs already fetched to avoid re-fetching.
+    let mut fetched_urls: HashSet<String> = HashSet::new();
 
     for iter in 1..=AGENTIC_MAX_ITERS {
         // Compact conversation to fit model context using smart pruning.
@@ -1347,7 +1351,8 @@ async fn run_unified_agentic_inference(
         if calls.is_empty() {
             // Detect "plan without action" — model describes what it *would* do but
             // doesn't emit tool_call blocks. Auto-generate tool calls from context.
-            if iter <= 3 {
+            // After 2 auto-actions (search + fetch), force the model to answer instead.
+            if auto_action_count < 2 {
                 let plan_phrases = ["let me search", "let me gather", "let me look",
                     "i'll search", "i'll research", "i'll fetch", "i'll start by",
                     "sub-questions", "let me find", "let me check", "i'll gather",
@@ -1356,25 +1361,22 @@ async fn run_unified_agentic_inference(
                 let is_plan = plan_phrases.iter().any(|p| lower.contains(p));
 
                 if is_plan {
-                    // Try to extract a URL from the conversation (from prior tool results).
-                    let url_from_results = conversation
-                        .rfind("\"url\":")
-                        .and_then(|pos| {
-                            let after = &conversation[pos + 6..];
-                            let start = after.find('"')? + 1;
-                            let end = after[start..].find('"')? + start;
-                            let url = &after[start..end];
-                            if url.starts_with("http") { Some(url.to_string()) } else { None }
-                        });
+                    // Try to extract a URL from search results that we haven't fetched yet.
+                    let url_re = regex::Regex::new(r#""url"\s*:\s*"(https?://[^"]+)""#).ok();
+                    let fresh_url = url_re.and_then(|re| {
+                        re.captures_iter(&conversation)
+                            .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
+                            .find(|u| !fetched_urls.contains(u))
+                    });
 
-                    if let Some(url) = url_from_results {
-                        // We have search results — auto-fetch the top URL.
+                    if let Some(url) = fresh_url {
+                        fetched_urls.insert(url.clone());
                         calls = vec![crate::agent::ParsedToolCall {
                             name: "web_fetch".to_string(),
                             args: serde_json::json!({ "url": url }),
                         }];
                     } else {
-                        // No prior results — auto-search the user's goal.
+                        // No fresh URLs — auto-search the user's goal.
                         let goal = conversation_body.lines()
                             .find(|l| !l.starts_with('#') && !l.starts_with("Tool ") && l.len() > 10)
                             .unwrap_or(&conversation_body)
@@ -1385,6 +1387,7 @@ async fn run_unified_agentic_inference(
                             args: serde_json::json!({ "query": goal }),
                         }];
                     }
+                    auto_action_count += 1;
 
                     if let Some(ref sink) = progress {
                         sink.append_log(format!(
@@ -1395,6 +1398,22 @@ async fn run_unified_agentic_inference(
                         )).await;
                     }
                 }
+            } else if auto_action_count >= 2 && calls.is_empty() {
+                // We've done 2 auto-actions (search + fetch). Force the model to answer.
+                conversation.push_str("\n\nAssistant:\n");
+                conversation.push_str(&text);
+                conversation.push_str(
+                    "\n\nUser:\n(System: You have search results and page content above. \
+                     Write your complete answer NOW. Do NOT call any more tools.)\n",
+                );
+                if let Some(ref sink) = progress {
+                    sink.append_log(format!(
+                        "[{}] Pass {}: forcing answer after {} auto-actions",
+                        chrono::Utc::now().format("%H:%M:%S"),
+                        iter, auto_action_count,
+                    )).await;
+                }
+                continue;
             }
 
             if calls.is_empty() {
