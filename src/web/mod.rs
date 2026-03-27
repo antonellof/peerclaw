@@ -1145,9 +1145,9 @@ Output rules:
 }
 
 /// Upper bound on LLM↔tool rounds (avoids unbounded memory growth on the conversation).
-const AGENTIC_MAX_ITERS: u32 = 12;
+const AGENTIC_MAX_ITERS: u32 = 20;
 /// Cap parallel tool calls per model response so one bad turn cannot flood the executor / UI.
-const AGENTIC_MAX_TOOL_CALLS_PER_PASS: usize = 6;
+const AGENTIC_MAX_TOOL_CALLS_PER_PASS: usize = 10;
 
 fn default_chat_agentic() -> bool {
     true
@@ -1160,53 +1160,45 @@ async fn build_agentic_system_prefix(
 ) -> String {
     use crate::tools::ToolLocation;
     let mut s = String::from(
-        "To use a tool, write:\n\
-         <tool_call>\nname: TOOL_NAME\nargs: {\"param\": \"value\"}\n</tool_call>\n\n\
+        "You are a helpful AI assistant with tools.\n\n\
+         To use a tool, write EXACTLY this format:\n\
+         <tool_call>\n\
+         name: tool_name\n\
+         args: {\"param\": \"value\"}\n\
+         </tool_call>\n\n\
          Example:\n\
-         <tool_call>\nname: web_search\nargs: {\"query\": \"AI agents 2026\"}\n</tool_call>\n\n\
-         Rules: Use 1-3 tool calls per turn. If a tool fails, answer from knowledge. Never guess URLs.\n\n",
+         <tool_call>\n\
+         name: web_search\n\
+         args: {\"query\": \"latest AI news 2026\"}\n\
+         </tool_call>\n\n\
+         Do NOT describe what you will do. Just call the tool directly.\n\
+         After tool results, continue reasoning. When done, write your answer without tool_call blocks.\n\n",
     );
     if let Some(registry) = registry {
-        s.push_str("You are a helpful assistant with local tools. Use exact tool names.\n\nTools:\n");
+        s.push_str("Available tools:\n");
         let mut infos = registry.list_tools().await;
         infos.retain(|t| matches!(t.location, ToolLocation::Local));
         infos.sort_by(|a, b| a.name.cmp(&b.name));
-        // Keep only the most useful tools for small-context models.
-        let priority_tools = [
-            "web_fetch", "web_search", "shell", "file_read", "file_write", "apply_patch",
-            "browser", "pdf_read", "json", "memory_search", "memory_write",
-            "llm_task", "agent_spawn", "job_submit", "job_status",
-        ];
-        let (priority, rest): (Vec<_>, Vec<_>) = infos.into_iter()
-            .partition(|t| priority_tools.contains(&t.name.as_str()));
-        for t in &priority {
-            s.push_str(&format!("- {}: {}\n", t.name, t.description));
-        }
-        if !rest.is_empty() {
-            s.push_str(&format!("- (and {} more: {})\n",
-                rest.len(),
-                rest.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", ")
-            ));
+        for t in &infos {
+            // One-line description, keep it short for small models
+            let desc: String = t.description.chars().take(80).collect();
+            s.push_str(&format!("- {}: {}\n", t.name, desc));
         }
     } else {
         s.push_str(
-            "You are a helpful assistant with **MCP (Model Context Protocol)** tools only (no PeerClaw local tool registry on this endpoint).\n\n\
-             Tool names MUST be MCP ids: `server:tool_name` as listed below.\n\
-             After tool results, continue until you can answer the user without more tools.\n",
+            "You have MCP tools only. Tool names MUST use `server:tool_name` format as listed below.\n",
         );
     }
     if include_mcp_catalog {
         if let Some(manager) = mcp {
             if manager.tool_count() > 0 {
-                s.push_str("\n### MCP tools\n");
+                s.push_str("\nMCP tools:\n");
                 let mut entries = manager.list_tools_with_ids();
                 entries.sort_by(|a, b| a.0.cmp(&b.0));
                 for (id, tool) in entries {
-                    s.push_str(&format!(
-                        "- **{}**: {}\n",
-                        id,
-                        tool.description.as_deref().unwrap_or("(no description)")
-                    ));
+                    let desc: String = tool.description.as_deref().unwrap_or("(no description)")
+                        .chars().take(80).collect();
+                    s.push_str(&format!("- {}: {}\n", id, desc));
                 }
             }
         }
@@ -1258,10 +1250,8 @@ async fn run_unified_agentic_inference(
     /// Bail out after this many consecutive passes where every tool call fails.
     const MAX_CONSECUTIVE_FAIL_PASSES: u32 = 2;
     let mut consecutive_all_fail_passes: u32 = 0;
-    /// Track how many times we auto-generated tool calls for a planning model.
-    let mut auto_action_count: u32 = 0;
-    /// Track URLs already fetched to avoid re-fetching.
-    let mut fetched_urls: HashSet<String> = HashSet::new();
+    // Tool loop detection: track recent (name, args_hash) pairs to detect repetitive calls.
+    let mut tool_call_history: Vec<(String, u64)> = Vec::new();
 
     for iter in 1..=AGENTIC_MAX_ITERS {
         // Compact conversation to fit model context using smart pruning.
@@ -1348,90 +1338,72 @@ async fn run_unified_agentic_inference(
         }
 
         let mut calls = crate::agent::parse_tool_calls(&text);
+        // No tool calls detected — return the response as the final answer.
         if calls.is_empty() {
-            // Detect "plan without action" — model describes what it *would* do but
-            // doesn't emit tool_call blocks. Auto-generate tool calls from context.
-            // Only for goals that look like research tasks (long enough, mentions research-like words).
-            let goal_lower = conversation_body.to_lowercase();
-            let is_research_goal = conversation_body.len() > 30
-                || goal_lower.contains("research")
-                || goal_lower.contains("search")
-                || goal_lower.contains("find")
-                || goal_lower.contains("summarize")
-                || goal_lower.contains("latest")
-                || goal_lower.contains("trends")
-                || goal_lower.contains("analyze")
-                || goal_lower.contains("compare")
-                || goal_lower.contains("review");
+            let cleaned = crate::agent::extract_answer(&text);
+            let text_out = if cleaned.trim().is_empty() {
+                "(No text in the model's final reply after stripping tool markup. See task steps / logs for tool results, or retry.)"
+                    .to_string()
+            } else {
+                cleaned
+            };
+            return Ok((
+                InferenceResponse {
+                    text: text_out,
+                    tokens_generated: total_tokens,
+                    tokens_per_second: inf.tokens_per_second,
+                    location: inf.location,
+                    provider_peer_id: inf.provider_peer_id,
+                },
+                tool_logs,
+            ));
+        }
 
-            if auto_action_count < 2 && is_research_goal {
-                let plan_phrases = ["let me search", "let me gather", "let me look",
-                    "i'll search", "i'll research", "i'll fetch", "i'll start by",
-                    "sub-questions", "let me find", "let me check", "i'll gather",
-                    "let me explore", "i'll explore", "i'll investigate"];
-                let lower = text.to_lowercase();
-                let is_plan = plan_phrases.iter().any(|p| lower.contains(p));
-
-                if is_plan {
-                    // Try to extract a URL from search results that we haven't fetched yet.
-                    let url_re = regex::Regex::new(r#""url"\s*:\s*"(https?://[^"]+)""#).ok();
-                    let fresh_url = url_re.and_then(|re| {
-                        re.captures_iter(&conversation)
-                            .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
-                            .find(|u| !fetched_urls.contains(u))
-                    });
-
-                    if let Some(url) = fresh_url {
-                        fetched_urls.insert(url.clone());
-                        calls = vec![crate::agent::ParsedToolCall {
-                            name: "web_fetch".to_string(),
-                            args: serde_json::json!({ "url": url }),
-                        }];
-                    } else {
-                        // No fresh URLs — auto-search the user's goal.
-                        let goal = conversation_body.lines()
-                            .find(|l| !l.starts_with('#') && !l.starts_with("Tool ") && l.len() > 10)
-                            .unwrap_or(&conversation_body)
-                            .trim()
-                            .chars().take(200).collect::<String>();
-                        calls = vec![crate::agent::ParsedToolCall {
-                            name: "web_search".to_string(),
-                            args: serde_json::json!({ "query": goal }),
-                        }];
-                    }
-                    auto_action_count += 1;
-
+        // Tool loop detection: check each call against history.
+        {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut filtered_calls = Vec::new();
+            let mut loop_warnings: Vec<String> = Vec::new();
+            for call in calls {
+                let mut hasher = DefaultHasher::new();
+                call.args.to_string().hash(&mut hasher);
+                let args_hash = hasher.finish();
+                let sig = (call.name.clone(), args_hash);
+                let repeat_count = tool_call_history.iter().filter(|s| **s == sig).count();
+                if repeat_count >= 4 {
+                    // 5+ times total (4 in history + this one): block the call entirely
                     if let Some(ref sink) = progress {
                         sink.append_log(format!(
-                            "[{}] Pass {}: model planned but didn't call tools — auto-{}",
+                            "[{}] Pass {}: BLOCKED repeated call to '{}' ({} prior identical calls)",
                             chrono::Utc::now().format("%H:%M:%S"),
-                            iter,
-                            if calls[0].name == "web_fetch" { "fetching URL" } else { "searching" },
+                            iter, call.name, repeat_count + 1,
                         )).await;
                     }
+                    continue;
+                } else if repeat_count >= 2 {
+                    // 3+ times: warn the model
+                    loop_warnings.push(format!(
+                        "(System: You called '{}' with the same args {} times. Try a different approach or answer from what you have.)",
+                        call.name, repeat_count + 1,
+                    ));
                 }
-            } else if auto_action_count >= 2 && calls.is_empty() {
-                // We've done 2 auto-actions (search + fetch). Force the model to answer.
-                conversation.push_str("\n\nAssistant:\n");
-                conversation.push_str(&text);
-                conversation.push_str(
-                    "\n\nUser:\n(System: You have search results and page content above. \
-                     Write your complete answer NOW. Do NOT call any more tools.)\n",
-                );
-                if let Some(ref sink) = progress {
-                    sink.append_log(format!(
-                        "[{}] Pass {}: forcing answer after {} auto-actions",
-                        chrono::Utc::now().format("%H:%M:%S"),
-                        iter, auto_action_count,
-                    )).await;
-                }
-                continue;
+                tool_call_history.push(sig);
+                filtered_calls.push(call);
             }
-
+            calls = filtered_calls;
+            if !loop_warnings.is_empty() {
+                conversation.push_str("\n");
+                for w in &loop_warnings {
+                    conversation.push_str(w);
+                    conversation.push('\n');
+                }
+            }
+            // If all calls were blocked, return current text as answer
             if calls.is_empty() {
                 let cleaned = crate::agent::extract_answer(&text);
                 let text_out = if cleaned.trim().is_empty() {
-                    "(No text in the model's final reply after stripping tool markup. See task steps / logs for tool results, or retry.)"
+                    "(All tool calls were blocked due to repeated identical calls. See logs for details.)"
                         .to_string()
                 } else {
                     cleaned
@@ -1583,7 +1555,7 @@ async fn run_unified_agentic_inference(
             } else {
                 summary
             };
-            conversation.push_str(&format!("- {} → {}\n", call.name, truncated));
+            conversation.push_str(&format!("Tool: {}\nResult: {}\n\n", call.name, truncated));
         }
 
         // After tool results, nudge the model to answer.
@@ -2093,7 +2065,7 @@ async fn api_chat(
     Json(req): Json<ChatRequest>,
 ) -> Json<ChatResponse> {
     let model = req.model.unwrap_or_else(|| "llama-3.2-3b".to_string());
-    let max_tokens = req.max_tokens.unwrap_or(500);
+    let max_tokens = req.max_tokens.unwrap_or(2048);
     let temperature = req.temperature.unwrap_or(0.7);
     let user_message = req.message.clone();
 
@@ -2308,7 +2280,7 @@ async fn api_chat_stream(
     Json(req): Json<ChatRequest>,
 ) -> Result<Response, (axum::http::StatusCode, Json<ChatResponse>)> {
     let model = req.model.unwrap_or_else(|| "llama-3.2-3b".to_string());
-    let max_tokens = req.max_tokens.unwrap_or(500);
+    let max_tokens = req.max_tokens.unwrap_or(2048);
     let temperature = req.temperature.unwrap_or(0.7);
     let user_message = req.message.clone();
 

@@ -88,7 +88,7 @@ pub struct ToolCallRecord {
 }
 
 /// Maximum number of iterations before stopping.
-const MAX_ITERATIONS: u32 = 10;
+const MAX_ITERATIONS: u32 = 20;
 
 /// Estimated cost per 1k tokens (in PCLAW) for budget tracking.
 const COST_PER_1K_TOKENS: f64 = 0.001;
@@ -528,7 +528,7 @@ impl AgentRuntime {
 
         if prompt.is_empty() {
             prompt = format!(
-                "You are {}, a helpful AI assistant. You solve tasks step by step using available tools.\n",
+                "You are {}, a helpful AI assistant with tools.\n",
                 self.config.name
             );
         }
@@ -537,8 +537,7 @@ impl AgentRuntime {
         if let Some(store) = &self.vector_store {
             let memories = self.recall_memories(store, user_input).await;
             if !memories.is_empty() {
-                prompt.push_str("\n\n## Recalled Memories\n\n");
-                prompt.push_str("The following are relevant memories from previous sessions. Use them to inform your response:\n\n");
+                prompt.push_str("\nRecalled memories:\n");
                 for (i, memory) in memories.iter().enumerate() {
                     prompt.push_str(&format!("{}. {}\n", i + 1, memory));
                 }
@@ -557,16 +556,25 @@ impl AgentRuntime {
         };
 
         if !available.is_empty() {
-            prompt.push_str("\n\nYou have access to the following tools:\n\n");
-            for tool in &available {
-                prompt.push_str(&format!("- **{}**: {}\n", tool.name, tool.description));
-            }
-
-            prompt.push_str("\nTo use a tool, include a tool_call block in your response:\n\n");
             prompt.push_str(
-                "<tool_call>\nname: tool_name\nargs: {\"param\": \"value\"}\n</tool_call>\n\n",
+                "\nTo use a tool, write EXACTLY this format:\n\
+                 <tool_call>\n\
+                 name: tool_name\n\
+                 args: {\"param\": \"value\"}\n\
+                 </tool_call>\n\n\
+                 Example:\n\
+                 <tool_call>\n\
+                 name: web_search\n\
+                 args: {\"query\": \"latest AI news 2026\"}\n\
+                 </tool_call>\n\n\
+                 Do NOT describe what you will do. Just call the tool directly.\n\
+                 After tool results, continue reasoning. When done, write your answer without tool_call blocks.\n\n\
+                 Available tools:\n",
             );
-            prompt.push_str("You can make multiple tool calls in one response. After tool results are returned, continue reasoning and make more tool calls if needed. When you have the final answer, respond without any tool_call blocks.\n");
+            for tool in &available {
+                let desc: String = tool.description.chars().take(80).collect();
+                prompt.push_str(&format!("- {}: {}\n", tool.name, desc));
+            }
         }
 
         prompt
