@@ -1,0 +1,1 @@
+(System: You sent no <tool_call> blocks and did not produce the full deliverable. Either call tools now (e.g. web_search with real queries) or write the complete structured answer the user asked for. Do not reply with only an introduction, plan, or promise to act later.)

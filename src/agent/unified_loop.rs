@@ -67,30 +67,18 @@ impl AgenticProgressSink for NoAgenticProgress {
 
 /// Build the tool + MCP system prefix (OpenClaw-style concise instructions).
 pub async fn build_agentic_system_prefix(
+    prompts: &crate::prompts::PromptBundle,
     registry: Option<&ToolRegistry>,
     mcp: Option<&McpManager>,
     include_mcp_catalog: bool,
     allowed_local_tools: Option<&[String]>,
 ) -> String {
-    let mut s = String::from(
-        "You are a helpful AI assistant with tools.\n\n\
-         To use a tool, write EXACTLY this format:\n\
-         <tool_call>\n\
-         name: tool_name\n\
-         args: {\"param\": \"value\"}\n\
-         </tool_call>\n\n\
-         Example:\n\
-         <tool_call>\n\
-         name: web_search\n\
-         args: {\"query\": \"latest AI news 2026\"}\n\
-         </tool_call>\n\n\
-         Do NOT describe what you will do. Just call the tool directly.\n\
-         If the user asks for research, sources, or up-to-date facts, you MUST emit <tool_call> \
-         (e.g. web_search) in the same turn — do not only say you will search later.\n\
-         After tool results, continue reasoning. When done, write your answer without tool_call blocks.\n\n",
-    );
+    let mut s = prompts.agentic_system_intro.clone();
     if let Some(registry) = registry {
-        s.push_str("Available tools:\n");
+        s.push_str(&prompts.agentic_tools_header);
+        if !s.ends_with('\n') {
+            s.push('\n');
+        }
         let mut infos = registry.list_tools().await;
         infos.retain(|t| matches!(t.location, ToolLocation::Local));
         if let Some(allowed) = allowed_local_tools {
@@ -105,14 +93,18 @@ pub async fn build_agentic_system_prefix(
             s.push_str(&format!("- {}: {}\n", t.name, desc));
         }
     } else {
-        s.push_str(
-            "You have MCP tools only. Tool names MUST use `server:tool_name` format as listed below.\n",
-        );
+        s.push_str(&prompts.agentic_mcp_only_intro);
+        if !s.ends_with('\n') {
+            s.push('\n');
+        }
     }
     if include_mcp_catalog {
         if let Some(manager) = mcp {
             if manager.tool_count() > 0 {
-                s.push_str("\nMCP tools:\n");
+                s.push_str(&prompts.agentic_mcp_tools_header);
+                if !s.ends_with('\n') {
+                    s.push('\n');
+                }
                 let mut entries = manager.list_tools_with_ids();
                 entries.sort_by(|a, b| a.0.cmp(&b.0));
                 for (id, tool) in entries {
@@ -200,10 +192,28 @@ fn response_looks_like_intent_without_delivery(response: &str) -> bool {
     preamble && n < 1400
 }
 
+/// Goal / user body (after the system prefix) looks like it needs a live web fetch/search, but no tools have run yet.
+/// Ignores the prefix so instructions that mention `www.` do not false-trigger nudges.
+fn goal_suggests_network_fetch(conversation: &str, after_prefix: usize) -> bool {
+    let tail = conversation.get(after_prefix..).unwrap_or("");
+    let lower = tail.to_lowercase();
+    let has_url_token = lower.contains("http://")
+        || lower.contains("https://")
+        || lower.contains("www.")
+        || lower.contains("url:");
+    let fetch_phrase = lower.contains("fetch and summarize")
+        || lower.contains("fetch this")
+        || lower.contains("summarize this url")
+        || lower.contains("this page")
+        || (lower.contains("summarize") && has_url_token);
+    has_url_token || fetch_phrase
+}
+
 /// Run the unified ReAct loop. Returns final outcome (accumulated token count), tool log lines, and structured tool records.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_unified_agentic_loop(
     sink: &dyn AgenticInferenceSink,
+    prompts: &crate::prompts::PromptBundle,
     registry: Option<Arc<ToolRegistry>>,
     mcp: Option<Arc<McpManager>>,
     include_mcp_catalog: bool,
@@ -221,6 +231,7 @@ pub async fn run_unified_agentic_loop(
 ) -> Result<(AgenticTurnOutcome, Vec<String>, Vec<ToolCallRecord>, u32), String> {
     let max_tokens = max_tokens.min(16384);
     let prefix = build_agentic_system_prefix(
+        prompts,
         registry.as_deref(),
         mcp.as_deref(),
         include_mcp_catalog,
@@ -244,6 +255,9 @@ pub async fn run_unified_agentic_loop(
     // Nudge when the model promises tools/work but emits no `<tool_call>` (common with some cloud models).
     const MAX_TOOL_PREAMBLE_NUDGES: u32 = 2;
     let mut tool_preamble_nudges: u32 = 0;
+    /// When the goal names a URL or asks to fetch a page but the model answered at length without any tool calls.
+    const MAX_URL_FETCH_NUDGES: u32 = 2;
+    let mut url_fetch_nudges: u32 = 0;
 
     for iter in 1..=AGENTIC_MAX_ITERS {
         if conversation.len() > conv_max_chars {
@@ -252,10 +266,9 @@ pub async fn run_unified_agentic_loop(
         }
 
         if iter == AGENTIC_MAX_ITERS {
-            conversation.push_str(
-                "\n\n(System: This is your FINAL turn. Do NOT call any tools. \
-                 Write your complete answer directly to the user NOW.)\n",
-            );
+            conversation.push_str("\n\n");
+            conversation.push_str(prompts.unified_final_turn_suffix.trim());
+            conversation.push('\n');
         }
         if cancel.is_some_and(|c| c.load(Ordering::Acquire)) {
             return Err("Stopped by user".into());
@@ -273,7 +286,7 @@ pub async fn run_unified_agentic_loop(
 
         let mut prompt_for_model = conversation.clone();
         if iter == 1 {
-            prompt_for_model.push_str("\n\nAssistant:");
+            prompt_for_model.push_str(&prompts.unified_assistant_turn_marker);
         }
 
         let inf = sink
@@ -312,29 +325,61 @@ pub async fn run_unified_agentic_loop(
                 .unwrap_or(conversation.len().min(goal_start + 2000));
             let goal_section = conversation[goal_start..goal_end].to_string();
             conversation = format!(
-                "{}\n\n{}\n\n(System: Earlier tool results were dropped due to context limits. Answer from your knowledge now. Do NOT call tools.)\n",
+                "{}\n\n{}\n\n{}\n",
                 &conversation[..prefix_len],
-                goal_section
+                goal_section,
+                prompts.unified_compact_retry_suffix.trim(),
             );
             continue;
         }
 
         let mut calls = parse_tool_calls(&text);
         if calls.is_empty() {
+            if url_fetch_nudges < MAX_URL_FETCH_NUDGES
+                && iter < AGENTIC_MAX_ITERS
+                && tool_logs.is_empty()
+                && tool_records.is_empty()
+                && goal_suggests_network_fetch(&conversation, prefix_len)
+                && agentic_action_tools_available(
+                    registry.as_deref(),
+                    mcp.as_deref(),
+                    allowed_local_tools,
+                )
+                .await
+            {
+                url_fetch_nudges += 1;
+                conversation.push_str("\n\nAssistant:\n");
+                conversation.push_str(text.trim());
+                conversation.push_str("\n\n");
+                conversation.push_str(prompts.unified_url_fetch_nudge.trim());
+                conversation.push('\n');
+                if let Some(ref p) = progress {
+                    p.append_log(format!(
+                        "[{}] Pass {}: no tools run yet for URL/fetch-style goal; nudging model to call web_fetch/web_search…",
+                        chrono::Utc::now().format("%H:%M:%S"),
+                        iter
+                    ))
+                    .await;
+                }
+                continue;
+            }
+
             if tool_preamble_nudges < MAX_TOOL_PREAMBLE_NUDGES
                 && iter < AGENTIC_MAX_ITERS
-                && agentic_action_tools_available(registry.as_deref(), mcp.as_deref(), allowed_local_tools)
-                    .await
+                && agentic_action_tools_available(
+                    registry.as_deref(),
+                    mcp.as_deref(),
+                    allowed_local_tools,
+                )
+                .await
                 && response_looks_like_intent_without_delivery(&text)
             {
                 tool_preamble_nudges += 1;
                 conversation.push_str("\n\nAssistant:\n");
                 conversation.push_str(text.trim());
-                conversation.push_str(
-                    "\n\n(System: You sent no <tool_call> blocks and did not produce the full deliverable. \
-                     Either call tools now (e.g. web_search with real queries) or write the complete structured answer the user asked for. \
-                     Do not reply with only an introduction, plan, or promise to act later.)\n",
-                );
+                conversation.push_str("\n\n");
+                conversation.push_str(prompts.unified_preamble_nudge.trim());
+                conversation.push('\n');
                 if let Some(ref p) = progress {
                     p.append_log(format!(
                         "[{}] Pass {}: model replied without tools (preamble-style); nudging to continue…",
@@ -353,8 +398,7 @@ pub async fn run_unified_agentic_loop(
             } else if !trimmed_raw.is_empty() {
                 trimmed_raw.to_string()
             } else {
-                "(No text in the model's final reply after stripping tool markup. See task steps / logs for tool results, or retry.)"
-                    .to_string()
+                prompts.unified_empty_final_reply.trim().to_string()
             };
             return Ok((
                 AgenticTurnOutcome {
@@ -394,11 +438,9 @@ pub async fn run_unified_agentic_loop(
                     }
                     continue;
                 } else if repeat_count >= 2 {
-                    loop_warnings.push(format!(
-                        "(System: You called '{}' with the same args {} times. Try a different approach or answer from what you have.)",
-                        call.name,
-                        repeat_count + 1,
-                    ));
+                    loop_warnings.push(
+                        prompts.unified_repeat_warning(&call.name, (repeat_count + 1) as u32),
+                    );
                 }
                 tool_call_history.push(sig);
                 filtered_calls.push(call);
@@ -419,8 +461,7 @@ pub async fn run_unified_agentic_loop(
                 } else if !trimmed_raw.is_empty() {
                     trimmed_raw.to_string()
                 } else {
-                    "(All tool calls were blocked due to repeated identical calls. See logs for details.)"
-                        .to_string()
+                    prompts.unified_all_calls_blocked.trim().to_string()
                 };
                 return Ok((
                     AgenticTurnOutcome {
@@ -483,18 +524,20 @@ pub async fn run_unified_agentic_loop(
 
         conversation.push_str("\n\nAssistant:\n");
         conversation.push_str(&text);
-        conversation.push_str("\n\nUser:\n");
+        conversation.push_str(&prompts.unified_conversation_user_label);
         if duplicate_calls_merged > 0 {
-            conversation.push_str(&format!(
-                "(System: {duplicate_calls_merged} repeated tool call(s) with identical name+args were merged; each unique call runs once. Prefer a single well-formed call per intent.)\n"
-            ));
+            conversation.push_str(&prompts.unified_merge_duplicates(duplicate_calls_merged));
+            conversation.push('\n');
         }
         if let Some(d) = dropped_calls {
-            conversation.push_str(&format!(
-                "(System: {d} tool call(s) in this reply were skipped — max {AGENTIC_MAX_TOOL_CALLS_PER_PASS} per turn. Use fewer, complete calls.)\n"
-            ));
+            conversation
+                .push_str(&prompts.unified_skipped_calls(d, AGENTIC_MAX_TOOL_CALLS_PER_PASS));
+            conversation.push('\n');
         }
-        conversation.push_str("Here are the tool results:\n");
+        conversation.push_str(&prompts.unified_tool_results_header);
+        if !prompts.unified_tool_results_header.ends_with('\n') {
+            conversation.push('\n');
+        }
         let mut pass_failures = 0u32;
         let call_count = calls.len();
 
@@ -590,8 +633,7 @@ pub async fn run_unified_agentic_loop(
                     None => {
                         pass_failures += 1;
                         (
-                            "ERROR: Local tool name used but only MCP tools are available; use server:tool_name from the MCP list."
-                                .to_string(),
+                            prompts.unified_mcp_only_tool_error.trim().to_string(),
                             false,
                         )
                     }
@@ -636,19 +678,18 @@ pub async fn run_unified_agentic_loop(
         }
 
         if pass_failures < call_count as u32 {
-            conversation.push_str(
-                "\nNow use the tool results above to write your answer to the user. If you need more info, call another tool. Otherwise answer directly without tool calls.\n",
-            );
+            conversation.push_str(&prompts.unified_tool_results_followup);
+            if !prompts.unified_tool_results_followup.ends_with('\n') {
+                conversation.push('\n');
+            }
         }
 
         if pass_failures as usize >= call_count {
             consecutive_all_fail_passes += 1;
             if consecutive_all_fail_passes >= MAX_CONSECUTIVE_FAIL_PASSES {
-                conversation.push_str(
-                    "\n(System: All tool calls have failed for multiple consecutive passes. \
-                     STOP calling tools. Answer the user's question directly from your own knowledge. \
-                     Do NOT make any more tool_call blocks.)\n",
-                );
+                conversation.push('\n');
+                conversation.push_str(prompts.unified_all_tools_failed_suffix.trim());
+                conversation.push('\n');
                 if let Some(ref p) = progress {
                     p.append_log(format!(
                         "[{}] {} consecutive all-fail passes — forcing answer from knowledge",
@@ -663,7 +704,7 @@ pub async fn run_unified_agentic_loop(
         }
     }
 
-    Err("Agentic: max tool iterations reached".into())
+    Err(prompts.unified_max_iters_error.trim().to_string())
 }
 
 #[cfg(test)]
@@ -696,12 +737,14 @@ mod tests {
 
     #[tokio::test]
     async fn unified_loop_ends_on_plain_answer() {
+        let prompts = crate::prompts::PromptBundle::load(None);
         let sink = FinalAnswerSink {
             text: "Hello, no tools.".to_string(),
         };
         let reg = Arc::new(ToolRegistry::new("test_peer".into()));
         let (out, logs, records, passes) = run_unified_agentic_loop(
             &sink,
+            &prompts,
             Some(reg),
             None,
             false,
@@ -727,11 +770,14 @@ mod tests {
 
     #[tokio::test]
     async fn build_prefix_respects_allowed_local_tools() {
+        let prompts = crate::prompts::PromptBundle::load(None);
         let reg = ToolRegistry::new("p".into());
         let allowed = vec!["web_search".to_string()];
-        let prefix = build_agentic_system_prefix(Some(&reg), None, false, Some(&allowed)).await;
-        assert!(prefix.contains("web_search"));
-        assert!(!prefix.contains("web_fetch"));
+        let prefix =
+            build_agentic_system_prefix(&prompts, Some(&reg), None, false, Some(&allowed)).await;
+        let tools_block = prefix.split("Available tools:").nth(1).unwrap_or("");
+        assert!(tools_block.contains("web_search"));
+        assert!(!tools_block.contains("web_fetch"));
     }
 
     #[test]
@@ -742,9 +788,25 @@ mod tests {
 
     #[test]
     fn intent_without_delivery_skips_plain_final() {
-        assert!(!response_looks_like_intent_without_delivery("Hello, no tools."));
+        assert!(!response_looks_like_intent_without_delivery(
+            "Hello, no tools."
+        ));
         assert!(!response_looks_like_intent_without_delivery(
             "(1) Overview\n\nFoo.\n\n(2) Terms\n\nBar."
+        ));
+    }
+
+    #[test]
+    fn goal_fetch_detects_bracketed_www_url() {
+        let g = "Goal: Fetch [www.google.com/news] and summarize.";
+        assert!(goal_suggests_network_fetch(g, 0));
+    }
+
+    #[test]
+    fn goal_fetch_detects_https() {
+        assert!(goal_suggests_network_fetch(
+            "Goal: read https://example.com/page for facts",
+            0
         ));
     }
 }

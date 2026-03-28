@@ -254,6 +254,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                             runtime.tools.clone(),
                             runtime.local_peer_id.to_string(),
                             Some(node_tool_tx.clone()),
+                            runtime.prompts.clone(),
                             Some(inference_sink_web),
                         );
 
@@ -315,15 +316,15 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         tx
     };
 
-    let crew_sink: Option<Arc<dyn crate::agent::AgenticInferenceSink>> =
-        if agent_runtime.is_some() {
-            Some(Arc::new(crate::web::WebChannelInferenceSink {
-                tx: inference_tx.clone(),
-                stream_delta_tx: None,
-            }))
-        } else {
-            None
-        };
+    let crew_sink: Option<Arc<dyn crate::agent::AgenticInferenceSink>> = if agent_runtime.is_some()
+    {
+        Some(Arc::new(crate::web::WebChannelInferenceSink {
+            tx: inference_tx.clone(),
+            stream_delta_tx: None,
+        }))
+    } else {
+        None
+    };
 
     let crew_store = crate::crew::CrewRunStore::new();
     let flow_store = crate::flow::FlowRunStore::new();
@@ -331,64 +332,70 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     // Create web state with all features: inference, jobs, swarm, tasks, providers, agent
     let (mut peer_dial_rx, web_state, mut crew_kickoff_rx, mut flow_kickoff_rx) =
         if config.web.enabled {
-        let (crew_kickoff_tx, crew_kickoff_rx) = mpsc::channel::<crate::web::CrewKickoffJob>(8);
-        let (flow_kickoff_tx, flow_kickoff_rx) = mpsc::channel::<crate::web::FlowKickoffJob>(8);
-        let (peer_dial_tx, peer_dial_rx) = mpsc::channel::<String>(32);
-        let p2p_network_hints = std::sync::Arc::new(crate::web::P2pNetworkHints {
-            bootstrap_peers: config.p2p.bootstrap_peers.clone(),
-            mdns_enabled: config.p2p.mdns_enabled,
-            kademlia_enabled: config.p2p.kademlia_enabled,
-            community_peers: crate::web::default_community_peer_directory(),
-        });
-        let state = Some(Arc::new(crate::web::WebState {
-            local_peer_id: runtime.local_peer_id,
-            resource_monitor: runtime.executor.resource_monitor(),
-            wallet_balance: Arc::new(tokio::sync::RwLock::new(0)),
-            connected_peers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
-            active_jobs: Arc::new(tokio::sync::RwLock::new(0)),
-            completed_jobs: Arc::new(tokio::sync::RwLock::new(0)),
-            job_list: Arc::new(tokio::sync::RwLock::new(Vec::new())),
-            inference_tx: Some(inference_tx),
-            job_submit_tx: Some(job_submit_tx),
-            swarm_manager: Some(swarm_manager.clone()),
-            task_store: Arc::new(tokio::sync::RwLock::new(Vec::new())),
-            agent_task_cancels: Arc::new(
-                tokio::sync::RwLock::new(std::collections::HashMap::new()),
-            ),
-            provider_tracker: Some(runtime.provider_tracker.clone()),
-            agent_task_tx: agent_task_tx_opt,
-            ws_control_tx,
-            skills: Some(runtime.skills.clone()),
-            chat_sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
-            mcp_config: Arc::new(tokio::sync::RwLock::new(config.mcp.clone())),
-            mcp_manager: Arc::new(tokio::sync::RwLock::new(None)),
-            tools: Some(runtime.tools.clone()),
-            node_tool_tx: Some(node_tool_tx.clone()),
-            skills_dir: config
-                .skills
-                .directory
-                .clone()
-                .unwrap_or_else(|| crate::bootstrap::base_dir().join("skills")),
-            config_path: crate::bootstrap::base_dir().join("config.toml"),
-            peer_dial_tx: Some(peer_dial_tx),
-            p2p_network_hints,
-            inference: Some(runtime.inference.clone()),
-            session_store: None,
-            channel_registry: None,
-            wallet: None,
-            vector_store: None,
-            verbose_agentic_io: args.verbose_agentic,
-            a2a: runtime.a2a.clone(),
-            a2a_public_base_url: format!("http://{}", config.web.listen_addr),
-            crew_store: crew_store.clone(),
-            crew_kickoff_tx: Some(crew_kickoff_tx),
-            flow_store: flow_store.clone(),
-            flow_kickoff_tx: Some(flow_kickoff_tx),
-        }));
-        (Some(peer_dial_rx), state, Some(crew_kickoff_rx), Some(flow_kickoff_rx))
-    } else {
-        (None, None, None, None)
-    };
+            let (crew_kickoff_tx, crew_kickoff_rx) = mpsc::channel::<crate::web::CrewKickoffJob>(8);
+            let (flow_kickoff_tx, flow_kickoff_rx) = mpsc::channel::<crate::web::FlowKickoffJob>(8);
+            let (peer_dial_tx, peer_dial_rx) = mpsc::channel::<String>(32);
+            let p2p_network_hints = std::sync::Arc::new(crate::web::P2pNetworkHints {
+                bootstrap_peers: config.p2p.bootstrap_peers.clone(),
+                mdns_enabled: config.p2p.mdns_enabled,
+                kademlia_enabled: config.p2p.kademlia_enabled,
+                community_peers: crate::web::default_community_peer_directory(),
+            });
+            let state = Some(Arc::new(crate::web::WebState {
+                local_peer_id: runtime.local_peer_id,
+                resource_monitor: runtime.executor.resource_monitor(),
+                wallet_balance: Arc::new(tokio::sync::RwLock::new(0)),
+                connected_peers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+                active_jobs: Arc::new(tokio::sync::RwLock::new(0)),
+                completed_jobs: Arc::new(tokio::sync::RwLock::new(0)),
+                job_list: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+                inference_tx: Some(inference_tx),
+                job_submit_tx: Some(job_submit_tx),
+                swarm_manager: Some(swarm_manager.clone()),
+                task_store: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+                agent_task_cancels: Arc::new(tokio::sync::RwLock::new(
+                    std::collections::HashMap::new(),
+                )),
+                provider_tracker: Some(runtime.provider_tracker.clone()),
+                agent_task_tx: agent_task_tx_opt,
+                ws_control_tx,
+                skills: Some(runtime.skills.clone()),
+                chat_sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+                mcp_config: Arc::new(tokio::sync::RwLock::new(config.mcp.clone())),
+                mcp_manager: Arc::new(tokio::sync::RwLock::new(None)),
+                tools: Some(runtime.tools.clone()),
+                node_tool_tx: Some(node_tool_tx.clone()),
+                skills_dir: config
+                    .skills
+                    .directory
+                    .clone()
+                    .unwrap_or_else(|| crate::bootstrap::base_dir().join("skills")),
+                config_path: crate::bootstrap::base_dir().join("config.toml"),
+                peer_dial_tx: Some(peer_dial_tx),
+                p2p_network_hints,
+                inference: Some(runtime.inference.clone()),
+                session_store: None,
+                channel_registry: None,
+                wallet: None,
+                vector_store: None,
+                verbose_agentic_io: args.verbose_agentic,
+                a2a: runtime.a2a.clone(),
+                a2a_public_base_url: format!("http://{}", config.web.listen_addr),
+                crew_store: crew_store.clone(),
+                crew_kickoff_tx: Some(crew_kickoff_tx),
+                flow_store: flow_store.clone(),
+                flow_kickoff_tx: Some(flow_kickoff_tx),
+                prompts: runtime.prompts.clone(),
+            }));
+            (
+                Some(peer_dial_rx),
+                state,
+                Some(crew_kickoff_rx),
+                Some(flow_kickoff_rx),
+            )
+        } else {
+            (None, None, None, None)
+        };
 
     // Start web server if enabled
     if let Some(state) = web_state.clone() {
@@ -900,10 +907,8 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         orch.to_string(),
                         Some(node_tool_tx.clone()),
                         crew_sink.clone(),
-                        store
-                            .cancel_flag(&job.run_id)
-                            .as_ref()
-                            .map(|a| a.as_ref()),
+                        runtime.prompts.clone(),
+                        store.cancel_flag(&job.run_id).as_ref().map(|a| a.as_ref()),
                         extras,
                     )
                     .await;
@@ -988,6 +993,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         runtime.local_peer_id.to_string(),
                         Some(node_tool_tx.clone()),
                         crew_sink.clone(),
+                        runtime.prompts.clone(),
                         extras,
                     )
                     .await;

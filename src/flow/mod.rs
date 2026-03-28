@@ -206,6 +206,7 @@ pub async fn run_flow(
     peer_id: String,
     node_tool_tx: Option<NodeToolTx>,
     inference_sink: Option<Arc<dyn crate::agent::AgenticInferenceSink>>,
+    prompts: Arc<crate::prompts::PromptBundle>,
     extras: AgentTaskExtras,
 ) -> Result<FlowRunOutput, String> {
     spec.validate()?;
@@ -222,10 +223,7 @@ pub async fn run_flow(
         let kind = node.kind.to_lowercase();
         if kind == "crew" || node.crew_spec.is_some() {
             let crew = node.crew_spec.as_ref().ok_or_else(|| {
-                format!(
-                    "flow node {}: crew steps require \"crew_spec\"",
-                    node.id
-                )
+                format!("flow node {}: crew steps require \"crew_spec\"", node.id)
             })?;
             crew.validate()?;
             let merged_inputs = if node.prompt.is_empty() {
@@ -241,6 +239,7 @@ pub async fn run_flow(
                 peer_id.clone(),
                 node_tool_tx.clone(),
                 inference_sink.clone(),
+                prompts.clone(),
                 None,
                 extras.clone(),
             )

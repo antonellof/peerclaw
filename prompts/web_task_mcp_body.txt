@@ -1,0 +1,5 @@
+### Agent goal
+{description}
+
+{skill_block}Use MCP tools when they help; pass the arguments each tool expects (see MCP server docs if unsure).
+Finish with a concise, substantive answer for the user (not commentary about tools).

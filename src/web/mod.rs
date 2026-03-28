@@ -221,6 +221,8 @@ pub struct WebState {
     pub crew_kickoff_tx: Option<mpsc::Sender<CrewKickoffJob>>,
     pub flow_store: Arc<crate::flow::FlowRunStore>,
     pub flow_kickoff_tx: Option<mpsc::Sender<FlowKickoffJob>>,
+    /// Prompt templates (embedded + optional overlay); stubs use [`default_web_prompts`].
+    pub prompts: Arc<crate::prompts::PromptBundle>,
 }
 
 /// Enqueued by `POST /api/crews/kickoff`, executed on the node event loop.
@@ -245,6 +247,10 @@ pub struct FlowKickoffJob {
 fn new_ws_control_plane() -> broadcast::Sender<serde_json::Value> {
     let (tx, _) = broadcast::channel(256);
     tx
+}
+
+fn default_web_prompts() -> Arc<crate::prompts::PromptBundle> {
+    crate::prompts::load_prompt_bundle(&crate::config::Config::default())
 }
 
 /// Notify WebSocket subscribers that task rows may have changed.
@@ -429,7 +435,10 @@ pub fn create_router(state: Arc<WebState>) -> Router {
     let spa = spa_dist_dir();
     let mut router = Router::new()
         .nest("/api", api_router())
-        .route("/.well-known/agent-card.json", get(api_agent_card_well_known))
+        .route(
+            "/.well-known/agent-card.json",
+            get(api_agent_card_well_known),
+        )
         .route("/a2a", post(api_a2a_jsonrpc))
         .route("/ws", get(ws_handler))
         // OpenAI-compatible API routes
@@ -496,6 +505,7 @@ pub fn create_web_state(
         crew_kickoff_tx: None,
         flow_store: crate::flow::FlowRunStore::new(),
         flow_kickoff_tx: None,
+        prompts: default_web_prompts(),
     })
 }
 
@@ -544,6 +554,7 @@ pub fn create_web_state_with_channels(
         crew_kickoff_tx: None,
         flow_store: crate::flow::FlowRunStore::new(),
         flow_kickoff_tx: None,
+        prompts: default_web_prompts(),
     })
 }
 
@@ -591,6 +602,7 @@ pub fn create_web_state_with_inference(
         crew_kickoff_tx: None,
         flow_store: crate::flow::FlowRunStore::new(),
         flow_kickoff_tx: None,
+        prompts: default_web_prompts(),
     })
 }
 
@@ -638,6 +650,7 @@ pub fn create_web_state_with_swarm(
         crew_kickoff_tx: None,
         flow_store: crate::flow::FlowRunStore::new(),
         flow_kickoff_tx: None,
+        prompts: default_web_prompts(),
     })
 }
 
@@ -709,7 +722,11 @@ async fn api_agent_card_well_known(
     };
     let pid = state.local_peer_id.to_string();
     let short: String = pid.chars().take(8).collect();
-    let base = state.a2a_public_base_url.trim().trim_end_matches('/').to_string();
+    let base = state
+        .a2a_public_base_url
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
     let base = if base.is_empty() {
         "http://127.0.0.1:8080".to_string()
     } else {
@@ -728,7 +745,10 @@ async fn api_a2a_jsonrpc(
     State(state): State<Arc<WebState>>,
     Json(body): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    Json(crate::a2a::jsonrpc::handle_jsonrpc_body(state.a2a.as_ref(), &body))
+    Json(crate::a2a::jsonrpc::handle_jsonrpc_body(
+        state.a2a.as_ref(),
+        &body,
+    ))
 }
 
 async fn api_a2a_peers(State(state): State<Arc<WebState>>) -> Json<serde_json::Value> {
@@ -762,7 +782,10 @@ struct CrewKickoffResponse {
 }
 
 async fn api_flow_validate(Json(spec): Json<crate::flow::FlowSpec>) -> Json<serde_json::Value> {
-    match spec.validate().and_then(|_| spec.execution_order().map(|_| ())) {
+    match spec
+        .validate()
+        .and_then(|_| spec.execution_order().map(|_| ()))
+    {
         Ok(()) => Json(serde_json::json!({ "ok": true })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e })),
     }
@@ -843,9 +866,7 @@ async fn api_flow_runs_list(
     Json(state.flow_store.list())
 }
 
-async fn api_crew_validate(
-    Json(spec): Json<crate::crew::CrewSpec>,
-) -> Json<serde_json::Value> {
+async fn api_crew_validate(Json(spec): Json<crate::crew::CrewSpec>) -> Json<serde_json::Value> {
     match spec.validate() {
         Ok(()) => Json(serde_json::json!({ "ok": true })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e })),
@@ -906,7 +927,9 @@ async fn api_crew_run_get(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
-async fn api_crew_runs_list(State(state): State<Arc<WebState>>) -> Json<Vec<crate::crew::CrewRunRecord>> {
+async fn api_crew_runs_list(
+    State(state): State<Arc<WebState>>,
+) -> Json<Vec<crate::crew::CrewRunRecord>> {
     Json(state.crew_store.list())
 }
 
@@ -1562,6 +1585,7 @@ async fn run_unified_agentic_inference(
     let (out, tool_logs, _tool_records, _passes) =
         crate::agent::unified_loop::run_unified_agentic_loop(
             &sink,
+            state.prompts.as_ref(),
             registry,
             mcp,
             include_mcp_catalog,
@@ -2118,13 +2142,14 @@ async fn api_chat(
                             } else {
                                 body.to_string()
                             };
-                            format!("### Active Skill: {}\n{}\n\n", s.name(), clipped)
+                            state.prompts.web_chat_active_skill(s.name(), &clipped)
                         })
                         .unwrap_or_default()
                 } else {
                     String::new()
                 };
-                let body = format!("{skill_inject}### User thread\n{prompt_for_model}");
+                let thread_h = state.prompts.web_chat_user_thread_header.trim();
+                let body = format!("{skill_inject}{thread_h}\n{prompt_for_model}");
                 match run_unified_agentic_inference(
                     state.as_ref(),
                     Some(registry),
@@ -2176,7 +2201,8 @@ async fn api_chat(
     if req.use_mcp {
         if let Some(mcp) = mcp_arc {
             if mcp.tool_count() > 0 && state.inference_tx.is_some() {
-                let body = format!("### User thread\n{prompt_for_model}");
+                let thread_h = state.prompts.web_chat_user_thread_header.trim();
+                let body = format!("{thread_h}\n{prompt_for_model}");
                 match run_unified_agentic_inference(
                     state.as_ref(),
                     None,
@@ -2332,13 +2358,14 @@ async fn api_chat_stream(
                             } else {
                                 body.to_string()
                             };
-                            format!("### Active Skill: {}\n{}\n\n", s.name(), clipped)
+                            state.prompts.web_chat_active_skill(s.name(), &clipped)
                         })
                         .unwrap_or_default()
                 } else {
                     String::new()
                 };
-                let body = format!("{skill_inject}### User thread\n{prompt_for_model}");
+                let thread_h = state.prompts.web_chat_user_thread_header.trim();
+                let body = format!("{skill_inject}{thread_h}\n{prompt_for_model}");
                 let state_spawn = state.clone();
                 let sessions = state.chat_sessions.clone();
                 let session_store_spawn = state.session_store.clone();
@@ -2353,8 +2380,8 @@ async fn api_chat_stream(
                         let sse_tx = sse_tx.clone();
                         async move {
                             while let Some(chunk) = llm_rx.recv().await {
-                                let payload =
-                                    serde_json::json!({ "type": "delta", "text": chunk }).to_string();
+                                let payload = serde_json::json!({ "type": "delta", "text": chunk })
+                                    .to_string();
                                 if sse_tx
                                     .send(Ok(Event::default().data(payload)))
                                     .await
@@ -2437,7 +2464,8 @@ async fn api_chat_stream(
     if req.use_mcp {
         if let Some(mcp) = mcp_arc {
             if mcp.tool_count() > 0 && state.inference_tx.is_some() {
-                let body = format!("### User thread\n{prompt_for_model}");
+                let thread_h = state.prompts.web_chat_user_thread_header.trim();
+                let body = format!("{thread_h}\n{prompt_for_model}");
                 let state_spawn = state.clone();
                 let sessions = state.chat_sessions.clone();
                 let session_store_spawn = state.session_store.clone();
@@ -2451,8 +2479,8 @@ async fn api_chat_stream(
                         let sse_tx = sse_tx.clone();
                         async move {
                             while let Some(chunk) = llm_rx.recv().await {
-                                let payload =
-                                    serde_json::json!({ "type": "delta", "text": chunk }).to_string();
+                                let payload = serde_json::json!({ "type": "delta", "text": chunk })
+                                    .to_string();
                                 if sse_tx
                                     .send(Ok(Event::default().data(payload)))
                                     .await
@@ -3148,12 +3176,9 @@ async fn api_create_task(
                 } else {
                     body.to_string()
                 };
-                format!(
-                    "### Skill `{}` (task type `{}`)\n{}\n\n",
-                    s.name(),
-                    req.task_type,
-                    clipped
-                )
+                state
+                    .prompts
+                    .web_task_skill_section(s.name(), &req.task_type, &clipped)
             })
     } else {
         None
@@ -3397,11 +3422,9 @@ async fn api_create_task(
             }
             broadcast_tasks_changed(&ws_tx);
 
-            let body = format!(
-                "Goal: {description}\n\n{skill_block}\
-                 Use tools only when needed. If a tool fails, answer from your knowledge.\n\
-                 Give a complete, useful answer.\n"
-            );
+            let body = state_spawn
+                .prompts
+                .web_task_unified(&description, &skill_block);
 
             let progress_sink = AgenticTaskProgressSink {
                 store: store.clone(),
@@ -3536,12 +3559,7 @@ async fn api_create_task(
             }
             broadcast_tasks_changed(&ws_tx);
 
-            let body = format!(
-                "### Agent goal\n{description}\n\n\
-                 {skill_block}\
-                 Use MCP tools when they help; pass the arguments each tool expects (see MCP server docs if unsure).\n\
-                 Finish with a concise, substantive answer for the user (not commentary about tools).\n"
-            );
+            let body = state_spawn.prompts.web_task_mcp(&description, &skill_block);
 
             let progress_sink = AgenticTaskProgressSink {
                 store: store.clone(),

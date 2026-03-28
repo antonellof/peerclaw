@@ -40,10 +40,7 @@ pub fn build_swarm(
 
     let a2a_proto = StreamProtocol::new("/peerclaw/a2a-rpc/1.0.0");
     let a2a_rpc = request_response::json::Behaviour::new(
-        [(
-            a2a_proto,
-            request_response::ProtocolSupport::Full,
-        )],
+        [(a2a_proto, request_response::ProtocolSupport::Full)],
         request_response::Config::default().with_request_timeout(Duration::from_secs(120)),
     );
 

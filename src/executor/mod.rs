@@ -131,7 +131,10 @@ impl TaskExecutor {
         let start = Instant::now();
 
         let requirements = self.routing_requirements_for_task(&task).await;
-        let decision = self.router.route_with_requirements(&task, requirements).await;
+        let decision = self
+            .router
+            .route_with_requirements(&task, requirements)
+            .await;
 
         tracing::debug!(
             task_id = %task_id,

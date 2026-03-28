@@ -1,0 +1,1 @@
+(System: Earlier tool results were dropped due to context limits. Answer from your knowledge now. Do NOT call tools.)

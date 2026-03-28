@@ -63,6 +63,8 @@ pub struct Runtime {
     pub local_peer_id: PeerId,
     /// Configuration
     pub config: Config,
+    /// Prompt fragments (embedded defaults + optional overlay dir at startup).
+    pub prompts: Arc<crate::prompts::PromptBundle>,
     /// A2A task state and discovered agent cards (shared with P2P + HTTP).
     pub a2a: Arc<A2aState>,
 
@@ -218,6 +220,8 @@ impl Runtime {
             tracing::info!("LLM provider sharing enabled");
         }
 
+        let prompts = crate::prompts::load_prompt_bundle(&config);
+
         Ok(Self {
             identity,
             database,
@@ -235,6 +239,7 @@ impl Runtime {
             provider_tracker,
             local_peer_id,
             config,
+            prompts,
             a2a,
             swarm_manager: tokio::sync::RwLock::new(None),
         })
@@ -632,7 +637,8 @@ impl Runtime {
                         ok = res.success,
                         "Crew task result on network"
                     );
-                } else if let Ok(claim) = serde_json::from_slice::<crate::crew::CrewTaskClaim>(&data)
+                } else if let Ok(claim) =
+                    serde_json::from_slice::<crate::crew::CrewTaskClaim>(&data)
                 {
                     tracing::debug!(
                         run = %claim.offer_run_id,
@@ -640,7 +646,8 @@ impl Runtime {
                         worker = %claim.worker_peer,
                         "Crew task claim on network"
                     );
-                } else if let Ok(offer) = serde_json::from_slice::<crate::crew::CrewTaskOffer>(&data)
+                } else if let Ok(offer) =
+                    serde_json::from_slice::<crate::crew::CrewTaskOffer>(&data)
                 {
                     if self.config.orchestration.crew_worker {
                         if let Some(src) = source {
@@ -659,7 +666,8 @@ impl Runtime {
                 }
             }
             t if t == crate::crew::POD_TOPIC => {
-                if let Ok(art) = serde_json::from_slice::<crate::crew::PodArtifactPublished>(&data) {
+                if let Ok(art) = serde_json::from_slice::<crate::crew::PodArtifactPublished>(&data)
+                {
                     tracing::debug!(
                         pod = %art.pod_id,
                         campaign = %art.campaign_id,
@@ -755,10 +763,7 @@ impl Runtime {
             hint
         };
 
-        let prompt = format!(
-            "You are a distributed crew worker. Respond briefly (plain text) to this task summary:\n\n{}",
-            offer.summary
-        );
+        let prompt = self.prompts.crew_worker_prompt(offer.summary.trim());
         let task = InferenceTask::new(model_ref, prompt).with_max_tokens(256);
         let exec = self
             .executor
@@ -806,11 +811,8 @@ impl Runtime {
     pub async fn gossip_resource_manifest(&self) -> anyhow::Result<()> {
         let resources = crate::p2p::Resources::default();
         let caps = vec![crate::p2p::Capability::Inference];
-        let mut manifest = crate::p2p::ResourceManifest::new(
-            self.local_peer_id.to_string(),
-            resources,
-            caps,
-        );
+        let mut manifest =
+            crate::p2p::ResourceManifest::new(self.local_peer_id.to_string(), resources, caps);
         let models: Vec<String> = self
             .inference
             .available_models()
@@ -855,10 +857,7 @@ impl Runtime {
         self.a2a
             .upsert_peer_card(self.local_peer_id.to_string(), card);
         let data = serde_json::to_vec(&ann)?;
-        self.network
-            .write()
-            .await
-            .publish(A2A_GOSSIP_TOPIC, data)?;
+        self.network.write().await.publish(A2A_GOSSIP_TOPIC, data)?;
         Ok(())
     }
 }

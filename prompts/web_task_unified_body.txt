@@ -1,0 +1,6 @@
+Goal: {description}
+
+{skill_block}Use tools when they improve factual accuracy (web_fetch for URLs, web_search for topics).
+If the goal names a URL or asks to fetch/summarize a webpage, call web_fetch with that URL before answering.
+If a tool fails, say so briefly; you may then answer from knowledge.
+Give a complete, useful answer.

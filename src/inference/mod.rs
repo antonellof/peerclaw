@@ -68,8 +68,8 @@ pub use distribution::{
 };
 pub use failover::{BackendId, ErrorKind, FailoverChain};
 pub use gguf::{
-    AsyncGgufEngine, GgufBackend, GgufConfig, GgufEngine, GgufError, GgufModelHandle, GgufModelInfo,
-    TokenCallback,
+    AsyncGgufEngine, GgufBackend, GgufConfig, GgufEngine, GgufError, GgufModelHandle,
+    GgufModelInfo, TokenCallback,
 };
 pub use live_settings::InferenceLiveSettings;
 pub use model::{ModelArchitecture, ModelId, ModelInfo, ModelRequirements, Quantization};
@@ -568,8 +568,8 @@ impl InferenceEngine {
 
         if self.failover.is_some() {
             let live = self.live.read().await;
-            let will_run_local_gguf = live.use_local_gguf
-                && self.registry.read().await.get(model_id).is_some();
+            let will_run_local_gguf =
+                live.use_local_gguf && self.registry.read().await.get(model_id).is_some();
             return if will_run_local_gguf {
                 InferenceTask::new(model_id, "").estimate_requirements()
             } else {

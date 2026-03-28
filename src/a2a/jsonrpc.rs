@@ -66,7 +66,9 @@ pub fn handle_jsonrpc_body(state: &A2aState, body: &serde_json::Value) -> serde_
                 -32700,
                 format!("Parse error: {e}"),
             ))
-            .unwrap_or_else(|_| json!({"jsonrpc":"2.0","error":{"code":-32700,"message":"parse error"}}));
+            .unwrap_or_else(
+                |_| json!({"jsonrpc":"2.0","error":{"code":-32700,"message":"parse error"}}),
+            );
         }
     };
 
@@ -242,4 +244,3 @@ mod tests {
         assert!(out.get("error").is_some());
     }
 }
-

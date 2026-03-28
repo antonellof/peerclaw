@@ -1,0 +1,2 @@
+
+(System: All tool calls have failed for multiple consecutive passes. STOP calling tools. Answer the user's question directly from your own knowledge. Do NOT make any more tool_call blocks.)

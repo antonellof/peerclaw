@@ -67,11 +67,17 @@ impl CrewSpec {
         let ids: std::collections::HashSet<_> = self.agents.iter().map(|a| a.id.as_str()).collect();
         for t in &self.tasks {
             if !ids.contains(t.agent_id.as_str()) {
-                return Err(format!("task {} references unknown agent {}", t.id, t.agent_id));
+                return Err(format!(
+                    "task {} references unknown agent {}",
+                    t.id, t.agent_id
+                ));
             }
             for c in &t.context {
                 if !self.tasks.iter().any(|x| x.id == *c) {
-                    return Err(format!("task {} references unknown context task {}", t.id, c));
+                    return Err(format!(
+                        "task {} references unknown context task {}",
+                        t.id, c
+                    ));
                 }
             }
         }

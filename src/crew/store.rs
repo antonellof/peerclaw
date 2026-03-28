@@ -52,7 +52,9 @@ impl CrewRunStore {
             logs: Some(vec!["[crew] queued".to_string()]),
         };
         self.runs.write().insert(id.clone(), rec);
-        self.cancels.write().insert(id.clone(), Arc::new(AtomicBool::new(false)));
+        self.cancels
+            .write()
+            .insert(id.clone(), Arc::new(AtomicBool::new(false)));
         id
     }
 

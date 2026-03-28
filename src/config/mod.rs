@@ -53,6 +53,17 @@ pub struct Config {
     /// Multi-agent orchestration (crew / flow workers).
     #[serde(default)]
     pub orchestration: OrchestrationConfig,
+
+    /// Editable LLM prompt fragments (`prompts/*.txt` overlays).
+    #[serde(default)]
+    pub prompts: PromptsConfig,
+}
+
+/// Optional directory of `*.txt` files that override built-in prompt fragments at startup.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PromptsConfig {
+    /// Same-named `.txt` as embedded stems (e.g. `agentic_system_intro.txt`).
+    pub directory: Option<PathBuf>,
 }
 
 /// Crew task market worker and related flags.
@@ -111,6 +122,13 @@ impl Config {
 
         if let Ok(val) = std::env::var("PEERCLAWD_BOOTSTRAP") {
             self.p2p.bootstrap_peers = val.split(',').map(String::from).collect();
+        }
+
+        if let Ok(val) = std::env::var("PEERCLAW_PROMPTS_DIR") {
+            let p = PathBuf::from(val.trim());
+            if !p.as_os_str().is_empty() {
+                self.prompts.directory = Some(p);
+            }
         }
     }
 }

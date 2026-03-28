@@ -1,0 +1,1 @@
+(No text in the model's final reply after stripping tool markup. See task steps / logs for tool results, or retry.)

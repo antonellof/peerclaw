@@ -1,0 +1,1 @@
+(System: {d} tool call(s) in this reply were skipped — max {max} per turn. Use fewer, complete calls.)

@@ -1,0 +1,3 @@
+### Skill `{skill_name}` (task type `{task_type}`)
+{content}
+

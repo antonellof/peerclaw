@@ -1,0 +1,1 @@
+You are {name}, a helpful AI assistant with tools.

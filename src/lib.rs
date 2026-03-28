@@ -22,6 +22,7 @@ pub mod messaging;
 pub mod models_hf;
 pub mod node;
 pub mod p2p;
+pub mod prompts;
 pub mod proxy;
 pub mod routines;
 pub mod runtime;

@@ -150,6 +150,8 @@ pub struct AgentRuntime {
     pub vector_store: Option<Arc<VectorStore>>,
     /// When set (e.g. `peerclaw serve` with web), tasks use the shared unified tool+MCP loop.
     pub inference_sink: Option<Arc<dyn AgenticInferenceSink>>,
+    /// Shared prompt fragments (same as node `Runtime`).
+    pub prompts: Arc<crate::prompts::PromptBundle>,
 }
 
 impl AgentRuntime {
@@ -161,6 +163,7 @@ impl AgentRuntime {
         budget: BudgetTracker,
         peer_id: String,
         node_tool_tx: Option<NodeToolTx>,
+        prompts: Arc<crate::prompts::PromptBundle>,
         inference_sink: Option<Arc<dyn AgenticInferenceSink>>,
     ) -> Self {
         let tool_context = ToolContext {
@@ -186,6 +189,7 @@ impl AgentRuntime {
             session_store: None,
             vector_store: None,
             inference_sink,
+            prompts,
         }
     }
 
@@ -208,6 +212,7 @@ impl AgentRuntime {
         tools: Arc<ToolRegistry>,
         peer_id: String,
         node_tool_tx: Option<NodeToolTx>,
+        prompts: Arc<crate::prompts::PromptBundle>,
         inference_sink: Option<Arc<dyn AgenticInferenceSink>>,
     ) -> Self {
         let config = AgentConfig::from_spec(spec);
@@ -224,6 +229,7 @@ impl AgentRuntime {
             budget,
             peer_id,
             node_tool_tx,
+            prompts,
             inference_sink,
         )
     }
@@ -611,7 +617,12 @@ impl AgentRuntime {
             const MAX_HISTORY_TURNS: usize = 40;
             if let Ok(turns) = store.load_session(sid, MAX_HISTORY_TURNS) {
                 if !turns.is_empty() {
-                    history.push_str("### Prior conversation\n");
+                    history.push_str(
+                        self.prompts
+                            .agent_runtime_prior_conversation_header
+                            .trim_end_matches('\n'),
+                    );
+                    history.push('\n');
                     for turn in &turns {
                         let label = match turn.role.as_str() {
                             "user" => "User",
@@ -635,15 +646,11 @@ impl AgentRuntime {
         let system_block = if spec_system.is_empty() {
             String::new()
         } else {
-            format!("### Agent instructions\n{spec_system}\n\n")
+            self.prompts.agent_runtime_instructions_block(spec_system)
         };
 
-        let body = format!(
-            "{}{}{}### Task\n{}\n\n\
-             Use tools only when needed. If a tool fails, answer from your knowledge.\n\
-             Give a complete, useful answer.\n",
-            system_block, extras.skill_block, history, user_input
-        );
+        let body = format!("{}{}{}", system_block, extras.skill_block, history)
+            + &self.prompts.agent_runtime_task_body(user_input);
 
         let mcp = if extras.use_mcp {
             extras.mcp.clone()
@@ -664,6 +671,7 @@ impl AgentRuntime {
 
         match run_unified_agentic_loop(
             sink,
+            self.prompts.as_ref(),
             Some(self.tools.clone()),
             mcp,
             include_mcp,
@@ -730,17 +738,22 @@ impl AgentRuntime {
         let mut prompt = self.config.system_prompt.clone();
 
         if prompt.is_empty() {
-            prompt = format!(
-                "You are {}, a helpful AI assistant with tools.\n",
-                self.config.name
-            );
+            prompt = self.prompts.agent_legacy_default_name(&self.config.name);
+            if !prompt.ends_with('\n') {
+                prompt.push('\n');
+            }
         }
 
         // Inject recalled memories from vector store (cross-session learning)
         if let Some(store) = &self.vector_store {
             let memories = self.recall_memories(store, user_input).await;
             if !memories.is_empty() {
-                prompt.push_str("\nRecalled memories:\n");
+                prompt.push_str(
+                    self.prompts
+                        .agent_recalled_memories_header
+                        .trim_end_matches('\n'),
+                );
+                prompt.push('\n');
                 for (i, memory) in memories.iter().enumerate() {
                     prompt.push_str(&format!("{}. {}\n", i + 1, memory));
                 }
@@ -759,21 +772,10 @@ impl AgentRuntime {
         };
 
         if !available.is_empty() {
-            prompt.push_str(
-                "\nTo use a tool, write EXACTLY this format:\n\
-                 <tool_call>\n\
-                 name: tool_name\n\
-                 args: {\"param\": \"value\"}\n\
-                 </tool_call>\n\n\
-                 Example:\n\
-                 <tool_call>\n\
-                 name: web_search\n\
-                 args: {\"query\": \"latest AI news 2026\"}\n\
-                 </tool_call>\n\n\
-                 Do NOT describe what you will do. Just call the tool directly.\n\
-                 After tool results, continue reasoning. When done, write your answer without tool_call blocks.\n\n\
-                 Available tools:\n",
-            );
+            prompt.push_str(&self.prompts.agent_legacy_tool_block);
+            if !self.prompts.agent_legacy_tool_block.ends_with('\n') {
+                prompt.push('\n');
+            }
             for tool in &available {
                 let desc: String = tool.description.chars().take(80).collect();
                 prompt.push_str(&format!("- {}: {}\n", tool.name, desc));

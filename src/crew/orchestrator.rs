@@ -65,18 +65,12 @@ fn make_runtime_for_agent(
     tools: Arc<ToolRegistry>,
     peer_id: String,
     node_tool_tx: Option<NodeToolTx>,
+    prompts: Arc<crate::prompts::PromptBundle>,
     inference_sink: Option<Arc<dyn crate::agent::AgenticInferenceSink>>,
 ) -> AgentRuntime {
-    let system_prompt = format!(
-        "You are {}.\nPrimary goal: {}\nContext: {}\nExecute the user's task thoroughly. If tools are available, use them when helpful.",
-        def.role, def.goal, def.backstory
-    );
+    let system_prompt = prompts.crew_agent_system(&def.role, &def.goal, &def.backstory);
     let allowed = allowed_tools_for_agent(def, tools.as_ref());
-    let max_iter = if def.max_iter == 0 {
-        20
-    } else {
-        def.max_iter
-    };
+    let max_iter = if def.max_iter == 0 { 20 } else { def.max_iter };
     let config = AgentConfig {
         id: format!("crew_{}", def.id),
         name: def.id.clone(),
@@ -95,6 +89,7 @@ fn make_runtime_for_agent(
         budget,
         peer_id,
         node_tool_tx,
+        prompts,
         inference_sink,
     );
     // Respect per-agent iteration cap inside unified loop via config if needed — runtime uses AGENTIC_MAX_ITERS global; we clip via early description only for now.
@@ -111,6 +106,7 @@ pub async fn run_crew(
     peer_id: String,
     node_tool_tx: Option<NodeToolTx>,
     inference_sink: Option<Arc<dyn crate::agent::AgenticInferenceSink>>,
+    prompts: Arc<crate::prompts::PromptBundle>,
     cancel: Option<&AtomicBool>,
     extras: AgentTaskExtras,
 ) -> Result<CrewOutput, String> {
@@ -122,7 +118,9 @@ pub async fn run_crew(
             .manager_agent_id
             .clone()
             .or_else(|| spec.agents.first().map(|a| a.id.clone()))
-            .ok_or_else(|| "hierarchical crew needs manager_agent_id or at least one agent".to_string())?;
+            .ok_or_else(|| {
+                "hierarchical crew needs manager_agent_id or at least one agent".to_string()
+            })?;
         let mgr = spec
             .agents
             .iter()
@@ -135,6 +133,7 @@ pub async fn run_crew(
             tools.clone(),
             peer_id.clone(),
             node_tool_tx.clone(),
+            prompts.clone(),
             inference_sink.clone(),
         );
         let plan_prompt = format!(
@@ -181,6 +180,7 @@ pub async fn run_crew(
             tools.clone(),
             peer_id.clone(),
             node_tool_tx.clone(),
+            prompts.clone(),
             inference_sink.clone(),
         );
         let res = rt

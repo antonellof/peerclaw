@@ -1,0 +1,1 @@
+You have MCP tools only. Tool names MUST use `server:tool_name` format as listed below.

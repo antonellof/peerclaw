@@ -3,12 +3,12 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+use crate::a2a::A2aState;
 use crate::bootstrap;
 use crate::config::Config;
 use crate::db::Database;
 use crate::executor::ResourceMonitor;
 use crate::identity::NodeIdentity;
-use crate::a2a::A2aState;
 use crate::p2p::Network;
 use crate::swarm::{SwarmManager, SwarmManagerConfig};
 use crate::web;
@@ -117,11 +117,7 @@ impl Node {
         let _network_shutdown = self.shutdown_tx.clone();
         let mut network = std::mem::replace(
             &mut self.network,
-            Network::new(
-                &self.identity,
-                self.config.p2p.clone(),
-                self.a2a.clone(),
-            )?,
+            Network::new(&self.identity, self.config.p2p.clone(), self.a2a.clone())?,
         );
 
         let _network_handle = tokio::spawn(async move {

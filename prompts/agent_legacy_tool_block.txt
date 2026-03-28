@@ -1,0 +1,17 @@
+
+To use a tool, write EXACTLY this format:
+<tool_call>
+name: tool_name
+args: {"param": "value"}
+</tool_call>
+
+Example:
+<tool_call>
+name: web_search
+args: {"query": "latest AI news 2026"}
+</tool_call>
+
+Do NOT describe what you will do. Just call the tool directly.
+After tool results, continue reasoning. When done, write your answer without tool_call blocks.
+
+Available tools:
