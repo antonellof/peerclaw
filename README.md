@@ -88,7 +88,14 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **Tool execution** — Builtin tools plus P2P marketplace hooks when running under `peerclaw serve`
 - **TOML agent specs** — Define agents with model, tools, budget, and capabilities
 - **Dashboard tasks** — With `--agent`, tasks go to the spec-driven runtime first; otherwise a unified tool+MCP loop runs when inference and the tool registry are available
+- **Context pruning** — Heuristic compaction in the legacy message path and string-based pruning in the unified loop when prompts exceed a budget (LLM-quality “summary compaction” is a v0.5 theme below)
 - **Personal assistant** — Research, code, automate, monitor, summarize, analyze
+
+### Prompt customization (no recompile)
+- **Embedded defaults** — Copy lives in the repo `prompts/*.txt` and is baked into the binary
+- **Runtime overrides** — Drop same-named `*.txt` files into an overlay directory; **restart** the node after edits
+- **Resolution order** — `[prompts].directory` in `config.toml` (also populated from `PEERCLAW_PROMPTS_DIR` on load) → `PEERCLAW_PROMPTS_DIR` if still needed → `~/.peerclaw/prompts` when present
+- **Coverage** — Agentic system prefix, unified-loop nudges/errors, web chat/task bodies, crew templates, legacy agent tool block, and related strings
 
 ### Multi-agent orchestration
 - **Crews** — Define agents, tasks, and a **sequential** or **hierarchical** process; kick off runs over HTTP with optional **distributed** execution across peers (`pod_id`, `campaign_id`)
@@ -126,10 +133,10 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **AI Chat interface** — Streaming assistant with workspace preferences (model, temperature, max tokens, distributed inference)
 
 ### Security
-- **WASM sandbox** — Wasmtime for isolated tool execution
+- **WASM sandbox** — Same stack as *Tools & MCP* (Wasmtime + explicit capability grants)
 - **End-to-end encryption** — Noise protocol for all P2P traffic
 - **Ed25519 signatures** — Cryptographic identity verification
-- **Capability-based access** — Explicit permission grants
+- **Capability-based access** — Explicit permission grants for tools and channels
 
 ---
 
@@ -476,6 +483,42 @@ export PEERCLAW_BASE_URL=http://127.0.0.1:8080
 python examples/minimal.py   # validates a tiny crew against a running node
 ```
 
+### Prompt overrides (example)
+
+```bash
+# 1) Copy the stems you want to edit from the repo `prompts/` directory
+mkdir -p ~/.peerclaw/prompts
+cp prompts/agentic_system_intro.txt ~/.peerclaw/prompts/
+
+# 2) Edit ~/.peerclaw/prompts/agentic_system_intro.txt, then restart the node
+peerclaw serve --web 127.0.0.1:8080
+```
+
+Or point config or env at a dedicated folder:
+
+```bash
+export PEERCLAW_PROMPTS_DIR=/etc/peerclaw/prompts
+peerclaw serve --web 127.0.0.1:8080
+```
+
+### Crew validate / kickoff (`curl`)
+
+`POST /api/crews/validate` expects a **raw** [`CrewSpec`](src/crew/spec.rs) JSON body. `POST /api/crews/kickoff` wraps the spec plus `inputs`, `distributed`, optional `pod_id` / `campaign_id`.
+
+```bash
+# Validate (from repo root)
+curl -sS -X POST http://127.0.0.1:8080/api/crews/validate \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/crews/minimal.json
+
+# Kick off a run (requires `peerclaw serve` with web + inference; edit `llm` in JSON to match an available model)
+curl -sS -X POST http://127.0.0.1:8080/api/crews/kickoff \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/crews/kickoff-minimal.json
+```
+
+See also `sdk/python/examples/minimal.py` for the same shape via the SDK.
+
 ---
 
 ## Configuration
@@ -486,6 +529,7 @@ python examples/minimal.py   # validates a tiny crew against a running node
 |----------|-------------|---------|
 | `PEERCLAW_HOME` | Base directory for data | `~/.peerclaw` |
 | `PEERCLAW_LOG` | Log level (trace, debug, info, warn, error) | `info` |
+| `PEERCLAW_PROMPTS_DIR` | Directory of `*.txt` files overriding built-in prompt fragments | *(unset)* |
 
 ### Config File
 
@@ -513,6 +557,10 @@ persistence_path = "~/.peerclaw/vector"
 leak_detection = true
 injection_defense = true
 policy_enforcement = true
+
+# Optional: directory of prompt fragment overrides (same stems as repo `prompts/*.txt`)
+# [prompts]
+# directory = "~/peerclaw-prompts"
 ```
 
 ---
@@ -566,14 +614,41 @@ policy_enforcement = true
 - [x] **A2A-shaped HTTP** — Agent Card, JSON-RPC `/a2a`, peer card cache
 - [x] **Python SDK** — `peerclaw-sdk` in `sdk/python` (validate, kickoff, runs)
 - [x] **Join network** landing in the web dashboard
+- [x] **Externalized prompts** — `prompts/*.txt` defaults with runtime overlay (`[prompts].directory`, `PEERCLAW_PROMPTS_DIR`, `~/.peerclaw/prompts`)
 
-### Next (v0.5)
-- [ ] Distributed inference (pipeline parallelism)
-- [x] Multi-agent collaboration (crews, flows, P2P crew market — **in progress**: hardening, docs, CI; see repo plan)
-- [ ] Durable agent runs (checkpoints, resume after restart) and richer observability
-- [ ] Cross-peer tool execution (discovery, quotes, escrow) and marketplace reputation
-- [ ] Human-in-the-loop approvals for high-risk tools
-- [ ] Context compaction for long conversations
+### v0.5 — Product themes (release checklist)
+
+Ship when the items below meet acceptance criteria in the engineering plan.
+
+- [ ] **Distributed inference** — Pipeline / tensor-parallel style execution across peers (beyond today’s single-request remote provider path)
+- [ ] **Multi-agent hardening** — Production QA for crews, flows, and the P2P crew market (deterministic failure modes, load tests, docs, CI fixtures)
+- [ ] **Durable agent runs** — Checkpoint task + conversation state; resume after process restart; export for audit
+- [ ] **Observability** — Structured traces/metrics for agent passes, tool latency, P2P job phases, and crew/flow runs (dashboard + optional OTLP)
+- [ ] **Cross-peer tool execution** — Discover remote tools, quote execution, escrow/settlement hooks, and basic **reputation** signals on the marketplace
+- [ ] **Human-in-the-loop (HITL)** — Policy-gated pause/approve for high-risk tools or spend thresholds (web + API)
+- [ ] **Context compaction (productized)** — Unify strategies across chat, tasks, and `--agent`: optional LLM summarization, token-budget UX, and tests (heuristic pruning exists today; see *Agent Runtime*)
+
+### v0.5 — Engineering plan (how we build it)
+
+**Phase 0 — Baseline & contracts (1–2 weeks)**  
+Freeze public HTTP/JSON shapes for crews, flows, tasks, and A2A where stable; add golden JSON under `examples/` + contract tests; document error codes and idempotency for kickoff/stop.
+
+**Phase 1 — Observability & durability foundations**  
+Introduce a small **run record** schema (crew/flow/agent task): run id, spec hash, inputs redaction, per-pass events, tool records, cancellation reason. Persist to `redb` (or extend existing stores); expose `GET` APIs and console panels. Checkpoints build on the same event log.
+
+**Phase 2 — Distributed inference**  
+Specify a **fragment protocol** (which tensors/layers move, timeouts, fallback to local). Start with two-peer pipeline behind a feature flag; integrate with `ProviderTracker` and economy for metering; add `peerclaw doctor` checks.
+
+**Phase 3 — Cross-peer tools & reputation**  
+Extend job or a sibling protocol for **tool offers** (capability manifest, quoted price, execution attestation). Reputation: rolling success rate + stake/escrow integration from the wallet; keep v0.5 **off-chain** with signed receipts.
+
+**Phase 4 — HITL**  
+Define risk classes in agent/tool config; when triggered, block tool execution until `POST …/approve` (or timeout/decline). Web UI: pending approvals queue; audit log ties to Phase 1.
+
+**Phase 5 — Compaction UX**  
+Wire optional **LLM summary** compaction (code in `agent/compaction.rs` has hooks) into the unified loop and web chat/tasks; user-visible “context used” meter; property tests that long sessions stay under budget.
+
+**Dependencies:** Phases 1 → 4 → 5 stack cleanly; Phase 2 can parallelize after Phase 0 if networking contracts are stable.
 
 ### Future (v1.0)
 - [ ] On-chain settlement
@@ -583,4 +658,4 @@ policy_enforcement = true
 
 ---
 
-*Crate v0.3.0 — March 2026 (feature set above includes v0.4 orchestration items in-tree)*
+*Cargo package version: **0.3.0**. README “v0.4” labels the in-tree feature wave (orchestration, A2A, prompts); crates.io may lag the binary feature set until the next semver publish.*

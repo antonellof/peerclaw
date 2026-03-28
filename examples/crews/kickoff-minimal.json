@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "name": "minimal",
+    "agents": [
+      {
+        "id": "a1",
+        "role": "Assistant",
+        "goal": "Answer briefly and correctly.",
+        "backstory": "Helpful demo agent.",
+        "llm": "llama-3.2-3b",
+        "tools": []
+      }
+    ],
+    "tasks": [
+      {
+        "id": "t1",
+        "description": "Reply with one short greeting including the word hello.",
+        "expected_output": "One sentence.",
+        "agent_id": "a1",
+        "context": []
+      }
+    ],
+    "process": "sequential"
+  },
+  "inputs": {},
+  "distributed": false
+}
