@@ -519,6 +519,16 @@ curl -sS -X POST http://127.0.0.1:8080/api/crews/kickoff \
 
 See also `sdk/python/examples/minimal.py` for the same shape via the SDK.
 
+### Flow validate (`curl`)
+
+`POST /api/flows/validate` expects a raw [`FlowSpec`](src/flow/mod.rs) JSON body (nodes + edges; optional `crew_spec` on nodes).
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/api/flows/validate \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/flows/minimal.json
+```
+
 ---
 
 ## Configuration
@@ -649,6 +659,8 @@ Define risk classes in agent/tool config; when triggered, block tool execution u
 Wire optional **LLM summary** compaction (code in `agent/compaction.rs` has hooks) into the unified loop and web chat/tasks; user-visible “context used” meter; property tests that long sessions stay under budget.
 
 **Dependencies:** Phases 1 → 4 → 5 stack cleanly; Phase 2 can parallelize after Phase 0 if networking contracts are stable.
+
+**Full v0.5 breakdown** (work package IDs, acceptance criteria, code map, risks, suggested GitHub issues): [docs/v0.5-plan.md](docs/v0.5-plan.md).
 
 ### Future (v1.0)
 - [ ] On-chain settlement

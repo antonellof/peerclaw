@@ -1,0 +1,16 @@
+{
+  "name": "minimal-linear",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "llm",
+      "prompt": "Reply with exactly: step-one"
+    },
+    {
+      "id": "n2",
+      "kind": "llm",
+      "prompt": "Reply with exactly: step-two. You may see prior step text in context."
+    }
+  ],
+  "edges": [{ "from": "n1", "to": "n2" }]
+}
