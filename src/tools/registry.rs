@@ -357,6 +357,11 @@ impl ToolRegistry {
         self.stats.read().await.clone()
     }
 
+    /// Builtin tool names (sync snapshot for crew / policy).
+    pub fn builtin_names(&self) -> Vec<String> {
+        self.builtin_tools.keys().cloned().collect()
+    }
+
     /// Count total available tools.
     pub async fn count(&self) -> usize {
         let wasm_count = self.wasm_tools.read().await.len();

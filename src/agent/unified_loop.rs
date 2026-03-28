@@ -154,6 +154,29 @@ async fn agentic_action_tools_available(
     !infos.is_empty()
 }
 
+/// Print tool invocation and raw result to stderr when `peerclaw serve --verbose-agentic` is on.
+fn eprint_verbose_tool_io(tool: &str, args: &serde_json::Value, ok: bool, result: &str) {
+    const MAX_ARGS: usize = 12_000;
+    const MAX_RESULT: usize = 200_000;
+    eprintln!("\n======== PEERCLAW TOOL_CALL tool={tool} ok={ok} ========");
+    let args_s = serde_json::to_string_pretty(args).unwrap_or_else(|_| args.to_string());
+    let (a_out, a_note) = clip_utf8_prefix(&args_s, MAX_ARGS);
+    eprintln!("args:\n{a_out}{a_note}");
+    let (r_out, r_note) = clip_utf8_prefix(result, MAX_RESULT);
+    eprintln!("result:\n{r_out}{r_note}");
+    eprintln!("======== END TOOL_CALL ========\n");
+}
+
+fn clip_utf8_prefix(s: &str, max_chars: usize) -> (String, String) {
+    let n = s.chars().count();
+    if n <= max_chars {
+        (s.to_string(), String::new())
+    } else {
+        let head: String = s.chars().take(max_chars).collect();
+        (head, format!("\n… [stderr truncated, {n} chars total]\n"))
+    }
+}
+
 /// Model promised work or research but did not deliver structured content (no tool calls in this turn).
 fn response_looks_like_intent_without_delivery(response: &str) -> bool {
     let t = response.trim();
@@ -194,6 +217,7 @@ pub async fn run_unified_agentic_loop(
     node_tool_tx: Option<NodeToolTx>,
     progress: Option<Arc<dyn AgenticProgressSink>>,
     cancel: Option<&AtomicBool>,
+    verbose_tool_io: bool,
 ) -> Result<(AgenticTurnOutcome, Vec<String>, Vec<ToolCallRecord>, u32), String> {
     let max_tokens = max_tokens.min(16384);
     let prefix = build_agentic_system_prefix(
@@ -529,6 +553,9 @@ pub async fn run_unified_agentic_loop(
                         p.record_tool_step(line, total_tokens).await;
                     }
                     conversation.push_str(&format!("Tool: {}\nResult: {}\n\n", call.name, msg));
+                    if verbose_tool_io {
+                        eprint_verbose_tool_io(&call.name, &call.args, false, &msg);
+                    }
                     continue;
                 }
 
@@ -570,6 +597,10 @@ pub async fn run_unified_agentic_loop(
                     }
                 }
             };
+
+            if verbose_tool_io {
+                eprint_verbose_tool_io(&call.name, &call.args, success, &summary);
+            }
 
             let duration_ms = start.elapsed().as_millis() as u64;
             tool_records.push(ToolCallRecord {
@@ -684,6 +715,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
         .await
         .expect("loop");

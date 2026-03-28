@@ -209,6 +209,37 @@ pub struct WebState {
     pub wallet: Option<Arc<crate::wallet::Wallet>>,
     /// Vector store for semantic search / memory.
     pub vector_store: Option<Arc<crate::vector::VectorStore>>,
+    /// When true (`peerclaw serve -V`), agentic tool calls log args + results to stderr (see unified loop).
+    pub verbose_agentic_io: bool,
+    /// A2A task store + discovered peer agent cards (shared with P2P).
+    pub a2a: Arc<crate::a2a::A2aState>,
+    /// Public base URL for this node's HTTP surface (e.g. `http://127.0.0.1:8080`) for Agent Card.
+    pub a2a_public_base_url: String,
+    /// Crew run history (multi-agent orchestration).
+    pub crew_store: Arc<crate::crew::CrewRunStore>,
+    /// Queue crew runs for the `serve` loop (same thread as agent tasks — keeps `WebState` Send).
+    pub crew_kickoff_tx: Option<mpsc::Sender<CrewKickoffJob>>,
+    pub flow_store: Arc<crate::flow::FlowRunStore>,
+    pub flow_kickoff_tx: Option<mpsc::Sender<FlowKickoffJob>>,
+}
+
+/// Enqueued by `POST /api/crews/kickoff`, executed on the node event loop.
+#[derive(Debug)]
+pub struct CrewKickoffJob {
+    pub run_id: String,
+    pub spec: crate::crew::CrewSpec,
+    pub inputs: serde_json::Value,
+    pub distributed: bool,
+    pub pod_id: Option<String>,
+    pub campaign_id: Option<String>,
+}
+
+/// Enqueued by `POST /api/flows/kickoff`, executed on the node event loop.
+#[derive(Debug)]
+pub struct FlowKickoffJob {
+    pub run_id: String,
+    pub spec: crate::flow::FlowSpec,
+    pub inputs: serde_json::Value,
 }
 
 fn new_ws_control_plane() -> broadcast::Sender<serde_json::Value> {
@@ -219,6 +250,14 @@ fn new_ws_control_plane() -> broadcast::Sender<serde_json::Value> {
 /// Notify WebSocket subscribers that task rows may have changed.
 pub fn broadcast_tasks_changed(tx: &broadcast::Sender<serde_json::Value>) {
     let _ = tx.send(serde_json::json!({ "type": "tasks_changed" }));
+}
+
+pub fn broadcast_crews_changed(tx: &broadcast::Sender<serde_json::Value>) {
+    let _ = tx.send(serde_json::json!({ "type": "crews_changed" }));
+}
+
+pub fn broadcast_flows_changed(tx: &broadcast::Sender<serde_json::Value>) {
+    let _ = tx.send(serde_json::json!({ "type": "flows_changed" }));
 }
 
 /// Push agentic loop progress into a web [`WebTask`] so the UI can poll live steps.
@@ -307,10 +346,25 @@ fn api_tasks_router() -> Router<Arc<WebState>> {
         .route("/tasks", get(api_list_tasks))
 }
 
+fn api_crews_router() -> Router<Arc<WebState>> {
+    Router::new()
+        .route("/crews/validate", post(api_crew_validate))
+        .route("/crews/kickoff", post(api_crew_kickoff))
+        .route("/crews/runs/:id/stop", post(api_crew_stop))
+        .route("/crews/runs/:id/stream", get(api_crew_stream))
+        .route("/crews/runs/:id", get(api_crew_run_get))
+        .route("/crews/runs", get(api_crew_runs_list))
+        .route("/flows/validate", post(api_flow_validate))
+        .route("/flows/kickoff", post(api_flow_kickoff))
+        .route("/flows/runs/:id", get(api_flow_run_get))
+        .route("/flows/runs", get(api_flow_runs_list))
+}
+
 /// REST handlers under `/api/...` (nested so static `ServeDir` fallback never handles POST/OPTIONS for these paths).
 fn api_router() -> Router<Arc<WebState>> {
     Router::new()
         .merge(api_tasks_router())
+        .merge(api_crews_router())
         .route("/status", get(api_status))
         .route("/onboarding", get(api_onboarding))
         .route("/peers/dial", post(api_peers_dial))
@@ -367,6 +421,7 @@ fn api_router() -> Router<Arc<WebState>> {
         // Tool execution
         .route("/tools/execute", post(api_tool_execute))
         .route("/tools/:name", get(api_tool_detail))
+        .route("/a2a/peers", get(api_a2a_peers))
 }
 
 /// Create the web router.
@@ -374,6 +429,8 @@ pub fn create_router(state: Arc<WebState>) -> Router {
     let spa = spa_dist_dir();
     let mut router = Router::new()
         .nest("/api", api_router())
+        .route("/.well-known/agent-card.json", get(api_agent_card_well_known))
+        .route("/a2a", post(api_a2a_jsonrpc))
         .route("/ws", get(ws_handler))
         // OpenAI-compatible API routes
         .route("/v1/chat/completions", post(openai::chat_completions))
@@ -432,6 +489,13 @@ pub fn create_web_state(
         channel_registry: None,
         wallet: None,
         vector_store: None,
+        verbose_agentic_io: false,
+        a2a: crate::a2a::A2aState::new(),
+        a2a_public_base_url: "http://127.0.0.1:8080".to_string(),
+        crew_store: crate::crew::CrewRunStore::new(),
+        crew_kickoff_tx: None,
+        flow_store: crate::flow::FlowRunStore::new(),
+        flow_kickoff_tx: None,
     })
 }
 
@@ -473,6 +537,13 @@ pub fn create_web_state_with_channels(
         channel_registry: None,
         wallet: None,
         vector_store: None,
+        verbose_agentic_io: false,
+        a2a: crate::a2a::A2aState::new(),
+        a2a_public_base_url: "http://127.0.0.1:8080".to_string(),
+        crew_store: crate::crew::CrewRunStore::new(),
+        crew_kickoff_tx: None,
+        flow_store: crate::flow::FlowRunStore::new(),
+        flow_kickoff_tx: None,
     })
 }
 
@@ -513,6 +584,13 @@ pub fn create_web_state_with_inference(
         channel_registry: None,
         wallet: None,
         vector_store: None,
+        verbose_agentic_io: false,
+        a2a: crate::a2a::A2aState::new(),
+        a2a_public_base_url: "http://127.0.0.1:8080".to_string(),
+        crew_store: crate::crew::CrewRunStore::new(),
+        crew_kickoff_tx: None,
+        flow_store: crate::flow::FlowRunStore::new(),
+        flow_kickoff_tx: None,
     })
 }
 
@@ -553,6 +631,13 @@ pub fn create_web_state_with_swarm(
         channel_registry: None,
         wallet: None,
         vector_store: None,
+        verbose_agentic_io: false,
+        a2a: crate::a2a::A2aState::new(),
+        a2a_public_base_url: "http://127.0.0.1:8080".to_string(),
+        crew_store: crate::crew::CrewRunStore::new(),
+        crew_kickoff_tx: None,
+        flow_store: crate::flow::FlowRunStore::new(),
+        flow_kickoff_tx: None,
     })
 }
 
@@ -608,6 +693,241 @@ struct StatusResponse {
     active_inference: u32,
     active_web: u32,
     active_wasm: u32,
+}
+
+async fn api_agent_card_well_known(
+    State(state): State<Arc<WebState>>,
+) -> Json<crate::a2a::AgentCard> {
+    let models = if let Some(ref inf) = state.inference {
+        inf.available_models()
+            .await
+            .into_iter()
+            .map(|m| m.name)
+            .collect()
+    } else {
+        vec![]
+    };
+    let pid = state.local_peer_id.to_string();
+    let short: String = pid.chars().take(8).collect();
+    let base = state.a2a_public_base_url.trim().trim_end_matches('/').to_string();
+    let base = if base.is_empty() {
+        "http://127.0.0.1:8080".to_string()
+    } else {
+        base
+    };
+    Json(crate::a2a::AgentCard::peerclaw_default(
+        format!("peerclaw-{short}"),
+        "PeerClaw P2P agent node",
+        base,
+        pid,
+        models,
+    ))
+}
+
+async fn api_a2a_jsonrpc(
+    State(state): State<Arc<WebState>>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    Json(crate::a2a::jsonrpc::handle_jsonrpc_body(state.a2a.as_ref(), &body))
+}
+
+async fn api_a2a_peers(State(state): State<Arc<WebState>>) -> Json<serde_json::Value> {
+    let peers: Vec<serde_json::Value> = state
+        .a2a
+        .list_peer_cards()
+        .into_iter()
+        .map(|(pid, c)| serde_json::json!({ "peer_id": pid, "card": c }))
+        .collect();
+    Json(serde_json::json!({ "peers": peers }))
+}
+
+#[derive(Deserialize)]
+struct CrewKickoffBody {
+    spec: crate::crew::CrewSpec,
+    #[serde(default)]
+    inputs: serde_json::Value,
+    #[serde(default)]
+    distributed: bool,
+    #[serde(default)]
+    pod_id: Option<String>,
+    #[serde(default)]
+    campaign_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CrewKickoffResponse {
+    success: bool,
+    run_id: Option<String>,
+    error: Option<String>,
+}
+
+async fn api_flow_validate(Json(spec): Json<crate::flow::FlowSpec>) -> Json<serde_json::Value> {
+    match spec.validate().and_then(|_| spec.execution_order().map(|_| ())) {
+        Ok(()) => Json(serde_json::json!({ "ok": true })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e })),
+    }
+}
+
+#[derive(Deserialize)]
+struct FlowKickoffBody {
+    spec: crate::flow::FlowSpec,
+    #[serde(default)]
+    inputs: serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct FlowKickoffResponse {
+    success: bool,
+    run_id: Option<String>,
+    error: Option<String>,
+}
+
+async fn api_flow_kickoff(
+    State(state): State<Arc<WebState>>,
+    Json(body): Json<FlowKickoffBody>,
+) -> Json<FlowKickoffResponse> {
+    let Some(tx) = state.flow_kickoff_tx.clone() else {
+        return Json(FlowKickoffResponse {
+            success: false,
+            run_id: None,
+            error: Some("flow kickoff not wired on this node".to_string()),
+        });
+    };
+    if let Err(e) = body
+        .spec
+        .validate()
+        .and_then(|_| body.spec.execution_order().map(|_| ()))
+    {
+        return Json(FlowKickoffResponse {
+            success: false,
+            run_id: None,
+            error: Some(e),
+        });
+    }
+    let run_id = uuid::Uuid::new_v4().to_string();
+    state.flow_store.insert_pending(&run_id, &body.spec);
+    broadcast_flows_changed(&state.ws_control_tx);
+    let job = FlowKickoffJob {
+        run_id: run_id.clone(),
+        spec: body.spec,
+        inputs: body.inputs,
+    };
+    if tx.try_send(job).is_err() {
+        return Json(FlowKickoffResponse {
+            success: false,
+            run_id: None,
+            error: Some("flow queue full".to_string()),
+        });
+    }
+    Json(FlowKickoffResponse {
+        success: true,
+        run_id: Some(run_id),
+        error: None,
+    })
+}
+
+async fn api_flow_run_get(
+    State(state): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> Result<Json<crate::flow::FlowRunRecord>, StatusCode> {
+    state
+        .flow_store
+        .get(&id)
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn api_flow_runs_list(
+    State(state): State<Arc<WebState>>,
+) -> Json<Vec<crate::flow::FlowRunRecord>> {
+    Json(state.flow_store.list())
+}
+
+async fn api_crew_validate(
+    Json(spec): Json<crate::crew::CrewSpec>,
+) -> Json<serde_json::Value> {
+    match spec.validate() {
+        Ok(()) => Json(serde_json::json!({ "ok": true })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e })),
+    }
+}
+
+async fn api_crew_kickoff(
+    State(state): State<Arc<WebState>>,
+    Json(body): Json<CrewKickoffBody>,
+) -> Json<CrewKickoffResponse> {
+    let Some(tx) = state.crew_kickoff_tx.clone() else {
+        return Json(CrewKickoffResponse {
+            success: false,
+            run_id: None,
+            error: Some("crew kickoff not wired on this node".to_string()),
+        });
+    };
+    if let Err(e) = body.spec.validate() {
+        return Json(CrewKickoffResponse {
+            success: false,
+            run_id: None,
+            error: Some(e),
+        });
+    }
+    let run_id = uuid::Uuid::new_v4().to_string();
+    state.crew_store.insert_pending(&run_id, &body.spec);
+    broadcast_crews_changed(&state.ws_control_tx);
+    let job = CrewKickoffJob {
+        run_id: run_id.clone(),
+        spec: body.spec,
+        inputs: body.inputs,
+        distributed: body.distributed,
+        pod_id: body.pod_id,
+        campaign_id: body.campaign_id,
+    };
+    if tx.try_send(job).is_err() {
+        return Json(CrewKickoffResponse {
+            success: false,
+            run_id: None,
+            error: Some("crew queue full".to_string()),
+        });
+    }
+    Json(CrewKickoffResponse {
+        success: true,
+        run_id: Some(run_id),
+        error: None,
+    })
+}
+
+async fn api_crew_run_get(
+    State(state): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> Result<Json<crate::crew::CrewRunRecord>, StatusCode> {
+    state
+        .crew_store
+        .get(&id)
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn api_crew_runs_list(State(state): State<Arc<WebState>>) -> Json<Vec<crate::crew::CrewRunRecord>> {
+    Json(state.crew_store.list())
+}
+
+async fn api_crew_stop(
+    State(state): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> Json<serde_json::Value> {
+    if let Some(f) = state.crew_store.cancel_flag(&id) {
+        f.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    Json(serde_json::json!({ "ok": true }))
+}
+
+async fn api_crew_stream(
+    State(state): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>> + Send> {
+    let rec = state.crew_store.get(&id);
+    let data = serde_json::to_string(&rec).unwrap_or_else(|_| "{}".to_string());
+    let s = tokio_stream::iter(vec![Ok(Event::default().data(data))]);
+    Sse::new(s).keep_alive(KeepAlive::default())
 }
 
 async fn api_status(State(state): State<Arc<WebState>>) -> Json<StatusResponse> {
@@ -1255,6 +1575,7 @@ async fn run_unified_agentic_inference(
             state.node_tool_tx.clone(),
             progress_dyn,
             cancel_ref,
+            state.verbose_agentic_io,
         )
         .await?;
     Ok((

@@ -27,8 +27,10 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::interval;
 
+use crate::a2a::state::A2aState;
 use crate::config::P2pConfig;
 use crate::identity::NodeIdentity;
+use std::sync::Arc;
 
 /// Network controller for managing P2P connections.
 pub struct Network {
@@ -38,11 +40,17 @@ pub struct Network {
     local_peer_id: PeerId,
     connected_peers: HashSet<PeerId>,
     config: P2pConfig,
+    /// Shared A2A task/card state (HTTP + request-response).
+    a2a_state: Arc<A2aState>,
 }
 
 impl Network {
     /// Create a new network controller.
-    pub fn new(identity: &NodeIdentity, config: P2pConfig) -> anyhow::Result<Self> {
+    pub fn new(
+        identity: &NodeIdentity,
+        config: P2pConfig,
+        a2a_state: Arc<A2aState>,
+    ) -> anyhow::Result<Self> {
         let keypair = identity.to_libp2p_keypair();
         let local_peer_id = *identity.peer_id();
 
@@ -56,7 +64,12 @@ impl Network {
             local_peer_id,
             connected_peers: HashSet::new(),
             config,
+            a2a_state,
         })
+    }
+
+    pub fn a2a_state(&self) -> Arc<A2aState> {
+        self.a2a_state.clone()
     }
 
     /// Get the local peer ID.
@@ -208,6 +221,45 @@ impl Network {
                 }
             }
 
+            SwarmEvent::Behaviour(behaviour::PeerclawdBehaviourEvent::A2aRpc(ev)) => {
+                use libp2p::request_response::{Event as RrEv, Message as RrMsg};
+                match ev {
+                    RrEv::Message { peer, message } => match message {
+                        RrMsg::Request {
+                            request, channel, ..
+                        } => {
+                            let method = request
+                                .envelope
+                                .get("method")
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("?")
+                                .to_string();
+                            let resp = request.dispatch(&self.a2a_state);
+                            if self
+                                .swarm
+                                .behaviour_mut()
+                                .a2a_rpc
+                                .send_response(channel, resp)
+                                .is_err()
+                            {
+                                tracing::warn!("A2A send_response failed");
+                            }
+                            Some(NetworkEvent::A2aRpcInbound { peer, method })
+                        }
+                        RrMsg::Response { .. } => None,
+                    },
+                    RrEv::InboundFailure { peer, error, .. } => {
+                        tracing::debug!(%peer, ?error, "A2A inbound failure");
+                        None
+                    }
+                    RrEv::OutboundFailure { peer, error, .. } => {
+                        tracing::debug!(%peer, ?error, "A2A outbound failure");
+                        None
+                    }
+                    _ => None,
+                }
+            }
+
             SwarmEvent::Behaviour(behaviour::PeerclawdBehaviourEvent::Identify(event)) => {
                 if let libp2p::identify::Event::Received { peer_id, info, .. } = event {
                     tracing::debug!(
@@ -232,10 +284,10 @@ impl Network {
         }
     }
 
-    /// Advertise resources to the DHT.
+    /// Periodic tick from [`Network::run`] (standalone node path). Full manifests are gossiped from
+    /// [`Runtime::gossip_resource_manifest`](crate::runtime::Runtime::gossip_resource_manifest) when using `serve`.
     async fn advertise_resources(&mut self) {
-        // TODO: Build and publish ResourceManifest to DHT
-        tracing::debug!("Resource advertisement tick");
+        tracing::trace!(target: "peerclaw_p2p", "advertise_resources tick (use serve loop for gossip manifest)");
     }
 
     /// Subscribe to a GossipSub topic.

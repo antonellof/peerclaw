@@ -49,6 +49,18 @@ pub struct Config {
     /// MCP client settings (used by the web UI and for future agent wiring; servers run as sidecars).
     #[serde(default)]
     pub mcp: crate::mcp::McpConfig,
+
+    /// Multi-agent orchestration (crew / flow workers).
+    #[serde(default)]
+    pub orchestration: OrchestrationConfig,
+}
+
+/// Crew task market worker and related flags.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OrchestrationConfig {
+    /// When true, this node may claim `peerclaw/crew/v1` offers and return signed results.
+    #[serde(default)]
+    pub crew_worker: bool,
 }
 
 /// Skills directory and discovery options.

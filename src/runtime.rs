@@ -5,8 +5,14 @@
 
 use libp2p::PeerId;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
+/// Gossip topic for signed resource manifests (capability fan-out).
+pub const RESOURCES_GOSSIP_TOPIC: &str = "peerclaw/resources/v1";
+
+use crate::a2a::gossip::A2A_GOSSIP_TOPIC;
+use crate::a2a::state::A2aState;
 use crate::config::Config;
 use crate::db::Database;
 use crate::executor::remote::{JobProvider, RemoteExecutor, RemoteExecutorConfig};
@@ -57,6 +63,11 @@ pub struct Runtime {
     pub local_peer_id: PeerId,
     /// Configuration
     pub config: Config,
+    /// A2A task state and discovered agent cards (shared with P2P + HTTP).
+    pub a2a: Arc<A2aState>,
+
+    /// Wired from `serve` after [`crate::swarm::SwarmManager`] exists (optional).
+    pub swarm_manager: tokio::sync::RwLock<Option<Arc<crate::swarm::SwarmManager>>>,
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
@@ -90,8 +101,14 @@ impl Runtime {
             local_peer_id_str,
         )));
 
+        let a2a = A2aState::new();
+
         // Create network
-        let network = Arc::new(RwLock::new(Network::new(&identity, config.p2p.clone())?));
+        let network = Arc::new(RwLock::new(Network::new(
+            &identity,
+            config.p2p.clone(),
+            a2a.clone(),
+        )?));
 
         // Create resource monitor
         let resource_monitor = Arc::new(ResourceMonitor::new(MonitorConfig::default()));
@@ -218,7 +235,14 @@ impl Runtime {
             provider_tracker,
             local_peer_id,
             config,
+            a2a,
+            swarm_manager: tokio::sync::RwLock::new(None),
         })
+    }
+
+    /// Attach swarm manager for crew/P2P visualization (called from `serve`).
+    pub async fn attach_swarm_manager(&self, sm: Arc<crate::swarm::SwarmManager>) {
+        *self.swarm_manager.write().await = Some(sm);
     }
 
     /// Subscribe to job-related and provider GossipSub topics.
@@ -229,7 +253,13 @@ impl Runtime {
         network.subscribe(job_network::topics::JOB_STATUS)?;
         network.subscribe(crate::p2p::provider::PROVIDER_TOPIC)?;
         network.subscribe(crate::skills::SKILLS_TOPIC)?;
-        tracing::info!("Subscribed to job marketplace, provider, and skills topics");
+        network.subscribe(A2A_GOSSIP_TOPIC)?;
+        network.subscribe(RESOURCES_GOSSIP_TOPIC)?;
+        network.subscribe(crate::crew::CREW_TASK_TOPIC)?;
+        network.subscribe(crate::crew::POD_TOPIC)?;
+        let world_global = crate::crew::world_topic("global");
+        network.subscribe(world_global.as_str())?;
+        tracing::info!("Subscribed to job marketplace, provider, skills, A2A, resources, crew, pod, and world (global) topics");
         Ok(())
     }
 
@@ -404,7 +434,7 @@ impl Runtime {
     }
 
     /// Handle a gossip message (job-related).
-    pub async fn handle_gossip_message(&self, topic: &str, data: Vec<u8>, _source: Option<PeerId>) {
+    pub async fn handle_gossip_message(&self, topic: &str, data: Vec<u8>, source: Option<PeerId>) {
         match topic {
             t if t == job_network::topics::JOB_REQUESTS => {
                 if let Ok(job_network::JobMessage::Request(req_msg)) =
@@ -526,7 +556,7 @@ impl Runtime {
                     // Verify the batch using the GossipSub source peer ID
                     // (authenticated by the libp2p Noise transport layer) and
                     // validate the Ed25519 signature over the batch contents.
-                    let source_peer = _source;
+                    let source_peer = source;
                     self.skills
                         .handle_announcement_batch(&batch, |claimed_peer_id, msg, sig| {
                             // Require a GossipSub source for authentication.
@@ -572,8 +602,264 @@ impl Runtime {
                         .await;
                 }
             }
+            t if t == A2A_GOSSIP_TOPIC => {
+                if let Ok(ann) = serde_json::from_slice::<crate::a2a::AgentCardAnnouncement>(&data)
+                {
+                    if ann.peer_id != self.local_peer_id.to_string() {
+                        self.a2a.upsert_peer_card(ann.peer_id.clone(), ann.card);
+                        tracing::debug!(peer = %ann.peer_id, "Cached remote agent card from gossip");
+                    }
+                }
+            }
+            t if t == RESOURCES_GOSSIP_TOPIC => {
+                if let Ok(manifest) = rmp_serde::from_slice::<crate::p2p::ResourceManifest>(&data) {
+                    if manifest.peer_id != self.local_peer_id.to_string() {
+                        tracing::debug!(
+                            peer = %manifest.peer_id,
+                            caps = manifest.capabilities.len(),
+                            models = manifest.supported_models.len(),
+                            "Received resource manifest from gossip"
+                        );
+                    }
+                }
+            }
+            t if t == crate::crew::CREW_TASK_TOPIC => {
+                if let Ok(res) = serde_json::from_slice::<crate::crew::CrewTaskResult>(&data) {
+                    tracing::debug!(
+                        run = %res.run_id,
+                        task = %res.task_id,
+                        worker = %res.worker_peer,
+                        ok = res.success,
+                        "Crew task result on network"
+                    );
+                } else if let Ok(claim) = serde_json::from_slice::<crate::crew::CrewTaskClaim>(&data)
+                {
+                    tracing::debug!(
+                        run = %claim.offer_run_id,
+                        task = %claim.offer_task_id,
+                        worker = %claim.worker_peer,
+                        "Crew task claim on network"
+                    );
+                } else if let Ok(offer) = serde_json::from_slice::<crate::crew::CrewTaskOffer>(&data)
+                {
+                    if self.config.orchestration.crew_worker {
+                        if let Some(src) = source {
+                            if let Err(e) = self.process_crew_worker_offer(offer, src).await {
+                                tracing::debug!(error = %e, "crew worker skipped offer");
+                            }
+                        }
+                    } else {
+                        tracing::debug!(
+                            run = %offer.run_id,
+                            task = %offer.task_id,
+                            from = %offer.orchestrator_peer,
+                            "Crew task offer on network"
+                        );
+                    }
+                }
+            }
+            t if t == crate::crew::POD_TOPIC => {
+                if let Ok(art) = serde_json::from_slice::<crate::crew::PodArtifactPublished>(&data) {
+                    tracing::debug!(
+                        pod = %art.pod_id,
+                        campaign = %art.campaign_id,
+                        "Pod artifact published"
+                    );
+                }
+            }
+            t if t.starts_with("peerclaw/world/") && t.ends_with("/v1") => {
+                if let Ok(ms) = serde_json::from_slice::<crate::crew::CampaignMilestone>(&data) {
+                    tracing::debug!(
+                        campaign = %ms.campaign_id,
+                        peer = %ms.reporter_peer,
+                        "Campaign milestone"
+                    );
+                }
+            }
             _ => {}
         }
+    }
+
+    async fn process_crew_worker_offer(
+        &self,
+        offer: crate::crew::CrewTaskOffer,
+        src: PeerId,
+    ) -> Result<(), String> {
+        use crate::executor::task::{ExecutionTask, InferenceTask, TaskData};
+        use crate::swarm::ActionType;
+
+        if src == self.local_peer_id {
+            return Ok(());
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        if now > offer.expires_at_ms {
+            return Err("offer expired".into());
+        }
+        if !offer.verify_source(&src) {
+            return Err("offer verification failed".into());
+        }
+
+        let sm_opt = self.swarm_manager.read().await.clone();
+        if let Some(ref sm) = sm_opt {
+            if let Some(aid) = sm.any_local_agent_id() {
+                sm.record_job_action(
+                    aid,
+                    ActionType::CrewTaskOffer,
+                    &format!("offer {} / {}", offer.run_id, offer.task_id),
+                    true,
+                );
+            }
+        }
+
+        let mut claim = crate::crew::CrewTaskClaim {
+            offer_run_id: offer.run_id.clone(),
+            offer_task_id: offer.task_id.clone(),
+            worker_peer: self.local_peer_id.to_string(),
+            signature: Vec::new(),
+        };
+        claim.sign(self.identity.as_ref());
+        let claim_bytes = serde_json::to_vec(&claim).map_err(|e| format!("claim json: {e}"))?;
+        {
+            let mut net = self.network.write().await;
+            net.publish(crate::crew::CREW_TASK_TOPIC, claim_bytes)
+                .map_err(|e| e.to_string())?;
+        }
+
+        if let Some(ref sm) = sm_opt {
+            if let Some(aid) = sm.any_local_agent_id() {
+                sm.record_job_action(
+                    aid,
+                    ActionType::CrewTaskClaim,
+                    &format!("claim {} / {}", offer.run_id, offer.task_id),
+                    true,
+                );
+            }
+        }
+
+        let first_model = self
+            .inference
+            .available_models()
+            .await
+            .into_iter()
+            .next()
+            .ok_or_else(|| "no local models for crew worker".to_string())?
+            .name;
+
+        let hint = offer.model_hint.trim();
+        let model_ref = if hint.is_empty() {
+            first_model.as_str()
+        } else {
+            hint
+        };
+
+        let prompt = format!(
+            "You are a distributed crew worker. Respond briefly (plain text) to this task summary:\n\n{}",
+            offer.summary
+        );
+        let task = InferenceTask::new(model_ref, prompt).with_max_tokens(256);
+        let exec = self
+            .executor
+            .execute(ExecutionTask::Inference(task))
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let (text, ok) = match exec.data {
+            TaskData::Inference(r) => (r.text, true),
+            TaskData::Error(e) => (e, false),
+            _ => ("unexpected executor output".to_string(), false),
+        };
+
+        let mut result = crate::crew::CrewTaskResult {
+            run_id: offer.run_id.clone(),
+            task_id: offer.task_id.clone(),
+            worker_peer: self.local_peer_id.to_string(),
+            output_summary: text.chars().take(2000).collect(),
+            success: ok,
+            signature: Vec::new(),
+        };
+        result.sign(self.identity.as_ref());
+        let res_bytes = serde_json::to_vec(&result).map_err(|e| e.to_string())?;
+        {
+            let mut net = self.network.write().await;
+            net.publish(crate::crew::CREW_TASK_TOPIC, res_bytes)
+                .map_err(|e| e.to_string())?;
+        }
+
+        if let Some(ref sm) = sm_opt {
+            if let Some(aid) = sm.any_local_agent_id() {
+                sm.record_job_action(
+                    aid,
+                    ActionType::CrewTaskComplete,
+                    &format!("result {} / {} ok={}", offer.run_id, offer.task_id, ok),
+                    ok,
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Build a minimal signed resource manifest and gossip it (replaces silent DHT stub).
+    pub async fn gossip_resource_manifest(&self) -> anyhow::Result<()> {
+        let resources = crate::p2p::Resources::default();
+        let caps = vec![crate::p2p::Capability::Inference];
+        let mut manifest = crate::p2p::ResourceManifest::new(
+            self.local_peer_id.to_string(),
+            resources,
+            caps,
+        );
+        let models: Vec<String> = self
+            .inference
+            .available_models()
+            .await
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        manifest.supported_models = models;
+        manifest.sign(|b| self.identity.sign(b).to_bytes().to_vec());
+        let data = rmp_serde::to_vec(&manifest)?;
+        self.network
+            .write()
+            .await
+            .publish(RESOURCES_GOSSIP_TOPIC, data)?;
+        Ok(())
+    }
+
+    /// Publish our agent card on the A2A gossip topic.
+    pub async fn gossip_agent_card(&self, public_base_url: &str) -> anyhow::Result<()> {
+        let models: Vec<String> = self
+            .inference
+            .available_models()
+            .await
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        let card = crate::a2a::AgentCard::peerclaw_default(
+            format!("peerclaw-{}", &self.local_peer_id.to_string()[..8.min(8)]),
+            "PeerClaw P2P agent node",
+            public_base_url.trim_end_matches('/').to_string(),
+            self.local_peer_id.to_string(),
+            models,
+        );
+        let ann = crate::a2a::AgentCardAnnouncement {
+            peer_id: self.local_peer_id.to_string(),
+            epoch_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+            card: card.clone(),
+        };
+        self.a2a
+            .upsert_peer_card(self.local_peer_id.to_string(), card);
+        let data = serde_json::to_vec(&ann)?;
+        self.network
+            .write()
+            .await
+            .publish(A2A_GOSSIP_TOPIC, data)?;
+        Ok(())
     }
 }
 

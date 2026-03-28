@@ -90,6 +90,10 @@ pub struct ServeArgs {
     /// Print each dashboard/agentic LLM prompt and full completion to stderr (debugging).
     #[arg(long, visible_alias = "verbose", short = 'V')]
     pub verbose_agentic: bool,
+
+    /// Claim distributed crew task offers on `peerclaw/crew/v1` and publish signed results.
+    #[arg(long)]
+    pub crew_worker: bool,
 }
 
 pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
@@ -154,6 +158,11 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         );
     }
 
+    if args.crew_worker {
+        config.orchestration.crew_worker = true;
+        tracing::info!("Crew P2P worker enabled (peerclaw/crew/v1)");
+    }
+
     // Open database (redb: single process per file — stop other `peerclaw serve` if lock fails)
     let database = Database::open(&config.database.path).map_err(|e| {
         anyhow::anyhow!(
@@ -212,6 +221,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             track_remote_peers: true,
         },
     ));
+    runtime.attach_swarm_manager(swarm_manager.clone()).await;
 
     // Register the local node as an agent in the swarm
     let local_agent_name = format!(
@@ -305,8 +315,24 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         tx
     };
 
+    let crew_sink: Option<Arc<dyn crate::agent::AgenticInferenceSink>> =
+        if agent_runtime.is_some() {
+            Some(Arc::new(crate::web::WebChannelInferenceSink {
+                tx: inference_tx.clone(),
+                stream_delta_tx: None,
+            }))
+        } else {
+            None
+        };
+
+    let crew_store = crate::crew::CrewRunStore::new();
+    let flow_store = crate::flow::FlowRunStore::new();
+
     // Create web state with all features: inference, jobs, swarm, tasks, providers, agent
-    let (mut peer_dial_rx, web_state) = if config.web.enabled {
+    let (mut peer_dial_rx, web_state, mut crew_kickoff_rx, mut flow_kickoff_rx) =
+        if config.web.enabled {
+        let (crew_kickoff_tx, crew_kickoff_rx) = mpsc::channel::<crate::web::CrewKickoffJob>(8);
+        let (flow_kickoff_tx, flow_kickoff_rx) = mpsc::channel::<crate::web::FlowKickoffJob>(8);
         let (peer_dial_tx, peer_dial_rx) = mpsc::channel::<String>(32);
         let p2p_network_hints = std::sync::Arc::new(crate::web::P2pNetworkHints {
             bootstrap_peers: config.p2p.bootstrap_peers.clone(),
@@ -351,10 +377,17 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             channel_registry: None,
             wallet: None,
             vector_store: None,
+            verbose_agentic_io: args.verbose_agentic,
+            a2a: runtime.a2a.clone(),
+            a2a_public_base_url: format!("http://{}", config.web.listen_addr),
+            crew_store: crew_store.clone(),
+            crew_kickoff_tx: Some(crew_kickoff_tx),
+            flow_store: flow_store.clone(),
+            flow_kickoff_tx: Some(flow_kickoff_tx),
         }));
-        (Some(peer_dial_rx), state)
+        (Some(peer_dial_rx), state, Some(crew_kickoff_rx), Some(flow_kickoff_rx))
     } else {
-        (None, None)
+        (None, None, None, None)
     };
 
     // Start web server if enabled
@@ -382,7 +415,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     let verbose_llm_io = args.verbose_agentic;
     if verbose_llm_io {
         tracing::info!(
-            "Verbose LLM I/O enabled: each web/agentic prompt and completion is printed to stderr (peerclaw serve --verbose-agentic)"
+            "Verbose agentic I/O enabled: LLM prompts/responses and tool args/results (large payloads truncated on stderr) — peerclaw serve --verbose-agentic"
         );
     }
 
@@ -398,6 +431,9 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
 
     // Interval for advertising provider to network
     let mut provider_advertise_interval = tokio::time::interval(std::time::Duration::from_secs(60));
+
+    // A2A agent card + resource manifest over GossipSub
+    let mut a2a_advertise_interval = tokio::time::interval(std::time::Duration::from_secs(45));
 
     // Interval for auto-accepting bids on pending jobs (after bid collection period)
     let mut bid_accept_interval = tokio::time::interval(std::time::Duration::from_secs(3));
@@ -845,6 +881,125 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
             }
         }
 
+        // Crew runs (inline — `TaskExecutor` is not `Send`, same as agent tasks).
+        if let Some(ref mut ckrx) = crew_kickoff_rx {
+            while let Ok(job) = ckrx.try_recv() {
+                if let Some(st) = web_state.as_ref() {
+                    let store = st.crew_store.clone();
+                    let ws = st.ws_control_tx.clone();
+                    store.update_status(&job.run_id, "running");
+                    store.push_log(&job.run_id, "[crew] started".to_string());
+                    crate::web::broadcast_crews_changed(&ws);
+                    let extras = crate::agent::AgentTaskExtras::default();
+                    let orch = runtime.local_peer_id;
+                    let res = crate::crew::run_crew(
+                        &job.spec,
+                        &job.inputs,
+                        runtime.executor.clone(),
+                        runtime.tools.clone(),
+                        orch.to_string(),
+                        Some(node_tool_tx.clone()),
+                        crew_sink.clone(),
+                        store
+                            .cancel_flag(&job.run_id)
+                            .as_ref()
+                            .map(|a| a.as_ref()),
+                        extras,
+                    )
+                    .await;
+                    match res {
+                        Ok(out) => {
+                            if job.distributed {
+                                let mut net = runtime.network.write().await;
+                                for t in &out.tasks_output {
+                                    let mut offer = crate::crew::CrewTaskOffer::new(
+                                        &job.run_id,
+                                        &t.task_id,
+                                        &orch,
+                                        t.answer.chars().take(500).collect::<String>(),
+                                        300_000,
+                                    );
+                                    offer.sign(runtime.identity.as_ref());
+                                    if let Ok(bytes) = serde_json::to_vec(&offer) {
+                                        let _ = net.publish(crate::crew::CREW_TASK_TOPIC, bytes);
+                                    }
+                                }
+                            }
+                            let pod = job.pod_id.clone().unwrap_or_default();
+                            if !pod.is_empty() {
+                                let camp = job.campaign_id.clone().unwrap_or_default();
+                                let art = crate::crew::PodArtifactPublished {
+                                    pod_id: pod,
+                                    campaign_id: camp,
+                                    artifact_id: job.run_id.clone(),
+                                    summary: out.raw.chars().take(400).collect::<String>(),
+                                    content_hash: String::new(),
+                                    depends_on: None,
+                                };
+                                let mut net = runtime.network.write().await;
+                                if let Ok(bytes) = serde_json::to_vec(&art) {
+                                    let _ = net.publish(crate::crew::POD_TOPIC, bytes);
+                                }
+                            }
+                            store.complete_ok(&job.run_id, out);
+                        }
+                        Err(e) => store.complete_err(&job.run_id, e),
+                    }
+                    crate::web::broadcast_crews_changed(&ws);
+                }
+            }
+        }
+
+        // Flow runs (DAG over LLM + optional nested crews).
+        if let Some(ref mut frx) = flow_kickoff_rx {
+            while let Ok(job) = frx.try_recv() {
+                if let Some(st) = web_state.as_ref() {
+                    let fs = st.flow_store.clone();
+                    let ws = st.ws_control_tx.clone();
+                    let mcp = st.mcp_manager.read().await.clone();
+                    fs.update_status(&job.run_id, "running");
+                    fs.push_log(&job.run_id, "[flow] started");
+                    crate::web::broadcast_flows_changed(&ws);
+                    let extras = crate::agent::AgentTaskExtras {
+                        use_mcp: mcp.is_some(),
+                        mcp,
+                        skill_block: String::new(),
+                        model_ctx_chars: 0,
+                    };
+                    let default_model = runtime
+                        .inference
+                        .available_models()
+                        .await
+                        .into_iter()
+                        .next()
+                        .map(|m| m.name)
+                        .unwrap_or_default();
+                    if default_model.is_empty() {
+                        fs.complete_err(&job.run_id, "no models available for flow execution");
+                        crate::web::broadcast_flows_changed(&ws);
+                        continue;
+                    }
+                    let res = crate::flow::run_flow(
+                        &job.spec,
+                        &job.inputs,
+                        &default_model,
+                        runtime.executor.clone(),
+                        runtime.tools.clone(),
+                        runtime.local_peer_id.to_string(),
+                        Some(node_tool_tx.clone()),
+                        crew_sink.clone(),
+                        extras,
+                    )
+                    .await;
+                    match res {
+                        Ok(out) => fs.complete_ok(&job.run_id, out),
+                        Err(e) => fs.complete_err(&job.run_id, e),
+                    }
+                    crate::web::broadcast_flows_changed(&ws);
+                }
+            }
+        }
+
         // Check for shutdown signal
         if tokio::signal::ctrl_c().now_or_never().is_some() {
             tracing::info!("Received Ctrl+C, shutting down...");
@@ -949,6 +1104,18 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                 tracing::debug!("Provider advertisement: {}", e);
             }
         }
+
+        if web_state.is_some() && runtime.config.web.enabled {
+            if a2a_advertise_interval.tick().now_or_never().is_some() {
+                let base = format!("http://{}", runtime.config.web.listen_addr);
+                if let Err(e) = runtime.gossip_agent_card(&base).await {
+                    tracing::debug!(error = %e, "A2A agent card gossip");
+                }
+                if let Err(e) = runtime.gossip_resource_manifest().await {
+                    tracing::debug!(error = %e, "Resource manifest gossip");
+                }
+            }
+        }
     }
 
     let final_stats = runtime.stats().await;
@@ -1005,6 +1172,9 @@ async fn handle_network_event(runtime: &Runtime, event: NetworkEvent) {
                 from,
                 payload.len()
             );
+        }
+        NetworkEvent::A2aRpcInbound { peer, method } => {
+            tracing::debug!(%peer, %method, "A2A JSON-RPC over request-response");
         }
         NetworkEvent::ResourceAdvertised { peer_id, manifest } => {
             tracing::debug!("Resources advertised by {}: {:?}", peer_id, manifest);

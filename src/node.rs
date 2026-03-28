@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::db::Database;
 use crate::executor::ResourceMonitor;
 use crate::identity::NodeIdentity;
+use crate::a2a::A2aState;
 use crate::p2p::Network;
 use crate::swarm::{SwarmManager, SwarmManagerConfig};
 use crate::web;
@@ -18,6 +19,7 @@ pub struct Node {
     identity: NodeIdentity,
     database: Database,
     network: Network,
+    a2a: std::sync::Arc<A2aState>,
     swarm_manager: Arc<SwarmManager>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: Option<mpsc::Receiver<()>>,
@@ -47,8 +49,9 @@ impl Node {
         let database = Database::open(&config.database.path)?;
         tracing::info!("Database opened at {:?}", config.database.path);
 
+        let a2a = A2aState::new();
         // Create network
-        let network = Network::new(&identity, config.p2p.clone())?;
+        let network = Network::new(&identity, config.p2p.clone(), a2a.clone())?;
 
         // Create swarm manager
         let swarm_config = SwarmManagerConfig {
@@ -67,6 +70,7 @@ impl Node {
             identity,
             database,
             network,
+            a2a,
             swarm_manager,
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
@@ -113,7 +117,11 @@ impl Node {
         let _network_shutdown = self.shutdown_tx.clone();
         let mut network = std::mem::replace(
             &mut self.network,
-            Network::new(&self.identity, self.config.p2p.clone())?,
+            Network::new(
+                &self.identity,
+                self.config.p2p.clone(),
+                self.a2a.clone(),
+            )?,
         );
 
         let _network_handle = tokio::spawn(async move {

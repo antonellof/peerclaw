@@ -188,6 +188,11 @@ pub enum ActionType {
     JobCompleted,
     JobFailed,
 
+    /// P2P crew task market
+    CrewTaskOffer,
+    CrewTaskClaim,
+    CrewTaskComplete,
+
     // Network actions
     PeerConnect,
     PeerDisconnect,
@@ -221,6 +226,9 @@ impl std::fmt::Display for ActionType {
             Self::JobStarted => write!(f, "Job Started"),
             Self::JobCompleted => write!(f, "Job Completed"),
             Self::JobFailed => write!(f, "Job Failed"),
+            Self::CrewTaskOffer => write!(f, "Crew Task Offer"),
+            Self::CrewTaskClaim => write!(f, "Crew Task Claim"),
+            Self::CrewTaskComplete => write!(f, "Crew Task Complete"),
             Self::PeerConnect => write!(f, "Peer Connect"),
             Self::PeerDisconnect => write!(f, "Peer Disconnect"),
             Self::MessageSent => write!(f, "Message Sent"),

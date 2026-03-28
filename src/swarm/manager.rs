@@ -93,6 +93,15 @@ impl SwarmManager {
         self.event_tx.subscribe()
     }
 
+    /// First registered local agent (e.g. default node shell) for P2P-side actions.
+    pub fn any_local_agent_id(&self) -> Option<Uuid> {
+        self.agents
+            .read()
+            .values()
+            .find(|a| a.is_local)
+            .map(|a| a.id)
+    }
+
     /// Register a local agent
     pub fn register_local_agent(&self, name: String, profile: AgentProfile) -> Uuid {
         let agent = SwarmAgent::new_local(name.clone(), profile.clone());

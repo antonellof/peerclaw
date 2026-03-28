@@ -1,9 +1,18 @@
-export type WorkspaceView = "chat" | "home" | "overview" | "jobs" | "providers" | "skills" | "mcp"
+export type WorkspaceView =
+  | "chat"
+  | "home"
+  | "overview"
+  | "join"
+  | "jobs"
+  | "providers"
+  | "skills"
+  | "mcp"
 
 export const WORKSPACE_VIEWS: WorkspaceView[] = [
   "chat",
   "home",
   "overview",
+  "join",
   "jobs",
   "providers",
   "skills",
@@ -29,6 +38,7 @@ export const LEGACY_CONSOLE_REDIRECT: Record<string, WorkspaceView> = {
   tasks: "chat",
   agent: "chat",
   overview: "overview",
+  join: "join",
   jobs: "jobs",
   providers: "providers",
   skills: "skills",

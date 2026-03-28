@@ -210,7 +210,7 @@ mod tests {
     #[tokio::test]
     async fn test_subagent_rejects_zero_budget() {
         let tool = SubAgentTool;
-        let mut ctx = ToolContext::local("test".to_string());
+        let ctx = ToolContext::local("test".to_string());
         // Need node_tool_tx to get past that check but depth is fine
         // Actually the budget check happens before the node_tool_tx check...
         // let's set depth to 0 so we pass that, budget check is after node_tool_tx

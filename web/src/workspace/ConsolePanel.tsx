@@ -5,10 +5,12 @@ import { ConsoleOverviewPage } from "@/pages/console/ConsoleOverviewPage"
 import { ConsoleProvidersPage } from "@/pages/console/ConsoleProvidersPage"
 import { ConsoleSkillsPage } from "@/pages/console/ConsoleSkillsPage"
 import { ConsoleMcpPage } from "@/pages/console/ConsoleMcpPage"
+import { JoinNetworkPage } from "@/pages/join/JoinNetworkPage"
 
 const TITLES: Partial<Record<WorkspaceView, string>> = {
   home: "Home",
   overview: "P2P Network",
+  join: "Join the mesh",
   jobs: "Jobs",
   providers: "Providers",
   skills: "Skills",
@@ -18,6 +20,7 @@ const TITLES: Partial<Record<WorkspaceView, string>> = {
 const SHOW_TOP_BAR: Record<Exclude<WorkspaceView, "chat">, boolean> = {
   home: false,
   overview: false,
+  join: false,
   jobs: true,
   providers: true,
   skills: true,
@@ -38,6 +41,7 @@ export function ConsolePanel({ view }: { view: Exclude<WorkspaceView, "chat"> })
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6">
         {view === "home" && <ConsoleHomePage />}
         {view === "overview" && <ConsoleOverviewPage />}
+        {view === "join" && <JoinNetworkPage />}
         {view === "jobs" && <ConsoleJobsPage />}
         {view === "providers" && <ConsoleProvidersPage />}
         {view === "skills" && <ConsoleSkillsPage />}

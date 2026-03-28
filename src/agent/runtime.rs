@@ -677,6 +677,7 @@ impl AgentRuntime {
             self.tool_context.node_tool_tx.clone(),
             Some(progress),
             stop,
+            false,
         )
         .await
         {

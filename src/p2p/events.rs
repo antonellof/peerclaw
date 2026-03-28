@@ -24,12 +24,15 @@ pub enum NetworkEvent {
         source: Option<PeerId>,
     },
 
-    /// A request was received from a peer.
+    /// A request was received from a peer (legacy; prefer [`A2aRpcInbound`](NetworkEvent::A2aRpcInbound)).
     RequestReceived {
         request_id: String,
         from: PeerId,
         payload: Vec<u8>,
     },
+
+    /// Inbound A2A JSON-RPC over libp2p request-response.
+    A2aRpcInbound { peer: PeerId, method: String },
 
     /// A resource manifest was received from a peer.
     ResourceAdvertised {
@@ -55,6 +58,9 @@ impl std::fmt::Display for NetworkEvent {
             }
             NetworkEvent::RequestReceived { from, payload, .. } => {
                 write!(f, "RequestReceived({}, {} bytes)", from, payload.len())
+            }
+            NetworkEvent::A2aRpcInbound { peer, method } => {
+                write!(f, "A2aRpcInbound({}, {})", peer, method)
             }
             NetworkEvent::ResourceAdvertised { peer_id, .. } => {
                 write!(f, "ResourceAdvertised({})", peer_id)

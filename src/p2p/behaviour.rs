@@ -3,17 +3,21 @@
 use libp2p::{
     gossipsub, identify,
     identity::Keypair,
-    kad, mdns, noise,
-    swarm::{NetworkBehaviour, Swarm},
+    kad, mdns, noise, request_response,
+    swarm::{NetworkBehaviour, StreamProtocol, Swarm},
     tcp, yamux, PeerId,
 };
 use std::time::Duration;
 
+use crate::a2a::jsonrpc::{A2aRpcWireRequest, A2aRpcWireResponse};
 use crate::config::P2pConfig;
 
 /// Combined network behaviour for PeerClaw.
 #[derive(NetworkBehaviour)]
 pub struct PeerclawdBehaviour {
+    /// JSON-RPC envelope over request-response (A2A mesh bridge).
+    pub a2a_rpc: request_response::json::Behaviour<A2aRpcWireRequest, A2aRpcWireResponse>,
+
     /// Kademlia DHT for peer discovery and content routing
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
 
@@ -33,6 +37,15 @@ pub fn build_swarm(
     _config: &P2pConfig,
 ) -> anyhow::Result<Swarm<PeerclawdBehaviour>> {
     let local_peer_id = PeerId::from(keypair.public());
+
+    let a2a_proto = StreamProtocol::new("/peerclaw/a2a-rpc/1.0.0");
+    let a2a_rpc = request_response::json::Behaviour::new(
+        [(
+            a2a_proto,
+            request_response::ProtocolSupport::Full,
+        )],
+        request_response::Config::default().with_request_timeout(Duration::from_secs(120)),
+    );
 
     // Build the swarm with TCP transport
     let swarm = libp2p::SwarmBuilder::with_existing_identity(keypair)
@@ -61,12 +74,6 @@ pub fn build_swarm(
                     .build()
                     .map_err(|e| anyhow::anyhow!("GossipSub config error: {}", e))?;
 
-                let _message_id_fn = |message: &gossipsub::Message| {
-                    // Use blake3 hash of message content as ID
-                    let hash = blake3::hash(&message.data);
-                    gossipsub::MessageId::from(hash.as_bytes().to_vec())
-                };
-
                 gossipsub::Behaviour::new(
                     gossipsub::MessageAuthenticity::Signed(keypair.clone()),
                     config,
@@ -81,6 +88,7 @@ pub fn build_swarm(
             );
 
             Ok(PeerclawdBehaviour {
+                a2a_rpc,
                 kademlia,
                 mdns,
                 gossipsub,
