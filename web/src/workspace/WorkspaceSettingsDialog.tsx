@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Briefcase, BookOpen, Cpu, HardDrive, Home, LayoutGrid, Plug, Terminal } from "lucide-react"
+import { Briefcase, BookOpen, Cpu, HardDrive, Home, LayoutGrid, Plug, Radio, Terminal, Users } from "lucide-react"
 
 import {
   downloadGgufModel,
@@ -30,7 +30,7 @@ type Props = {
   onOpenChange: (open: boolean) => void
   chatPreferences: WorkspaceChatPreferences
   setChatPreferences: (u: Partial<WorkspaceChatPreferences>) => void
-  onNavigate: (view: WorkspaceView) => void
+  onNavigate: (view: WorkspaceView, hash?: string) => void
   /** Called after inference settings save or model download so the chat dropdown refreshes. */
   onModelsChanged?: () => void
 }
@@ -153,8 +153,8 @@ export function WorkspaceSettingsDialog({
     }
   }
 
-  const go = (v: WorkspaceView) => {
-    onNavigate(v)
+  const go = (v: WorkspaceView, hash?: string) => {
+    onNavigate(v, hash)
     onOpenChange(false)
   }
 
@@ -236,6 +236,18 @@ export function WorkspaceSettingsDialog({
                   >
                     <LayoutGrid className="size-4 shrink-0 opacity-80" />
                     <span className="text-sm font-medium">P2P Network</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-auto justify-start gap-2 py-3 text-left"
+                    onClick={() => go("overview", "join-mesh")}
+                  >
+                    <Radio className="size-4 shrink-0 opacity-80" />
+                    <span className="text-sm font-medium">Join the mesh</span>
+                  </Button>
+                  <Button variant="outline" className="h-auto justify-start gap-2 py-3 text-left" onClick={() => go("crews")}>
+                    <Users className="size-4 shrink-0 opacity-80" />
+                    <span className="text-sm font-medium">Crews</span>
                   </Button>
                 </div>
               </div>

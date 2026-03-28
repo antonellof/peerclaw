@@ -10,7 +10,7 @@ SPEC = {
             "role": "Assistant",
             "goal": "Help",
             "backstory": "Helpful",
-            "llm": {"model": "dummy"},
+            "llm": "dummy",
         }
     ],
     "tasks": [{"id": "t1", "description": "Say hi", "agent_id": "a1"}],

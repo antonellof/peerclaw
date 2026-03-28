@@ -14,7 +14,7 @@ export type SlashCommandDef = { cmd: string; desc: string; args?: string; catego
 export const SLASH_COMMANDS: SlashCommandDef[] = [
   { cmd: "/help", desc: "Show available commands", category: "General" },
   { cmd: "/guide", desc: "Open help (agents & commands)", category: "General" },
-  { cmd: "/open", desc: "Open workspace panel", args: "overview|jobs|…", category: "Workspace" },
+  { cmd: "/open", desc: "Open workspace panel", args: "overview|join|crews|jobs|…", category: "Workspace" },
   { cmd: "/overview", desc: "Open P2P Network (mesh & swarm)", category: "Workspace" },
   { cmd: "/home", desc: "Open Home (starters)", category: "Workspace" },
   { cmd: "/providers", desc: "Open Providers", category: "Workspace" },
@@ -50,7 +50,7 @@ export type SlashContext = {
   sessionStats: { tokens: number; requests: number; startTime: number }
   onClearSession: () => void
   /** When set (main app shell), /open and /guide can switch panels. */
-  setWorkspaceView?: (v: WorkspaceView) => void
+  setWorkspaceView?: (v: WorkspaceView, hash?: string) => void
   openHelp?: () => void
 }
 
@@ -103,6 +103,13 @@ export async function runSlashCommand(input: string, ctx: SlashContext): Promise
     case "open":
     case "nav": {
       const target = (args[0] || "").toLowerCase()
+      if (!ctx.setWorkspaceView) {
+        return "Workspace navigation is only available in the main app shell."
+      }
+      if (target === "join") {
+        ctx.setWorkspaceView("overview", "join-mesh")
+        return "Opened P2P Network (Join the mesh)."
+      }
       const map: Record<string, WorkspaceView> = {
         chat: "chat",
         home: "home",
@@ -116,13 +123,13 @@ export async function runSlashCommand(input: string, ctx: SlashContext): Promise
         providers: "providers",
         provider: "providers",
         skills: "skills",
+        mcp: "mcp",
+        crews: "crews",
+        crew: "crews",
       }
       const v = map[target]
       if (!v) {
-        return "Usage: /open chat|home|overview|jobs|providers|skills"
-      }
-      if (!ctx.setWorkspaceView) {
-        return "Workspace navigation is only available in the main app shell."
+        return "Usage: /open chat|home|overview|join|jobs|providers|skills|mcp|crews"
       }
       ctx.setWorkspaceView(v)
       if (v === "chat" && (target === "tasks" || target === "agent")) {

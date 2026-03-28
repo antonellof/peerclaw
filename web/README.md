@@ -42,8 +42,15 @@ npx shadcn@latest add dialog table tabs
 ## Tech stack
 
 - [Vite](https://vite.dev/) — dev server, HMR, proxy
-- [React Router](https://reactrouter.com/) — `/` assistant, `/console/*` operator sections
+- [React Router](https://reactrouter.com/) — `/` assistant + workspace shell (`?view=home|overview|crews|…`), `/console/*` redirects for old bookmarks (`/console/join` → P2P Network `#join-mesh`)
 - [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/)
 - [d3](https://d3js.org/) — force graphs (network + swarm), same idea as the legacy HTML
+
+## Operator UI highlights
+
+- **Home** — Onboarding checklist, chat scenario starters, links to P2P (Join the mesh), and **Crew builder**.
+- **P2P Network** — Resources, **Join the mesh** (stats + `serve` commands), libp2p dial/peers graph, swarm tabs.
+- **Crews** — Sidebar panel to edit `CrewSpec` (agents, tasks, process), validate, kick off runs, and inspect recent run records.
+- **Chat** — Agentic loop, tasks, MCP toggle; flows remain API/SDK-first (`/api/flows/*`).
 
 The React app replaces the embedded `chat.html` / `dashboard.html` when `web/dist` is present. Legacy HTML remains at `/embed/chat` and `/embed/console` on the Rust server if you need a fallback.

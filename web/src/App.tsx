@@ -7,6 +7,9 @@ import { LEGACY_CONSOLE_REDIRECT } from "@/workspace/views"
 function ConsoleRoutesRedirect() {
   const { pathname, hash } = useLocation()
   const seg = pathname.replace(/^\/console\/?/, "").split("/").filter(Boolean)[0] ?? ""
+  if (seg === "join") {
+    return <Navigate to={{ pathname: "/", search: "?view=overview", hash: "join-mesh" }} replace />
+  }
   const v = LEGACY_CONSOLE_REDIRECT[seg] ?? "home"
   const search = v === "chat" ? "" : `?view=${v}`
   const bareHash = hash.startsWith("#") ? hash.slice(1) : hash

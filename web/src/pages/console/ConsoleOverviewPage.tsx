@@ -34,9 +34,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { JoinMeshSection } from "@/pages/console/JoinMeshSection"
 
 const SECTIONS = [
   { id: "health", label: "Resources" },
+  { id: "join-mesh", label: "Join the mesh" },
   { id: "p2p", label: "P2P mesh" },
   { id: "swarm", label: "Swarm" },
 ] as const
@@ -239,8 +241,8 @@ export function ConsoleOverviewPage() {
               </Badge>
             </div>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-              Resources, libp2p connectivity, and swarm agents. Peer count and balance stay in the header so they are
-              not repeated here.
+              Resources, how to join the mesh, libp2p connectivity, and swarm agents. Peer count and balance stay in the
+              header so they are not repeated here.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 md:justify-end">
@@ -252,6 +254,9 @@ export function ConsoleOverviewPage() {
             </Button>
             <Button variant="outline" size="sm" asChild>
               <Link to="/">Chat (Agent goal)</Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to={workspaceHref("crews")}>Crews</Link>
             </Button>
           </div>
         </div>
@@ -337,6 +342,12 @@ export function ConsoleOverviewPage() {
           </Card>
         </div>
       </section>
+
+      <JoinMeshSection
+        ref={(el) => {
+          sectionRefs.current["join-mesh"] = el
+        }}
+      />
 
       {/* —— P2P —— */}
       <section

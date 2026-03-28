@@ -90,6 +90,21 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **Dashboard tasks** — With `--agent`, tasks go to the spec-driven runtime first; otherwise a unified tool+MCP loop runs when inference and the tool registry are available
 - **Personal assistant** — Research, code, automate, monitor, summarize, analyze
 
+### Multi-agent orchestration
+- **Crews** — Define agents, tasks, and a **sequential** or **hierarchical** process; kick off runs over HTTP with optional **distributed** execution across peers (`pod_id`, `campaign_id`)
+- **P2P crew task market** — Signed offers, claims, and results on `peerclaw/crew/v1`; peers can join as workers with `--crew-worker` (alongside `--share-inference` for LLM capacity)
+- **Pods & campaigns** — Gossip topics for inter-pod handoffs (`peerclaw/pod/v1`) and campaign-scale aggregates (`peerclaw/world/...`) so large meshes stay sharded
+- **Flows** — Declarative **FlowSpec** graphs (steps, listeners, shared state); validate and kick off via `/api/flows/*` like crews
+
+### A2A-style HTTP surface
+- **Agent Card** — `GET /.well-known/agent-card.json` describes capabilities and endpoints for integrations
+- **JSON-RPC** — `POST /a2a` for task-oriented RPC aligned with Agent2Agent-style clients
+- **Peer directory** — `GET /a2a/peers` lists discovered agent cards from the mesh (GossipSub-backed cache)
+
+### Python SDK
+- **Package** — `sdk/python` ships as **`peerclaw-sdk`** (`httpx`, optional YAML project loading)
+- **Client** — `PeerclawClient` wraps crew validation, kickoff, run status, and streaming endpoints against `PEERCLAW_BASE_URL`
+
 ### LLM Provider Sharing
 - **Share your LLM** — Let other peers use your Ollama/GGUF models for CLAW tokens
 - **Rate limits** — Configure max requests/hour, tokens/day, concurrent requests
@@ -97,11 +112,14 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **Pricing** — Set your own price multiplier on the base token economy rates
 
 ### Web Dashboard
+- **Console home** — Quick paths to chat, node health, and scenario starters; copy highlights **crews**, **flows**, and the **Python SDK** for multi-step automation
+- **Join the mesh** — Section inside **P2P Network** with live peer/swarm stats and copy-paste `serve` commands (`--share-inference`, `--crew-worker`); sidebar link removed in favor of **Crews** + in-page anchor `#join-mesh`
 - **Network topology** — Interactive D3.js graph, click nodes to see details
 - **Agentic chat** — Default **Tools** mode: ReAct loop over the node’s tool registry (including `job_submit` / `job_status` for network work); optional **MCP** adds external servers; plain single-shot replies when Tools is off
 - **Chat API** — `POST /api/chat` and `/api/chat/stream` support `agentic`, `use_mcp`, and `session_id` for bounded server-side history
 - **MCP console** — Configure MCP in the UI (`PUT /api/mcp/config`) and inspect connection status
 - **Task management** — Create, monitor, and view results of agent tasks (tool traces in logs when using the unified loop)
+- **Crews** — Dashboard **Crew builder** (agents, tasks, validate, kick off) plus REST + SSE (`/api/crews/*`); **flows** remain API/SDK-first (`/api/flows/*`); Agent Card + `/a2a` for external agents
 - **Provider settings** — Configure LLM sharing, view discovered network providers
 - **Resource monitoring** — Real-time CPU, RAM, GPU stats
 - **Job tracking** — List and monitor marketplace jobs; submission is intended via chat/agents (`job_submit`), not a separate submit form
@@ -159,7 +177,7 @@ Configure Ollama, local GGUF models, and remote OpenAI-compatible APIs. Priority
 
 ### Settings — Workspace panels
 
-Quick navigation to all console panels — Home, Jobs, Providers, Skills, MCP servers, and P2P Network.
+Quick navigation to console panels — Home, Jobs, Providers, Skills, MCP servers, **Crews**, **Join the mesh** (opens P2P `#join-mesh`), and P2P Network.
 
 <p align="center">
   <img src="docs/screenshots/settings-workspace.png" alt="Workspace settings with panel shortcuts" width="720" />
@@ -220,6 +238,9 @@ curl -L -o ~/.peerclaw/models/llama-3.2-1b-instruct-q4_k_m.gguf \
 
 # Share your LLM with the P2P network (earn CLAW tokens)
 ./target/release/peerclaw serve --web 127.0.0.1:8080 --ollama --share-inference --agent examples/agents/assistant.toml
+
+# Also claim distributed crew tasks from other peers (inference-focused workers)
+./target/release/peerclaw serve --web 127.0.0.1:8080 --crew-worker
 ```
 
 ---
@@ -427,6 +448,36 @@ for chunk in response:
 
 ---
 
+## Crew & flow HTTP API
+
+With `peerclaw serve --web …`, the node exposes JSON endpoints for multi-agent runs (see `src/web/mod.rs` for the canonical list).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/crews/validate` | Validate a `CrewSpec` |
+| `POST` | `/api/crews/kickoff` | Start a crew run (`inputs`, `stream`, `distributed`, `pod_id`, `campaign_id`, …) |
+| `GET` | `/api/crews/runs` | List crew runs |
+| `GET` | `/api/crews/runs/:id` | Run status and output |
+| `GET` | `/api/crews/runs/:id/stream` | SSE progress / stream |
+| `POST` | `/api/crews/runs/:id/stop` | Cooperative cancel |
+| `POST` | `/api/flows/validate` | Validate a `FlowSpec` |
+| `POST` | `/api/flows/kickoff` | Start a flow run |
+| `GET` | `/api/flows/runs` | List flow runs |
+| `GET` | `/api/flows/runs/:id` | Flow run status |
+
+**Integrations:** `GET /.well-known/agent-card.json`, `POST /a2a`, `GET /a2a/peers`.
+
+### Python SDK (local install)
+
+```bash
+cd sdk/python
+pip install -e ".[dev]"
+export PEERCLAW_BASE_URL=http://127.0.0.1:8080
+python examples/minimal.py   # validates a tiny crew against a running node
+```
+
+---
+
 ## Configuration
 
 ### Environment Variables
@@ -509,10 +560,16 @@ policy_enforcement = true
 - [x] Web agentic chat: unified ReAct path (local tools + optional MCP + long-horizon tool iterations)
 - [x] P2P `job_submit` / `job_status` tools connected to the serve node (GossipSub + `JobManager`)
 - [x] Marketplace job types: inference, web_fetch, wasm, compute, storage (web + tool path)
+- [x] **Crews** — `CrewSpec`, sequential/hierarchical orchestration, REST + SSE, optional distributed runs
+- [x] **Flows** — `FlowSpec` interpreter and `/api/flows/*`
+- [x] **P2P orchestration** — Crew task market, pod/world gossip topics, `--crew-worker`
+- [x] **A2A-shaped HTTP** — Agent Card, JSON-RPC `/a2a`, peer card cache
+- [x] **Python SDK** — `peerclaw-sdk` in `sdk/python` (validate, kickoff, runs)
+- [x] **Join network** landing in the web dashboard
 
 ### Next (v0.5)
 - [ ] Distributed inference (pipeline parallelism)
-- [ ] Multi-agent collaboration
+- [x] Multi-agent collaboration (crews, flows, P2P crew market — **in progress**: hardening, docs, CI; see repo plan)
 - [ ] Durable agent runs (checkpoints, resume after restart) and richer observability
 - [ ] Cross-peer tool execution (discovery, quotes, escrow) and marketplace reputation
 - [ ] Human-in-the-loop approvals for high-risk tools
@@ -526,4 +583,4 @@ policy_enforcement = true
 
 ---
 
-*v0.3.0 — March 2026*
+*Crate v0.3.0 — March 2026 (feature set above includes v0.4 orchestration items in-tree)*

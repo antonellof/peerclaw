@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- nav config + helper exported for shell title */
-import { Home, LayoutGrid, MessageSquare, Radio } from "lucide-react"
+import { Home, LayoutGrid, MessageSquare, Users } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import type { WorkspaceView } from "./views"
@@ -9,18 +9,18 @@ export const WORKSPACE_NAV_ITEMS: { view: WorkspaceView; label: string; icon: ty
   { view: "home", label: "Home", icon: Home },
   { view: "chat", label: "Chat", icon: MessageSquare },
   { view: "overview", label: "P2P Network", icon: LayoutGrid },
-  { view: "join", label: "Join network", icon: Radio },
+  { view: "crews", label: "Crews", icon: Users },
 ]
 
 export const WORKSPACE_VIEW_TITLES: Record<WorkspaceView, string> = {
   chat: "Chat",
   home: "Home",
   overview: "P2P Network",
-  join: "Join the mesh",
   jobs: "Jobs",
   providers: "Providers",
   skills: "Skills",
   mcp: "MCP",
+  crews: "Crews",
 }
 
 type Props = {

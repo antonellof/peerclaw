@@ -33,13 +33,22 @@ export function ConsoleHomePage() {
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Turn a goal into an outcome</h1>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
           Describe what you need. Your <span className="text-violet-400">agent</span> plans steps, runs tools within a{" "}
-          <strong>budget</strong>, and returns a structured answer. In <strong>Chat</strong>, switch to{" "}
-          <strong>Agent goal</strong> for multi-step work, or stay in <strong>Chat</strong> for quick messages.
+          <strong>budget</strong>, and returns a structured answer. For <strong>multi-agent crews</strong> and{" "}
+          <strong>declarative flows</strong>, use the node&apos;s <code className="text-foreground/90">/api/crews</code> and{" "}
+          <code className="text-foreground/90">/api/flows</code> endpoints or the <strong>Python SDK</strong> in{" "}
+          <code className="text-foreground/90">sdk/python</code>. In <strong>Chat</strong>, switch to <strong>Agent goal</strong>{" "}
+          for multi-step work, or stay in <strong>Chat</strong> for quick messages.
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
           <Button onClick={() => nav("/", { state: { openAgent: true } })}>Start with Agent</Button>
           <Button variant="outline" asChild>
             <Link to="/">Open Assistant</Link>
+          </Button>
+          <Button variant="secondary" onClick={() => nav({ pathname: "/", search: "?view=overview", hash: "join-mesh" })}>
+            Join the mesh
+          </Button>
+          <Button variant="outline" onClick={() => nav({ pathname: "/", search: "?view=crews" })}>
+            Crew builder
           </Button>
           <Button variant="secondary" onClick={() => nav({ pathname: "/", search: "?view=overview", hash: "health" })}>
             Node overview
@@ -100,13 +109,20 @@ export function ConsoleHomePage() {
         <CardHeader>
           <CardTitle>Requirements</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>
             <strong className="text-foreground">Agent</strong> needs a node with an agent spec, for example:
           </p>
           <code className="block rounded-lg bg-muted px-3 py-2 font-mono text-xs text-primary">
             peerclaw serve --web 127.0.0.1:8080 --agent examples/agents/assistant.toml
           </code>
+          <p>
+            <strong className="text-foreground">Distributed crews</strong> — other peers can share inference (
+            <code className="text-foreground/90">--share-inference</code>) or claim crew steps (
+            <code className="text-foreground/90">--crew-worker</code>). Under <strong>P2P Network</strong> →{" "}
+            <strong>Join the mesh</strong> for copy-paste commands and live stats; use <strong>Crews</strong> in the sidebar
+            to configure agents and kick off runs.
+          </p>
         </CardContent>
       </Card>
     </div>

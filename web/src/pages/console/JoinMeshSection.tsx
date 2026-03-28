@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react"
+import { forwardRef, useEffect, useState } from "react"
 import { Copy, RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { fetchPeers, fetchStatus, fetchSwarmTopology } from "@/lib/api"
+import { fetchStatus, fetchSwarmTopology } from "@/lib/api"
 
-export function JoinNetworkPage() {
+/** Mesh onboarding: stats + copy-paste serve commands (embedded in P2P Network). */
+export const JoinMeshSection = forwardRef<HTMLElement>(function JoinMeshSection(_, ref) {
   const [peerId, setPeerId] = useState("…")
   const [peers, setPeers] = useState(0)
   const [agents, setAgents] = useState(0)
@@ -17,16 +18,11 @@ export function JoinNetworkPage() {
     setLoading(true)
     setErr(null)
     try {
-      const [st, topo, plist] = await Promise.all([
-        fetchStatus(),
-        fetchSwarmTopology(),
-        fetchPeers(),
-      ])
+      const [st, topo] = await Promise.all([fetchStatus(), fetchSwarmTopology()])
       setPeerId(st.peer_id)
       setPeers(st.connected_peers)
       setAgents(topo.nodes.length)
       setBalance(st.balance)
-      void plist
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to load network stats")
     } finally {
@@ -44,17 +40,18 @@ export function JoinNetworkPage() {
     "peerclaw serve --web 127.0.0.1:8080 --share-inference\n# Optional crew worker:\npeerclaw serve --web 127.0.0.1:8080 --crew-worker"
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-8">
+    <section
+      ref={ref}
+      id="join-mesh"
+      className="scroll-mt-28 space-y-4"
+      aria-labelledby="join-mesh-heading"
+    >
       <div>
-        <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-          Distributed agents
-        </p>
-        <h2 className="mt-2 font-serif text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
-          Add your node to the mesh
+        <h2 id="join-mesh-heading" className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Join the mesh
         </h2>
-        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          PeerClaw runs inference, crew orchestration, and P2P tasks across many machines. Share capacity,
-          earn PCLAW, and let other peers route work to you when you are online.
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+          Share inference capacity, earn PCLAW, and optionally run as a <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">--crew-worker</code> so other peers can claim distributed crew steps.
         </p>
       </div>
 
@@ -93,9 +90,9 @@ export function JoinNetworkPage() {
 
       <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
         <CardHeader>
-          <CardTitle className="text-lg">Run a node</CardTitle>
+          <CardTitle className="text-lg">Run a contributing node</CardTitle>
           <CardDescription>
-            Your peer id (from this dashboard):{" "}
+            Your peer id on this dashboard:{" "}
             <span className="font-mono text-xs text-foreground/90">{peerId}</span>
           </CardDescription>
         </CardHeader>
@@ -128,6 +125,6 @@ export function JoinNetworkPage() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </section>
   )
-}
+})

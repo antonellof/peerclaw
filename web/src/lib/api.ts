@@ -1046,3 +1046,117 @@ export async function executeTool(payload: {
   }
   return r.json()
 }
+
+// ── Crews ───────────────────────────────────────────────────────────────────
+
+/** Mirrors `crate::crew::CrewSpec` (JSON). */
+export type CrewSpecJson = {
+  name?: string
+  agents: {
+    id: string
+    role: string
+    goal: string
+    backstory?: string
+    llm?: string
+    tools?: string[]
+    max_iter?: number
+  }[]
+  tasks: {
+    id: string
+    description: string
+    expected_output?: string
+    agent_id: string
+    context?: string[]
+  }[]
+  process?: "sequential" | "hierarchical"
+  manager_agent_id?: string | null
+  planning?: boolean
+}
+
+export type CrewKickoffBody = {
+  spec: CrewSpecJson
+  inputs?: unknown
+  distributed?: boolean
+  pod_id?: string | null
+  campaign_id?: string | null
+}
+
+export type CrewKickoffResponse = {
+  success: boolean
+  run_id?: string | null
+  error?: string | null
+}
+
+export type CrewTaskOutputJson = {
+  task_id: string
+  agent_id: string
+  answer: string
+  iterations: number
+  tokens: number
+  success: boolean
+  error?: string | null
+}
+
+export type CrewOutputJson = {
+  raw: string
+  tasks_output: CrewTaskOutputJson[]
+  token_usage: unknown
+}
+
+export type CrewRunRecordJson = {
+  id: string
+  status: string
+  crew_name: string
+  error?: string | null
+  output?: CrewOutputJson | null
+  created_at: string
+  completed_at?: string | null
+  logs?: string[] | null
+}
+
+export async function validateCrew(spec: CrewSpecJson): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/crews/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(spec),
+  })
+  const j = (await r.json()) as { ok?: boolean; error?: string }
+  if (!r.ok) {
+    return { ok: false, error: j.error ?? `HTTP ${r.status}` }
+  }
+  return { ok: j.ok === true, error: j.error }
+}
+
+export async function kickoffCrew(body: CrewKickoffBody): Promise<CrewKickoffResponse> {
+  const r = await apiFetch("/api/crews/kickoff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      spec: body.spec,
+      inputs: body.inputs ?? {},
+      distributed: body.distributed ?? false,
+      pod_id: body.pod_id ?? null,
+      campaign_id: body.campaign_id ?? null,
+    }),
+  })
+  return r.json() as Promise<CrewKickoffResponse>
+}
+
+export async function fetchCrewRuns(): Promise<CrewRunRecordJson[]> {
+  const r = await apiFetch("/api/crews/runs")
+  if (!r.ok) throw new Error(`crews/runs ${r.status}`)
+  return r.json()
+}
+
+export async function fetchCrewRun(id: string): Promise<CrewRunRecordJson | null> {
+  const r = await apiFetch(`/api/crews/runs/${encodeURIComponent(id)}`)
+  if (r.status === 404) return null
+  if (!r.ok) throw new Error(`crew run ${r.status}`)
+  return r.json()
+}
+
+export async function stopCrewRun(id: string): Promise<{ ok: boolean }> {
+  const r = await apiFetch(`/api/crews/runs/${encodeURIComponent(id)}/stop`, { method: "POST" })
+  const j = (await r.json().catch(() => ({}))) as { ok?: boolean }
+  return { ok: j.ok === true && r.ok }
+}

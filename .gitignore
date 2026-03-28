@@ -47,3 +47,5 @@ flamegraph.svg
 # Vite / npm front-end (run `npm install` and `npm run build` in web/)
 web/node_modules/
 web/dist/
+
+.cursor/

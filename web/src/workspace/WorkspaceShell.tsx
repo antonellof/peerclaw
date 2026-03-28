@@ -38,6 +38,12 @@ export function WorkspaceShell() {
     }
   }, [rawViewParam, navigate])
 
+  useEffect(() => {
+    if (rawViewParam === "join") {
+      navigate({ pathname: "/", search: "?view=overview", hash: "join-mesh" }, { replace: true })
+    }
+  }, [rawViewParam, navigate])
+
   const [helpOpen, setHelpOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chatPreferences, setChatPreferencesState] = useState(loadWorkspaceChatPreferences)
@@ -299,7 +305,7 @@ export function WorkspaceShell() {
         onOpenChange={setSettingsOpen}
         chatPreferences={chatPreferences}
         setChatPreferences={setChatPreferences}
-        onNavigate={(v) => setView(v)}
+        onNavigate={(v, hash) => setView(v, hash)}
         onModelsChanged={() => chatControlsRef.current?.refreshModels()}
       />
     </WorkspaceNavProvider>
