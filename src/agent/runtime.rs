@@ -777,7 +777,7 @@ impl AgentRuntime {
                 prompt.push('\n');
             }
             for tool in &available {
-                let desc: String = tool.description.chars().take(80).collect();
+                let desc: String = tool.description.chars().take(200).collect();
                 prompt.push_str(&format!("- {}: {}\n", tool.name, desc));
             }
         }

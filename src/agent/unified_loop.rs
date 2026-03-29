@@ -99,7 +99,7 @@ pub async fn build_agentic_system_prefix(
         }
         infos.sort_by(|a, b| a.name.cmp(&b.name));
         for t in &infos {
-            let desc: String = t.description.chars().take(80).collect();
+            let desc: String = t.description.chars().take(200).collect();
             s.push_str(&format!("- {}: {}\n", t.name, desc));
         }
     } else {
