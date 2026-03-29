@@ -407,6 +407,15 @@ pub async fn run_unified_agentic_loop(
                 cleaned
             } else if !trimmed_raw.is_empty() {
                 trimmed_raw.to_string()
+            } else if !tool_records.is_empty() {
+                // Model returned only tool markup with no prose — synthesize from last tool result.
+                let last = &tool_records[tool_records.len() - 1];
+                let preview: String = last.result.chars().take(4000).collect();
+                if preview.trim().is_empty() {
+                    format!("Completed {} tool call(s). No additional commentary from model.", tool_records.len())
+                } else {
+                    preview
+                }
             } else {
                 prompts.unified_empty_final_reply.trim().to_string()
             };

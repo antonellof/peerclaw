@@ -927,7 +927,13 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   {m.agentTaskId && (
                     <div className="mb-2 text-[11px] text-muted-foreground">{m.agentStatusLine}</div>
                   )}
-                  {m.role === "assistant" || m.role === "system" ? (
+                  {m.role === "assistant" && !m.content && streamLocked && m.id === streamingMessageId ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      <span className="inline-flex size-1.5 animate-pulse rounded-full bg-primary" />
+                      <span className="inline-flex size-1.5 animate-pulse rounded-full bg-primary [animation-delay:150ms]" />
+                      <span className="inline-flex size-1.5 animate-pulse rounded-full bg-primary [animation-delay:300ms]" />
+                    </span>
+                  ) : (m.role === "assistant" || m.role === "system") ? (
                     <ChatMessageMarkdown
                       content={m.content}
                       isAnimating={streamLocked && m.id === streamingMessageId}
