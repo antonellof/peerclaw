@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Bot, ChevronDown, ChevronRight, Send, Settings2, Terminal, Brain, CheckCircle2 } from "lucide-react"
+import { Bot, ChevronDown, ChevronRight, Copy, Send, Settings2, Terminal, Brain, CheckCircle2, Workflow } from "lucide-react"
 
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
 import {
@@ -82,6 +82,10 @@ type ChatMessage = {
   agentStatusLine?: string
   /** Streaming assistant text while an agent task runs (WebSocket `task_stream_delta`). */
   agentStreamPreview?: string
+  /** Name of workflow that produced this message. */
+  workflowName?: string
+  /** Whether this message represents a running workflow (shows pulsing indicator). */
+  workflowRunning?: boolean
 }
 
 function newId() {
@@ -725,27 +729,42 @@ export function ChatPanel({ onRegisterControls }: Props) {
     if (selectedLibraryEntry) {
       setInput("")
       setShowWelcome(false)
+      const wfName = selectedLibraryEntry.name
       setMessages((m) => [...m, { id: newId(), role: "user", content }])
+      const statusId = newId()
+      setMessages((m) => [
+        ...m,
+        { id: statusId, role: "system", content: `Running workflow "${wfName}"…`, workflowRunning: true, workflowName: wfName },
+      ])
       setTyping(true)
       try {
         if (!selectedLibraryEntry.flow_spec) {
-          setMessages((m) => [
-            ...m,
-            { id: newId(), role: "error", content: "This workflow has no flow spec. Re-save it from the Workflow builder." },
-          ])
+          setMessages((m) =>
+            m.map((msg) =>
+              msg.id === statusId
+                ? { ...msg, role: "error" as const, content: "This workflow has no flow spec. Re-save it from the Workflow builder.", workflowRunning: false, workflowName: wfName }
+                : msg,
+            ),
+          )
           setTyping(false)
           return
         }
         const fr = await runFlowFromChat(selectedLibraryEntry.flow_spec, content)
-        setMessages((m) => [
-          ...m,
-          { id: newId(), role: fr.ok ? "assistant" : "error", content: fr.text, meta: `workflow: ${selectedLibraryEntry.name}` },
-        ])
+        setMessages((m) =>
+          m.map((msg) =>
+            msg.id === statusId
+              ? { ...msg, role: (fr.ok ? "assistant" : "error") as MsgRole, content: fr.text, workflowRunning: false, workflowName: wfName }
+              : msg,
+          ),
+        )
       } catch (e) {
-        setMessages((m) => [
-          ...m,
-          { id: newId(), role: "error", content: e instanceof Error ? e.message : "Workflow error" },
-        ])
+        setMessages((m) =>
+          m.map((msg) =>
+            msg.id === statusId
+              ? { ...msg, role: "error" as const, content: e instanceof Error ? e.message : "Workflow error", workflowRunning: false, workflowName: wfName }
+              : msg,
+          ),
+        )
       }
       setTyping(false)
       return
@@ -939,6 +958,23 @@ export function ChatPanel({ onRegisterControls }: Props) {
                       })()}
                     />
                   ) : null}
+                  {m.workflowRunning && (
+                    <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <span className="inline-flex size-2 animate-pulse rounded-full bg-primary" />
+                      Running workflow…
+                    </div>
+                  )}
+                  {m.workflowName && !m.workflowRunning && (
+                    <div className="mt-2">
+                      <Badge
+                        variant={m.role === "error" ? "destructive" : "secondary"}
+                        className="gap-1 text-[10px] font-normal"
+                      >
+                        <Workflow className="size-3" />
+                        {m.workflowName}
+                      </Badge>
+                    </div>
+                  )}
                   {m.meta && <div className="mt-2 text-[11px] text-muted-foreground">{m.meta}</div>}
                 </div>
               </div>
@@ -1156,6 +1192,21 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              {/* Session ID */}
+              {sessionId && (
+                <button
+                  type="button"
+                  className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-mono text-muted-foreground/60 transition-colors hover:bg-muted hover:text-muted-foreground"
+                  title={`Session: ${sessionId}\nClick to copy`}
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(sessionId)
+                  }}
+                >
+                  <Copy className="size-2.5" />
+                  {sessionId.slice(0, 8)}
+                </button>
+              )}
 
               {/* Model dropdown - grouped by provider with search */}
               <DropdownMenu onOpenChange={(open) => { if (!open) setModelSearch("") }}>

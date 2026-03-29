@@ -410,6 +410,7 @@ fn api_router() -> Router<Arc<WebState>> {
         .route("/jobs/submit", post(api_submit_job))
         .route("/chat", post(api_chat))
         .route("/chat/stream", post(api_chat_stream))
+        .route("/sessions", get(api_list_sessions))
         .route("/providers", get(api_list_providers))
         .route("/providers/config", get(api_get_provider_config))
         .route("/providers/config", post(api_set_provider_config))
@@ -2081,6 +2082,9 @@ struct ChatRequest {
     /// When true, include MCP tool ids in the system prefix and route `server:tool` calls to MCP.
     #[serde(default)]
     use_mcp: bool,
+    /// Optional mutable state that the frontend can pass and receive back (stored in session).
+    #[serde(default)]
+    session_state: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -2090,6 +2094,9 @@ struct ChatResponse {
     tokens_per_second: f32,
     location: String,
     provider_peer_id: Option<String>,
+    /// Echoed (possibly modified) session state; `null` when no state was provided.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_state: Option<serde_json::Value>,
 }
 
 /// Build the model prompt with recent session history prepended.
@@ -2229,14 +2236,110 @@ async fn save_session_turn_persistent(
     }
 }
 
+/// Run the safety layer's pre-processing hooks on a chat message.
+///
+/// Returns `Ok(())` if the message is safe, or `Err(reason)` with a human-readable
+/// explanation when the message is blocked.
+fn safety_check_chat_input(message: &str) -> Result<(), String> {
+    use crate::safety::{SafetyLayer, SanitizeAction};
+
+    let layer = SafetyLayer::new();
+
+    // 1. Credential leak scan
+    if let Err(e) = layer.scan_inbound(message) {
+        tracing::warn!(reason = %e, "Safety pre-hook blocked chat input (leak)");
+        return Err(format!("Message blocked by safety layer: {e}"));
+    }
+
+    // 2. Prompt injection / sanitizer check
+    let sanitized = layer.sanitizer().sanitize(message);
+    if sanitized.action == SanitizeAction::Blocked {
+        let reason = sanitized.warnings.join("; ");
+        tracing::warn!(reason = %reason, "Safety pre-hook blocked chat input (injection)");
+        return Err(format!("Message blocked by safety layer: {reason}"));
+    }
+    if !sanitized.warnings.is_empty() {
+        tracing::info!(warnings = ?sanitized.warnings, "Safety pre-hook warnings on chat input");
+    }
+
+    Ok(())
+}
+
+/// `GET /api/sessions` — list recent chat sessions with metadata.
+#[derive(Serialize)]
+struct SessionListEntry {
+    session_id: String,
+    created_at: i64,
+    message_count: u64,
+    last_message: String,
+}
+
+async fn api_list_sessions(
+    State(state): State<Arc<WebState>>,
+) -> Json<Vec<SessionListEntry>> {
+    // Prefer the persistent session store.
+    if let Some(ref store) = state.session_store {
+        match store.list_sessions() {
+            Ok(sessions) => {
+                let entries: Vec<SessionListEntry> = sessions
+                    .into_iter()
+                    .map(|s| SessionListEntry {
+                        session_id: s.session_id,
+                        created_at: s.created_at,
+                        message_count: s.turn_count,
+                        last_message: s.title,
+                    })
+                    .collect();
+                return Json(entries);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to list sessions from store: {}", e);
+            }
+        }
+    }
+
+    // Fallback: build from in-memory cache.
+    let guard = state.chat_sessions.read().await;
+    let mut entries: Vec<SessionListEntry> = guard
+        .iter()
+        .map(|(sid, msgs)| {
+            let last = msgs.last().map(|m| {
+                let preview: String = m.content.chars().take(120).collect();
+                preview
+            }).unwrap_or_default();
+            SessionListEntry {
+                session_id: sid.clone(),
+                created_at: 0,
+                message_count: msgs.len() as u64,
+                last_message: last,
+            }
+        })
+        .collect();
+    entries.sort_by(|a, b| b.message_count.cmp(&a.message_count));
+    Json(entries)
+}
+
 async fn api_chat(
     State(state): State<Arc<WebState>>,
     Json(req): Json<ChatRequest>,
 ) -> Json<ChatResponse> {
+    // --- Safety pre-hook ---
+    if let Err(reason) = safety_check_chat_input(&req.message) {
+        return Json(ChatResponse {
+            response: reason,
+            tokens: 0,
+            tokens_per_second: 0.0,
+            location: "safety".to_string(),
+            provider_peer_id: None,
+            session_state: req.session_state.clone(),
+        });
+    }
+
     let model = req.model.unwrap_or_else(|| "llama-3.2-3b".to_string());
     let max_tokens = req.max_tokens.unwrap_or(2048).min(16384);
     let temperature = req.temperature.unwrap_or(0.7);
     let user_message = req.message.clone();
+    let session_state = req.session_state.clone();
 
     let store_ref = state.session_store.as_deref();
     let prompt_for_model = build_prompt_with_history_persistent(
@@ -2314,6 +2417,7 @@ async fn api_chat(
                             tokens_per_second: response.tokens_per_second,
                             location: response.location,
                             provider_peer_id: response.provider_peer_id,
+                            session_state: session_state.clone(),
                         });
                     }
                     Err(e) => {
@@ -2323,6 +2427,7 @@ async fn api_chat(
                             tokens_per_second: 0.0,
                             location: "error".to_string(),
                             provider_peer_id: None,
+                            session_state: session_state.clone(),
                         });
                     }
                 }
@@ -2366,6 +2471,7 @@ async fn api_chat(
                             tokens_per_second: response.tokens_per_second,
                             location: response.location,
                             provider_peer_id: response.provider_peer_id,
+                            session_state: session_state.clone(),
                         });
                     }
                     Err(e) => {
@@ -2375,6 +2481,7 @@ async fn api_chat(
                             tokens_per_second: 0.0,
                             location: "error".to_string(),
                             provider_peer_id: None,
+                            session_state: session_state.clone(),
                         });
                     }
                 }
@@ -2408,6 +2515,7 @@ async fn api_chat(
                         tokens_per_second: response.tokens_per_second,
                         location: response.location,
                         provider_peer_id: response.provider_peer_id,
+                        session_state: session_state.clone(),
                     });
                 }
                 Ok(Err(_)) => {
@@ -2417,6 +2525,7 @@ async fn api_chat(
                         tokens_per_second: 0.0,
                         location: "error".to_string(),
                         provider_peer_id: None,
+                        session_state: session_state.clone(),
                     });
                 }
                 Err(_) => {
@@ -2426,6 +2535,7 @@ async fn api_chat(
                         tokens_per_second: 0.0,
                         location: "error".to_string(),
                         provider_peer_id: None,
+                        session_state: session_state.clone(),
                     });
                 }
             }
@@ -2443,6 +2553,7 @@ async fn api_chat(
         tokens_per_second: 0.0,
         location: "none".to_string(),
         provider_peer_id: None,
+        session_state,
     })
 }
 
@@ -2452,6 +2563,21 @@ async fn api_chat_stream(
     State(state): State<Arc<WebState>>,
     Json(req): Json<ChatRequest>,
 ) -> Result<Response, (axum::http::StatusCode, Json<ChatResponse>)> {
+    // --- Safety pre-hook ---
+    if let Err(reason) = safety_check_chat_input(&req.message) {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(ChatResponse {
+                response: reason,
+                tokens: 0,
+                tokens_per_second: 0.0,
+                location: "safety".to_string(),
+                provider_peer_id: None,
+                session_state: req.session_state.clone(),
+            }),
+        ));
+    }
+
     let model = req.model.unwrap_or_else(|| "llama-3.2-3b".to_string());
     let max_tokens = req.max_tokens.unwrap_or(2048).min(16384);
     let temperature = req.temperature.unwrap_or(0.7);
@@ -2505,6 +2631,7 @@ async fn api_chat_stream(
                 let user_message_for_session = user_message.clone();
                 let model_spawn = model.clone();
                 let mcp_clone = mcp_for_agentic.clone();
+                let session_state_spawn = req.session_state.clone();
                 let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(128);
                 tokio::spawn(async move {
                     let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<String>();
@@ -2557,6 +2684,7 @@ async fn api_chat_stream(
                                 "tokens_per_second": response.tokens_per_second,
                                 "location": response.location,
                                 "provider_peer_id": response.provider_peer_id,
+                                "session_state": session_state_spawn,
                             })
                             .to_string();
                             let _ = sse_tx.send(Ok(Event::default().data(done))).await;
@@ -2579,6 +2707,7 @@ async fn api_chat_stream(
                                 "tokens_per_second": 0.0,
                                 "location": "error",
                                 "provider_peer_id": null,
+                                "session_state": session_state_spawn,
                             })
                             .to_string();
                             let _ = sse_tx.send(Ok(Event::default().data(done))).await;
@@ -2604,6 +2733,7 @@ async fn api_chat_stream(
                 let session_id = req.session_id.clone();
                 let user_message_for_session = user_message.clone();
                 let model_spawn = model.clone();
+                let session_state_spawn = req.session_state.clone();
                 let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(128);
                 tokio::spawn(async move {
                     let (llm_tx, mut llm_rx) = mpsc::unbounded_channel::<String>();
@@ -2656,6 +2786,7 @@ async fn api_chat_stream(
                                 "tokens_per_second": response.tokens_per_second,
                                 "location": response.location,
                                 "provider_peer_id": response.provider_peer_id,
+                                "session_state": session_state_spawn,
                             })
                             .to_string();
                             let _ = sse_tx.send(Ok(Event::default().data(done))).await;
@@ -2678,6 +2809,7 @@ async fn api_chat_stream(
                                 "tokens_per_second": 0.0,
                                 "location": "error",
                                 "provider_peer_id": null,
+                                "session_state": session_state_spawn,
                             })
                             .to_string();
                             let _ = sse_tx.send(Ok(Event::default().data(done))).await;
@@ -2705,6 +2837,7 @@ async fn api_chat_stream(
                 tokens_per_second: 0.0,
                 location: "none".to_string(),
                 provider_peer_id: None,
+                session_state: req.session_state.clone(),
             }),
         ));
     };
@@ -2730,6 +2863,7 @@ async fn api_chat_stream(
                 tokens_per_second: 0.0,
                 location: "error".to_string(),
                 provider_peer_id: None,
+                session_state: req.session_state.clone(),
             }),
         ));
     }
@@ -2738,6 +2872,7 @@ async fn api_chat_stream(
     let session_store_spawn = state.session_store.clone();
     let session_id = req.session_id.clone();
     let user_message_for_session = user_message.clone();
+    let session_state_spawn = req.session_state.clone();
 
     let (sse_tx, sse_rx) = mpsc::channel::<Result<Event, Infallible>>(128);
 
@@ -2789,6 +2924,7 @@ async fn api_chat_stream(
             "tokens_per_second": response.tokens_per_second,
             "location": response.location,
             "provider_peer_id": response.provider_peer_id,
+            "session_state": session_state_spawn,
         })
         .to_string();
 
