@@ -2,7 +2,7 @@
 //!
 //! ## Execution modes
 //! - **Legacy DAG** — no `start` node: all nodes run in topological order (backward compatible with
-//!   `examples/flows/minimal.json`). Each LLM step sees outputs of all prior steps.
+//!   `templates/flows/minimal.json`). Each LLM step sees outputs of all prior steps.
 //! - **Interpreter** — exactly one node with `kind: "start"`: execution begins at `start` and follows
 //!   outgoing edges. Branching uses edge `label` values (`true`/`false`, `loop`/`exit`, `pass`/`fail`).
 //!
@@ -36,7 +36,7 @@ pub struct FlowSpec {
     pub edges: Vec<FlowEdge>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FlowNode {
     pub id: String,
     #[serde(default)]
@@ -259,6 +259,55 @@ pub fn interpolate_inputs(template: &str, inputs: &serde_json::Value) -> String 
 }
 
 impl FlowSpec {
+    /// Wrap a [`crate::crew::CrewSpec`] as a single-node flow (Start → Crew → End).
+    pub fn from_crew(crew: crate::crew::CrewSpec) -> Self {
+        let name = if crew.name.is_empty() {
+            "crew-workflow".to_string()
+        } else {
+            crew.name.clone()
+        };
+        Self {
+            name,
+            nodes: vec![
+                FlowNode { id: "s".into(), kind: "start".into(), name: "Start".into(), ..Default::default() },
+                FlowNode {
+                    id: "crew".into(),
+                    kind: "crew".into(),
+                    name: "Crew".into(),
+                    crew_spec: Some(crew),
+                    ..Default::default()
+                },
+                FlowNode { id: "e".into(), kind: "end".into(), name: "End".into(), ..Default::default() },
+            ],
+            edges: vec![
+                FlowEdge { from: "s".into(), to: "crew".into(), label: None },
+                FlowEdge { from: "crew".into(), to: "e".into(), label: None },
+            ],
+        }
+    }
+
+    /// Minimal single-agent flow: Start → Agent → End.  Used for agent preset library entries.
+    pub fn single_agent(agent_name: &str) -> Self {
+        Self {
+            name: agent_name.to_string(),
+            nodes: vec![
+                FlowNode { id: "s".into(), kind: "start".into(), name: "Start".into(), ..Default::default() },
+                FlowNode {
+                    id: "agent".into(),
+                    kind: "agent".into(),
+                    name: agent_name.to_string(),
+                    instructions: format!("You are a helpful {agent_name} agent. Complete the user's request."),
+                    ..Default::default()
+                },
+                FlowNode { id: "e".into(), kind: "end".into(), name: "End".into(), ..Default::default() },
+            ],
+            edges: vec![
+                FlowEdge { from: "s".into(), to: "agent".into(), label: None },
+                FlowEdge { from: "agent".into(), to: "e".into(), label: None },
+            ],
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.nodes.is_empty() {
             return Err("flow needs nodes".to_string());

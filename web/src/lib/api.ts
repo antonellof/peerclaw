@@ -1242,7 +1242,7 @@ export type FlowRunRecordJson = {
 }
 
 export async function validateFlow(spec: FlowSpecJson): Promise<{ ok: boolean; error?: string }> {
-  const r = await apiFetch("/api/flows/validate", {
+  const r = await apiFetch("/api/workflows/validate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(spec),
@@ -1255,7 +1255,7 @@ export async function validateFlow(spec: FlowSpecJson): Promise<{ ok: boolean; e
 }
 
 export async function kickoffFlow(body: FlowKickoffBody): Promise<FlowKickoffResponse> {
-  const r = await apiFetch("/api/flows/kickoff", {
+  const r = await apiFetch("/api/workflows/kickoff", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ spec: body.spec, inputs: body.inputs ?? {} }),
@@ -1264,29 +1264,27 @@ export async function kickoffFlow(body: FlowKickoffBody): Promise<FlowKickoffRes
 }
 
 export async function fetchFlowRuns(): Promise<FlowRunRecordJson[]> {
-  const r = await apiFetch("/api/flows/runs")
+  const r = await apiFetch("/api/workflows/runs")
   if (!r.ok) throw new Error(`flows/runs ${r.status}`)
   return r.json()
 }
 
 export async function fetchFlowRun(id: string): Promise<FlowRunRecordJson | null> {
-  const r = await apiFetch(`/api/flows/runs/${encodeURIComponent(id)}`)
+  const r = await apiFetch(`/api/workflows/runs/${encodeURIComponent(id)}`)
   if (r.status === 404) return null
   if (!r.ok) throw new Error(`flow run ${r.status}`)
   return r.json()
 }
 
-// --- Saved agent library (flows + task shortcuts; persisted on node as agent_library.json) ---
-
-export type AgentLibraryKind = "flow" | "task"
+// --- Workflow library (saved flows; persisted on node as agent_library.json) ---
 
 export type AgentLibraryEntryJson = {
   id: string
   name: string
   description?: string
-  kind: AgentLibraryKind
+  kind: string // always "flow" (legacy "task" migrated on server)
   flow_spec?: FlowSpecJson
-  task_type?: string | null
+  task_type?: string | null // deprecated
   source_path?: string | null
 }
 

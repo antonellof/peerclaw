@@ -245,9 +245,9 @@ export function WorkspaceSettingsDialog({
                     <Radio className="size-4 shrink-0 opacity-80" />
                     <span className="text-sm font-medium">Join the mesh</span>
                   </Button>
-                  <Button variant="outline" className="h-auto justify-start gap-2 py-3 text-left" onClick={() => go("crews")}>
+                  <Button variant="outline" className="h-auto justify-start gap-2 py-3 text-left" onClick={() => go("workflows")}>
                     <Workflow className="size-4 shrink-0 opacity-80" />
-                    <span className="text-sm font-medium">Agent builder</span>
+                    <span className="text-sm font-medium">Workflows</span>
                   </Button>
                 </div>
               </div>

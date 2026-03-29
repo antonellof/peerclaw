@@ -118,7 +118,7 @@ export function WorkspaceShell() {
     setView("chat")
   }, [setView])
 
-  const agentBuilderFullBleed = view === "crews"
+  const agentBuilderFullBleed = view === "workflows"
 
   const navValue = {
     view,

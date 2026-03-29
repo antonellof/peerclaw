@@ -87,10 +87,10 @@ export function ConsoleHelpPage() {
       <section className="space-y-2">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-foreground">Run the node with an agent spec</h2>
         <p className="text-xs text-muted-foreground">
-          So <strong className="text-foreground">Agent goal</strong> and tools work end-to-end:
+          So <strong className="text-foreground">chat tools</strong> and workflows work end-to-end:
         </p>
         <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-border bg-muted/50 p-3 font-mono text-[10px] leading-relaxed text-primary">
-          peerclaw serve --web 127.0.0.1:8080 --agent examples/agents/assistant.toml
+          peerclaw serve --web 127.0.0.1:8080 --agent templates/agents/assistant.toml
         </pre>
       </section>
 
@@ -125,8 +125,8 @@ export function ConsoleHelpPage() {
           <Button variant="outline" size="sm" onClick={() => nav("/", { state: { openAgent: true } })}>
             Start with Agent
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setView("crews")}>
-            Agent builder
+          <Button variant="outline" size="sm" onClick={() => setView("workflows")}>
+            Workflows
           </Button>
           <Button variant="secondary" size="sm" onClick={() => setView("overview", "join-mesh")}>
             Join the mesh

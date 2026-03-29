@@ -378,7 +378,7 @@ export function ConsoleSkillsPage() {
             <CardContent className="space-y-3">
               {templates.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No bundled templates found. Make sure the examples/skills/ directory is present.
+                  No bundled templates found. Make sure the templates/skills/ directory is present.
                 </p>
               ) : (
                 templates.map((tpl) => (

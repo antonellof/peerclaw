@@ -4,26 +4,29 @@ import { ConsoleJobsPage } from "@/pages/console/ConsoleJobsPage"
 import { ConsoleOverviewPage } from "@/pages/console/ConsoleOverviewPage"
 import { ConsoleProvidersPage } from "@/pages/console/ConsoleProvidersPage"
 import { ConsoleSkillsPage } from "@/pages/console/ConsoleSkillsPage"
+import { ConsoleToolsPage } from "@/pages/console/ConsoleToolsPage"
 import { ConsoleMcpPage } from "@/pages/console/ConsoleMcpPage"
 import { AgentBuilderPage } from "@/pages/console/agent-builder/AgentBuilderPage"
 
 const TITLES: Partial<Record<WorkspaceView, string>> = {
   help: "Help & getting started",
   overview: "P2P Network",
-  crews: "Agent builder",
+  workflows: "Workflows",
   jobs: "Jobs",
   providers: "Providers",
   skills: "Skills",
+  tools: "Tools",
   mcp: "MCP",
 }
 
 const SHOW_TOP_BAR: Record<Exclude<WorkspaceView, "chat">, boolean> = {
   help: true,
   overview: false,
-  crews: false,
+  workflows: false,
   jobs: true,
   providers: true,
   skills: true,
+  tools: true,
   mcp: true,
 }
 
@@ -40,14 +43,14 @@ export function ConsolePanel({ view }: { view: Exclude<WorkspaceView, "chat"> })
       ) : null}
       <div
         className={
-          view === "crews"
+          view === "workflows"
             ? "min-h-0 flex-1 overflow-hidden"
             : "min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6"
         }
       >
         {view === "help" && <ConsoleHelpPage />}
         {view === "overview" && <ConsoleOverviewPage />}
-        {view === "crews" && (
+        {view === "workflows" && (
           <div className="h-full min-h-0">
             <AgentBuilderPage />
           </div>
@@ -55,6 +58,7 @@ export function ConsolePanel({ view }: { view: Exclude<WorkspaceView, "chat"> })
         {view === "jobs" && <ConsoleJobsPage />}
         {view === "providers" && <ConsoleProvidersPage />}
         {view === "skills" && <ConsoleSkillsPage />}
+        {view === "tools" && <ConsoleToolsPage />}
         {view === "mcp" && <ConsoleMcpPage />}
       </div>
     </div>

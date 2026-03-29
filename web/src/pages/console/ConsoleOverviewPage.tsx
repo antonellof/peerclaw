@@ -253,10 +253,10 @@ export function ConsoleOverviewPage() {
               <Link to={workspaceHref("providers")}>Providers</Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <Link to="/">Chat (Agent goal)</Link>
+              <Link to="/">Chat</Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <Link to={workspaceHref("crews")}>Agent builder</Link>
+              <Link to={workspaceHref("workflows")}>Workflows</Link>
             </Button>
           </div>
         </div>
@@ -581,7 +581,7 @@ export function ConsoleOverviewPage() {
                 <CardContent className="py-10 text-center text-sm text-muted-foreground">
                   No agents registered. Example:{" "}
                   <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-primary">
-                    peerclaw serve --web 127.0.0.1:8080 --agent examples/agents/coder.toml
+                    peerclaw serve --web 127.0.0.1:8080 --agent templates/agents/coder.toml
                   </code>
                 </CardContent>
               </Card>

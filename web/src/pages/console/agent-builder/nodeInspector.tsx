@@ -1,11 +1,14 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import type { Node } from "@xyflow/react"
+import { Plug, RefreshCw } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import type { McpToolListItem } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 import type { FlowNodeData } from "./flowCompile"
@@ -19,7 +22,7 @@ const NODE_INSPECTOR_HELP: Partial<Record<string, string>> = {
   end: "Stops execution and returns recorded steps.",
   fileSearch: "Queries the shared vectX store. Collection id = vector collection name.",
   guardrails: "SafetyLayer checks. Use Input template ({{topic}}) or Source node id. Pass / fail edges.",
-  mcp: "Calls a connected MCP tool (server:tool). Requires MCP on the node.",
+  mcp: "Runs a tool from the node MCP catalog (same servers as Settings → MCP and the MCP console). Use server:tool ids.",
   if: "CEL expression over inputs, outputs, state, input_as_text. Use true / false edge labels.",
   while: "CEL with iteration variable. Use loop / exit edge labels.",
   userApproval:
@@ -33,6 +36,167 @@ function selectCls(disabled: boolean) {
   return cn(
     "mt-1 flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-sm",
     disabled && "cursor-not-allowed opacity-60",
+  )
+}
+
+const MCP_CUSTOM_SELECT = "__peerclaw_mcp_custom__"
+
+function groupMcpToolsByServer(tools: McpToolListItem[]): [string, McpToolListItem[]][] {
+  const m = new Map<string, McpToolListItem[]>()
+  for (const t of tools) {
+    const i = t.id.indexOf(":")
+    const server = i >= 0 ? t.id.slice(0, i) : "other"
+    const arr = m.get(server)
+    if (arr) arr.push(t)
+    else m.set(server, [t])
+  }
+  return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b))
+}
+
+function McpToolSection({
+  disabled,
+  mcpToolId,
+  mcpArgsJson,
+  mcpTools,
+  mcpEnabled,
+  mcpHint,
+  onChangeData,
+  onOpenMcpConsole,
+  onRefreshMcpCatalog,
+}: {
+  disabled: boolean
+  mcpToolId: string
+  mcpArgsJson: string
+  mcpTools: McpToolListItem[]
+  mcpEnabled: boolean
+  mcpHint: string | null
+  onChangeData: (patch: Partial<FlowNodeData>) => void
+  onOpenMcpConsole?: () => void
+  onRefreshMcpCatalog?: () => void
+}) {
+  const [filter, setFilter] = useState("")
+  const q = filter.trim().toLowerCase()
+  const filtered = useMemo(() => {
+    if (!q) return mcpTools
+    return mcpTools.filter(
+      (t) =>
+        t.id.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q),
+    )
+  }, [mcpTools, q])
+
+  const grouped = useMemo(() => groupMcpToolsByServer(filtered), [filtered])
+  const ids = useMemo(() => new Set(mcpTools.map((t) => t.id)), [mcpTools])
+  const current = mcpToolId.trim()
+  const inCatalog = current.length > 0 && ids.has(current)
+  const selectValue = !current ? "" : inCatalog ? current : MCP_CUSTOM_SELECT
+
+  return (
+    <>
+      <div className="space-y-2 rounded-md border border-border/50 bg-muted/15 p-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Plug className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Node MCP</span>
+          {onRefreshMcpCatalog ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7 shrink-0"
+              disabled={disabled}
+              title="Reload tool list from the node"
+              onClick={() => onRefreshMcpCatalog()}
+            >
+              <RefreshCw className="size-3.5" />
+            </Button>
+          ) : null}
+        </div>
+        {mcpHint ? <p className="text-[10px] leading-relaxed text-muted-foreground">{mcpHint}</p> : null}
+        {!mcpEnabled ? (
+          <p className="text-[10px] text-amber-600/90 dark:text-amber-400/90">
+            MCP is disabled in config. Enable it in Settings → MCP or the MCP console.
+          </p>
+        ) : null}
+        {onOpenMcpConsole ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 w-full text-[11px]"
+            disabled={disabled}
+            onClick={() => onOpenMcpConsole()}
+          >
+            Open MCP console
+          </Button>
+        ) : null}
+      </div>
+
+      {mcpTools.length > 8 ? (
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Filter tools</Label>
+          <Input
+            className="mt-1 h-7 text-[11px]"
+            disabled={disabled}
+            placeholder="server, tool name, description…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        </div>
+      ) : null}
+
+      <div>
+        <Label>Tool (from catalog)</Label>
+        <select
+          className={selectCls(disabled)}
+          disabled={disabled || mcpTools.length === 0}
+          value={selectValue}
+          onChange={(e) => {
+            const v = e.target.value
+            if (v === "" || v === MCP_CUSTOM_SELECT) {
+              if (v === "") onChangeData({ mcpToolId: "" })
+              return
+            }
+            onChangeData({ mcpToolId: v })
+          }}
+        >
+          <option value="">{mcpTools.length === 0 ? "No tools — configure MCP" : "Select tool…"}</option>
+          {grouped.map(([server, list]) => (
+            <optgroup key={server} label={server}>
+              {list.map((t) => {
+                const short = t.id.startsWith(`${server}:`) ? t.id.slice(server.length + 1) : t.id
+                return (
+                  <option key={t.id} value={t.id} title={t.description ?? undefined}>
+                    {short}
+                    {t.description ? ` — ${t.description.slice(0, 72)}${t.description.length > 72 ? "…" : ""}` : ""}
+                  </option>
+                )
+              })}
+            </optgroup>
+          ))}
+          <option value={MCP_CUSTOM_SELECT}>Custom id (edit below)…</option>
+        </select>
+      </div>
+      <div>
+        <Label>Tool id <span className="font-normal text-muted-foreground">(server:tool)</span></Label>
+        <Input
+          className="mt-1 h-8 font-mono text-[11px]"
+          disabled={disabled}
+          placeholder="e.g. filesystem:read_file"
+          value={mcpToolId}
+          onChange={(e) => onChangeData({ mcpToolId: e.target.value })}
+        />
+      </div>
+      <div>
+        <Label>Arguments JSON</Label>
+        <Textarea
+          className="mt-1 font-mono text-[11px]"
+          rows={4}
+          disabled={disabled}
+          placeholder='{"query":"{{topic}}"}'
+          value={mcpArgsJson}
+          onChange={(e) => onChangeData({ mcpArgsJson: e.target.value })}
+        />
+      </div>
+    </>
   )
 }
 
@@ -72,11 +236,22 @@ export function FlowNodeInspector({
   disabled,
   onChangeData,
   modelIds,
+  mcpTools = [],
+  mcpEnabled = false,
+  mcpHint = null,
+  onOpenMcpConsole,
+  onRefreshMcpCatalog,
 }: {
   node: Node
   disabled: boolean
   onChangeData: (patch: Partial<FlowNodeData>) => void
   modelIds: string[]
+  /** Live catalog from GET /api/mcp/status (same as chat and Settings → MCP). */
+  mcpTools?: McpToolListItem[]
+  mcpEnabled?: boolean
+  mcpHint?: string | null
+  onOpenMcpConsole?: () => void
+  onRefreshMcpCatalog?: () => void
 }) {
   const d = (node.data || {}) as FlowNodeData
   const nt = String(node.type ?? "")
@@ -523,28 +698,18 @@ export function FlowNodeInspector({
       )}
 
       {node.type === "mcp" && (
-        <>
-          <div>
-            <Label>Tool id (server:tool)</Label>
-            <Input
-              className="mt-1 h-8 font-mono text-[11px]"
-              disabled={disabled}
-              value={d.mcpToolId ?? ""}
-              onChange={(e) => onChangeData({ mcpToolId: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label>Arguments JSON</Label>
-            <Textarea
-              className="mt-1 font-mono text-[11px]"
-              rows={4}
-              disabled={disabled}
-              placeholder='{"query":"{{topic}}"}'
-              value={d.mcpArgsJson ?? "{}"}
-              onChange={(e) => onChangeData({ mcpArgsJson: e.target.value })}
-            />
-          </div>
-        </>
+        <McpToolSection
+          key={node.id}
+          disabled={disabled}
+          mcpToolId={d.mcpToolId ?? ""}
+          mcpArgsJson={d.mcpArgsJson ?? "{}"}
+          mcpTools={mcpTools}
+          mcpEnabled={mcpEnabled}
+          mcpHint={mcpHint}
+          onChangeData={onChangeData}
+          onOpenMcpConsole={onOpenMcpConsole}
+          onRefreshMcpCatalog={onRefreshMcpCatalog}
+        />
       )}
 
       {node.type === "fileSearch" && (

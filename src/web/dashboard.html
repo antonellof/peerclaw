@@ -1440,7 +1440,7 @@
                 <div class="panel-header">Requirements</div>
                 <div class="panel-body" style="font-size:0.8125rem;line-height:1.6;color:var(--text-secondary)">
                     <p style="margin-bottom:0.65rem"><strong style="color:var(--text-primary)">Agent tab</strong> needs a running node with an agent spec, for example:</p>
-                    <code style="display:block;background:var(--bg-primary);padding:0.65rem 0.85rem;border-radius:6px;font-size:0.72rem;color:var(--accent);word-break:break-all">peerclaw serve --web 127.0.0.1:8080 --agent examples/agents/assistant.toml</code>
+                    <code style="display:block;background:var(--bg-primary);padding:0.65rem 0.85rem;border-radius:6px;font-size:0.72rem;color:var(--accent);word-break:break-all">peerclaw serve --web 127.0.0.1:8080 --agent templates/agents/assistant.toml</code>
                     <p style="margin-top:0.65rem">Without <code style="color:var(--accent)">--agent</code>, tasks are created but fail with a clear message. Chat needs local or network inference enabled.</p>
                 </div>
             </div>
@@ -1548,7 +1548,7 @@
                     <p>No agents registered yet.</p>
                     <p style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.5rem">
                         Start the server with an agent:<br>
-                        <code style="color:var(--accent)">peerclaw serve --web 127.0.0.1:8080 --agent examples/agents/coder.toml</code>
+                        <code style="color:var(--accent)">peerclaw serve --web 127.0.0.1:8080 --agent templates/agents/coder.toml</code>
                     </p>
                 </div>
             </div>
@@ -2078,7 +2078,7 @@
                 grid.innerHTML = `<div class="empty-state">
                     <p>No agents registered yet.</p>
                     <p style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.5rem">
-                        Start with: <code style="color:var(--accent)">peerclaw serve --web 127.0.0.1:8080 --agent examples/agents/coder.toml</code>
+                        Start with: <code style="color:var(--accent)">peerclaw serve --web 127.0.0.1:8080 --agent templates/agents/coder.toml</code>
                     </p>
                 </div>`;
                 return;

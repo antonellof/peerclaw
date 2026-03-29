@@ -356,8 +356,16 @@ fn api_tasks_router() -> Router<Arc<WebState>> {
         .route("/tasks", get(api_list_tasks))
 }
 
-fn api_crews_router() -> Router<Arc<WebState>> {
+fn api_workflows_router() -> Router<Arc<WebState>> {
     Router::new()
+        // Primary: /api/workflows/*
+        .route("/workflows/validate", post(api_flow_validate))
+        .route("/workflows/kickoff", post(api_flow_kickoff))
+        .route("/workflows/runs/:id/stop", post(api_crew_stop))
+        .route("/workflows/runs/:id/stream", get(api_crew_stream))
+        .route("/workflows/runs/:id", get(api_flow_run_get))
+        .route("/workflows/runs", get(api_flow_runs_list))
+        // Legacy aliases: /api/crews/* and /api/flows/*
         .route("/crews/validate", post(api_crew_validate))
         .route("/crews/kickoff", post(api_crew_kickoff))
         .route("/crews/runs/:id/stop", post(api_crew_stop))
@@ -374,7 +382,7 @@ fn api_crews_router() -> Router<Arc<WebState>> {
 fn api_router() -> Router<Arc<WebState>> {
     Router::new()
         .merge(api_tasks_router())
-        .merge(api_crews_router())
+        .merge(api_workflows_router())
         .route("/agents/library", get(api_agent_library_list).post(api_agent_library_post))
         .route("/agents/library/:id", delete(api_agent_library_delete))
         .route("/status", get(api_status))
@@ -904,34 +912,14 @@ async fn api_agent_library_post(
             Json(serde_json::json!({"ok": false, "error": "id required"})),
         ));
     }
-    match entry.kind {
-        crate::agent_library::AgentLibraryKind::Flow => {
-            let Some(spec) = entry.flow_spec.clone() else {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"ok": false, "error": "flow_spec required for flow agents"})),
-                ));
-            };
-            if let Err(e) = spec.validate_for_run() {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"ok": false, "error": e})),
-                ));
-            }
-        }
-        crate::agent_library::AgentLibraryKind::Task => {
-            let Some(tt) = entry
-                .task_type
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            else {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"ok": false, "error": "task_type required for task agents"})),
-                ));
-            };
-            entry.task_type = Some(tt.to_string());
+    // Migrate legacy task entries to flow
+    entry.migrate_if_needed();
+    if let Some(spec) = entry.flow_spec.as_ref() {
+        if let Err(e) = spec.validate_for_run() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"ok": false, "error": e})),
+            ));
         }
     }
     {
@@ -1242,7 +1230,7 @@ async fn api_skills_scan(State(state): State<Arc<WebState>>) -> Json<serde_json:
     }
 }
 
-// ---- Skill templates: bundled example skills from examples/skills/ ----
+// ---- Skill templates: bundled example skills from templates/skills/ ----
 
 #[derive(Serialize)]
 struct SkillTemplate {
@@ -1261,13 +1249,13 @@ fn load_bundled_templates() -> Vec<SkillTemplate> {
         let mut v = Vec::new();
         if let Ok(exe) = std::env::current_exe() {
             if let Some(parent) = exe.parent() {
-                v.push(parent.join("../../examples/skills"));
-                v.push(parent.join("examples/skills"));
+                v.push(parent.join("../../templates/skills"));
+                v.push(parent.join("templates/skills"));
             }
         }
         v.push(std::path::PathBuf::from(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/examples/skills"
+            "/templates/skills"
         )));
         v
     };

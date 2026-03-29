@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Bot, ChevronDown, Send, Settings2, Zap } from "lucide-react"
+import { Bot, ChevronDown, Send, Settings2 } from "lucide-react"
 
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
 import {
-  createTask,
   fetchAgentLibrary,
   fetchFlowRun,
   fetchOpenAiModels,
@@ -25,9 +24,6 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
@@ -180,8 +176,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [showWelcome, setShowWelcome] = useState(true)
-  /** When true, next send creates a background agent task instead of streaming chat. */
-  const [deepTaskMode, setDeepTaskMode] = useState(false)
+  // deepTaskMode removed: chat is always agentic, workflows run via library picker
   const [models, setModels] = useState<{ id: string; owned_by?: string }[]>([])
   const model = chatPreferences.model
   const setModel = useCallback(
@@ -212,8 +207,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
   const [autocompleteOpen, setAutocompleteOpen] = useState(false)
   const [autocompleteFilter, setAutocompleteFilter] = useState("")
   const [autocompleteIdx, setAutocompleteIdx] = useState(0)
-  const [agentTaskType, setAgentTaskType] = useState("general")
-  const [agentBudget, setAgentBudget] = useState(5)
+  // agentBudget removed: handled per-workflow in settings
   const [transcriptReady, setTranscriptReady] = useState(false)
   const [agentLibrary, setAgentLibrary] = useState<AgentLibraryEntryJson[]>([])
 
@@ -316,19 +310,10 @@ export function ChatPanel({ onRegisterControls }: Props) {
 
   useEffect(() => {
     const st = location.state as {
-      agentPreset?: { taskType: string; text: string }
-      openAgent?: boolean
+      agentPreset?: { text: string }
     } | null
     if (st?.agentPreset) {
-      setDeepTaskMode(true)
-      setAgentTaskType(st.agentPreset.taskType)
       setInput(st.agentPreset.text)
-      setShowWelcome(false)
-      navigate(`${location.pathname}${location.search}`, { replace: true, state: {} })
-      return
-    }
-    if (st?.openAgent) {
-      setDeepTaskMode(true)
       setShowWelcome(false)
       navigate(`${location.pathname}${location.search}`, { replace: true, state: {} })
     }
@@ -488,6 +473,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
     [stopPoll],
   )
 
+  // @ts-expect-error -- kept for future task polling integration
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const startAgentPoll = useCallback(
     (taskId: string) => {
       finishedRef.current.delete(taskId)
@@ -553,7 +540,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
 
   useLayoutEffect(() => {
     syncComposerHeight()
-  }, [input, deepTaskMode, autocompleteOpen, syncComposerHeight])
+  }, [input, autocompleteOpen, syncComposerHeight])
 
   useEffect(() => {
     window.addEventListener("resize", syncComposerHeight)
@@ -614,128 +601,30 @@ export function ChatPanel({ onRegisterControls }: Props) {
       return
     }
 
+    // Run selected workflow from library
     if (selectedLibraryEntry) {
       setInput("")
       setShowWelcome(false)
       setMessages((m) => [...m, { id: newId(), role: "user", content }])
       setTyping(true)
       try {
-        if (selectedLibraryEntry.kind === "flow") {
-          if (!selectedLibraryEntry.flow_spec) {
-            setMessages((m) => [
-              ...m,
-              {
-                id: newId(),
-                role: "error",
-                content: "This saved flow has no graph spec. Re-save it from Agent builder.",
-              },
-            ])
-            setTyping(false)
-            return
-          }
-          const fr = await runFlowFromChat(selectedLibraryEntry.flow_spec, content)
+        if (!selectedLibraryEntry.flow_spec) {
           setMessages((m) => [
             ...m,
-            {
-              id: newId(),
-              role: fr.ok ? "assistant" : "error",
-              content: fr.text,
-              meta: "flow run",
-            },
+            { id: newId(), role: "error", content: "This workflow has no flow spec. Re-save it from the Workflow builder." },
           ])
           setTyping(false)
           return
         }
-        const tt = selectedLibraryEntry.task_type?.trim()
-        if (!tt) {
-          setMessages((m) => [
-            ...m,
-            { id: newId(), role: "error", content: "Saved task agent has no task_type." },
-          ])
-          setTyping(false)
-          return
-        }
-        let budget = agentBudget
-        if (!Number.isFinite(budget) || budget < 0.5) budget = 5
-        const res = await createTask({
-          task_type: tt,
-          description: content,
-          budget,
-          model,
-          use_mcp: chatPreferences.useMcp,
-          session_id: sessionId,
-        })
-        if (!res.success || !res.task_id) {
-          setMessages((m) => [
-            ...m,
-            { id: newId(), role: "error", content: res.error ?? "Could not create task." },
-          ])
-        } else {
-          const tid = res.task_id
-          setMessages((m) => [
-            ...m,
-            {
-              id: newId(),
-              role: "system",
-              content: `Agent task ${tid.slice(0, 8)}… (${selectedLibraryEntry.name})`,
-              agentTaskId: tid,
-              agentLogs: [],
-              agentStatusLine: "starting…",
-            },
-          ])
-          startAgentPoll(tid)
-        }
-      } catch (e) {
+        const fr = await runFlowFromChat(selectedLibraryEntry.flow_spec, content)
         setMessages((m) => [
           ...m,
-          { id: newId(), role: "error", content: e instanceof Error ? e.message : "Agent error" },
+          { id: newId(), role: fr.ok ? "assistant" : "error", content: fr.text, meta: `workflow: ${selectedLibraryEntry.name}` },
         ])
-      }
-      setTyping(false)
-      return
-    }
-
-    if (deepTaskMode) {
-      setInput("")
-      setShowWelcome(false)
-      setDeepTaskMode(false)
-      setMessages((m) => [...m, { id: newId(), role: "user", content }])
-      setTyping(true)
-      try {
-        let budget = agentBudget
-        if (!Number.isFinite(budget) || budget < 0.5) budget = 5
-        const res = await createTask({
-          task_type: agentTaskType,
-          description: content,
-          budget,
-          model,
-          use_mcp: chatPreferences.useMcp,
-          session_id: sessionId,
-        })
-        if (!res.success || !res.task_id) {
-          setMessages((m) => [
-            ...m,
-            { id: newId(), role: "error", content: res.error ?? "Could not create task." },
-          ])
-        } else {
-          const tid = res.task_id
-          setMessages((m) => [
-            ...m,
-            {
-              id: newId(),
-              role: "system",
-              content: `Agent task ${tid.slice(0, 8)}…`,
-              agentTaskId: tid,
-              agentLogs: [],
-              agentStatusLine: "starting…",
-            },
-          ])
-          startAgentPoll(tid)
-        }
       } catch (e) {
         setMessages((m) => [
           ...m,
-          { id: newId(), role: "error", content: e instanceof Error ? e.message : "Task error" },
+          { id: newId(), role: "error", content: e instanceof Error ? e.message : "Workflow error" },
         ])
       }
       setTyping(false)
@@ -817,17 +706,13 @@ export function ChatPanel({ onRegisterControls }: Props) {
   const applyAgentTemplate = (key: keyof typeof AGENT_TASK_TEMPLATES) => {
     const t = AGENT_TASK_TEMPLATES[key]
     if (!t) return
-    setAgentTaskType(t.taskType)
     setInput(t.text)
-    setDeepTaskMode(true)
   }
 
   const applyScenarioPreset = (key: string) => {
     const p = SCENARIO_PRESETS[key]
     if (!p) return
-    setAgentTaskType(p.type)
     setInput(p.text)
-    setDeepTaskMode(true)
   }
 
   return (
@@ -839,10 +724,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
           </p>
           <p className="truncate text-[10px] text-muted-foreground">
             {selectedLibraryEntry
-              ? selectedLibraryEntry.kind === "flow"
-                ? "Saved flow — runs on the node"
-                : `Saved task · ${selectedLibraryEntry.task_type ?? "general"}`
-              : "Chat, tools, or pick a saved agent below"}
+              ? "Workflow — runs on the node"
+              : "Chat with tools, or pick a workflow below"}
           </p>
         </div>
       </header>
@@ -860,7 +743,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
               <div className="mx-auto max-w-lg text-center">
                 <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">PeerClaw</h1>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Chat, run agent tasks, or type <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[11px]">/</kbd> for commands
+                  Ask anything, or type <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[11px]">/</kbd> for commands
                 </p>
               </div>
               <div className="mx-auto mt-8 grid w-full max-w-lg gap-2 sm:grid-cols-2">
@@ -1009,12 +892,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
               rows={1}
               placeholder={
                 selectedLibraryEntry
-                  ? selectedLibraryEntry.kind === "flow"
-                    ? "Message becomes flow input_as_text (and topic)…"
-                    : `Describe the goal for «${selectedLibraryEntry.name}»…`
-                  : deepTaskMode
-                    ? "Describe the goal for the agent…"
-                    : "Message, or type / for commands…"
+                  ? `Message for «${selectedLibraryEntry.name}»…`
+                  : "Message, or type / for commands…"
               }
               value={input}
               onChange={(e) => onInputChange(e.target.value)}
@@ -1061,35 +940,19 @@ export function ChatPanel({ onRegisterControls }: Props) {
                     type="button"
                     className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   >
-                    {deepTaskMode ? (
-                      <><Zap className="size-3 text-amber-500" /> Agent</>
-                    ) : (
-                      <><Settings2 className="size-3" /> Chat</>
-                    )}
+                    <Settings2 className="size-3" /> Settings
                     <ChevronDown className="size-3 opacity-50" />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-56">
-                  {/* Mode selection */}
-                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Mode</DropdownMenuLabel>
-                  <DropdownMenuRadioGroup value={deepTaskMode ? "agent" : "chat"} onValueChange={(v) => setDeepTaskMode(v === "agent")}>
-                    <DropdownMenuRadioItem value="chat" className="text-xs">
-                      Chat <span className="ml-auto text-[10px] text-muted-foreground">streaming</span>
-                    </DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="agent" className="text-xs">
-                      Agent <span className="ml-auto text-[10px] text-muted-foreground">deep task</span>
-                    </DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
-
-                  <DropdownMenuSeparator />
-
                   {/* Tool toggles */}
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Capabilities</DropdownMenuLabel>
                   <DropdownMenuCheckboxItem
                     className="text-xs"
                     checked={chatPreferences.useAgentic}
                     onCheckedChange={(v) => setChatPreferences({ useAgentic: !!v })}
                   >
-                    Tools (ReAct loop)
+                    Tools (search, browse, code…)
                   </DropdownMenuCheckboxItem>
                   <DropdownMenuCheckboxItem
                     className="text-xs"
@@ -1098,87 +961,49 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   >
                     MCP tools
                   </DropdownMenuCheckboxItem>
-
-                  {/* Agent task settings submenu - only meaningful when in agent mode */}
-                  {deepTaskMode && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuSub>
-                        <DropdownMenuSubTrigger className="text-xs">Task type</DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent className="w-40">
-                          <DropdownMenuRadioGroup value={agentTaskType} onValueChange={setAgentTaskType}>
-                            {["general", "research", "code", "monitor", "analyze"].map((x) => (
-                              <DropdownMenuRadioItem key={x} value={x} className="text-xs capitalize">
-                                {x}
-                              </DropdownMenuRadioItem>
-                            ))}
-                          </DropdownMenuRadioGroup>
-                        </DropdownMenuSubContent>
-                      </DropdownMenuSub>
-                      <div className="flex items-center gap-2 px-2 py-1.5">
-                        <span className="text-xs text-muted-foreground">Budget</span>
-                        <input
-                          type="number"
-                          className="h-6 w-16 rounded border border-input bg-background px-1.5 text-xs"
-                          value={agentBudget}
-                          min={0.5}
-                          step={0.5}
-                          onChange={(e) => setAgentBudget(parseFloat(e.target.value) || 5)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <span className="text-[10px] text-muted-foreground">PCLAW</span>
-                      </div>
-                    </>
-                  )}
+                  <DropdownMenuCheckboxItem
+                    className="text-xs"
+                    checked={settings.distributed}
+                    onCheckedChange={(v) => setSettings({ distributed: !!v })}
+                  >
+                    Distributed (P2P)
+                  </DropdownMenuCheckboxItem>
 
                   <DropdownMenuSeparator />
 
-                  {/* Settings submenu */}
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger className="text-xs">Settings</DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="w-52">
-                      <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Inference</DropdownMenuLabel>
-                      <div className="space-y-2 px-2 py-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-muted-foreground">Temperature</span>
-                          <input
-                            type="number"
-                            className="h-6 w-14 rounded border border-input bg-background px-1.5 text-xs"
-                            value={settings.temperature}
-                            min={0}
-                            max={2}
-                            step={0.1}
-                            onChange={(e) => setSettings({ temperature: parseFloat(e.target.value) || 0.7 })}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-muted-foreground">Max tokens</span>
-                          <input
-                            type="number"
-                            className="h-6 w-16 rounded border border-input bg-background px-1.5 text-xs"
-                            value={settings.maxTokens}
-                            min={50}
-                            step={50}
-                            onChange={(e) => setSettings({ maxTokens: parseInt(e.target.value) || 500 })}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </div>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuCheckboxItem
-                        className="text-xs"
-                        checked={settings.distributed}
-                        onCheckedChange={(v) => setSettings({ distributed: !!v })}
-                      >
-                        Distributed (P2P)
-                      </DropdownMenuCheckboxItem>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
+                  {/* Inference settings */}
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Inference</DropdownMenuLabel>
+                  <div className="space-y-2 px-2 py-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Temperature</span>
+                      <input
+                        type="number"
+                        className="h-6 w-14 rounded border border-input bg-background px-1.5 text-xs"
+                        value={settings.temperature}
+                        min={0}
+                        max={2}
+                        step={0.1}
+                        onChange={(e) => setSettings({ temperature: parseFloat(e.target.value) || 0.7 })}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Max tokens</span>
+                      <input
+                        type="number"
+                        className="h-6 w-16 rounded border border-input bg-background px-1.5 text-xs"
+                        value={settings.maxTokens}
+                        min={50}
+                        step={50}
+                        onChange={(e) => setSettings({ maxTokens: parseInt(e.target.value) || 500 })}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              {/* Saved agents (Agent builder + examples catalog on node) */}
+              {/* Workflow picker */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -1187,14 +1012,14 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   >
                     <Bot className="size-3 shrink-0 opacity-80" />
                     <span className="truncate">
-                      {selectedLibraryEntry ? selectedLibraryEntry.name : "Saved agent"}
+                      {selectedLibraryEntry ? selectedLibraryEntry.name : "Workflows"}
                     </span>
                     <ChevronDown className="size-3 shrink-0 opacity-50" />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="max-h-72 w-72 overflow-y-auto">
                   <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Run with saved agent
+                    Run a workflow
                   </DropdownMenuLabel>
                   <DropdownMenuRadioGroup
                     value={chatPreferences.selectedAgentLibraryId ?? "__default__"}
@@ -1205,39 +1030,22 @@ export function ChatPanel({ onRegisterControls }: Props) {
                     }
                   >
                     <DropdownMenuRadioItem value="__default__" className="text-xs">
-                      Default (chat / mode below)
+                      None (direct chat)
                     </DropdownMenuRadioItem>
-                    {agentLibrary
-                      .filter((e) => e.kind === "flow")
-                      .map((e) => (
-                        <DropdownMenuRadioItem key={e.id} value={e.id} className="text-xs">
-                          <span className="font-medium">Flow</span> · {e.name}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    {agentLibrary.filter((e) => e.kind === "task").length > 0 ? (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                          Task presets (examples / skills)
-                        </DropdownMenuLabel>
-                        {agentLibrary
-                          .filter((e) => e.kind === "task")
-                          .map((e) => (
-                            <DropdownMenuRadioItem key={e.id} value={e.id} className="text-xs">
-                              <span className="font-medium">Task</span> · {e.name}
-                            </DropdownMenuRadioItem>
-                          ))}
-                      </>
-                    ) : null}
+                    {agentLibrary.map((e) => (
+                      <DropdownMenuRadioItem key={e.id} value={e.id} className="text-xs">
+                        {e.name}
+                      </DropdownMenuRadioItem>
+                    ))}
                   </DropdownMenuRadioGroup>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="text-xs"
                     onClick={() => {
-                      setView("crews")
+                      setView("workflows")
                     }}
                   >
-                    Open Agent builder…
+                    Open Workflow builder…
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

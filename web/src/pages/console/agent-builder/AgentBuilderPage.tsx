@@ -37,12 +37,14 @@ import {
 import {
   fetchFlowRun,
   fetchFlowRuns,
+  fetchMcpStatus,
   fetchOpenAiModels,
   kickoffFlow,
   upsertAgentLibraryEntry,
   validateFlow,
   type FlowRunRecordJson,
   type FlowSpecJson,
+  type McpToolListItem,
 } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -119,7 +121,12 @@ const PALETTE: PaletteItem[] = [
   { section: "Core", type: "note", label: "Note", hint: "Canvas-only (not exported)" },
   { section: "Tools", type: "fileSearch", label: "File search", hint: "vectX semantic search" },
   { section: "Tools", type: "guardrails", label: "Guardrails", hint: "SafetyLayer pass / fail branches" },
-  { section: "Tools", type: "mcp", label: "MCP", hint: "Model Context Protocol tool" },
+  {
+    section: "Tools",
+    type: "mcp",
+    label: "MCP",
+    hint: "Tools from node MCP config (same as MCP console)",
+  },
   { section: "Logic", type: "if", label: "If / else", hint: "CEL → true / false edges" },
   { section: "Logic", type: "while", label: "While", hint: "CEL → loop / exit edges" },
   { section: "Logic", type: "userApproval", label: "User approval", hint: "inputs.human_approval: approve|reject" },
@@ -212,6 +219,9 @@ function AgentBuilderInner() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [runDetail, setRunDetail] = useState<FlowRunRecordJson | null>(null)
   const [modelIds, setModelIds] = useState<string[]>([])
+  const [mcpTools, setMcpTools] = useState<McpToolListItem[]>([])
+  const [mcpEnabled, setMcpEnabled] = useState(false)
+  const [mcpHint, setMcpHint] = useState<string | null>(null)
   const [runPanelCollapsed, setRunPanelCollapsed] = useState(readRunPanelCollapsed)
   const [runPanelHeight, setRunPanelHeight] = useState(readRunPanelHeight)
   const runPanelHeightRef = useRef(runPanelHeight)
@@ -268,6 +278,32 @@ function AgentBuilderInner() {
       .then((m) => setModelIds(m.map((x) => x.id)))
       .catch(() => setModelIds([]))
   }, [])
+
+  const refreshMcpCatalog = useCallback(() => {
+    void fetchMcpStatus()
+      .then((s) => {
+        setMcpTools(s.tools)
+        setMcpEnabled(s.config.enabled)
+        const up = s.connected_servers.length
+        const total = s.config.servers.length
+        setMcpHint(
+          s.config.enabled
+            ? `${s.tool_count} tools in catalog · ${up}/${total} servers connected`
+            : "MCP disabled — enable in Settings → MCP",
+        )
+      })
+      .catch(() => {
+        setMcpTools([])
+        setMcpEnabled(false)
+        setMcpHint("Could not load MCP status (is the node running?)")
+      })
+  }, [])
+
+  useEffect(() => {
+    refreshMcpCatalog()
+    const t = setInterval(refreshMcpCatalog, 45_000)
+    return () => clearInterval(t)
+  }, [refreshMcpCatalog])
 
   const spec = useMemo(
     () => compileFlowSpec(nodesSnap, edgesSnap, flowName.trim() || "agent"),
@@ -519,7 +555,7 @@ function AgentBuilderInner() {
                 void upsertAgentLibraryEntry({
                   id,
                   name: flowName.trim() || "Saved flow",
-                  description: "Saved from Agent builder",
+                  description: "Saved from Workflow builder",
                   kind: "flow",
                   flow_spec: spec,
                 }).then((r) => {
@@ -591,9 +627,10 @@ function AgentBuilderInner() {
           <DialogHeader>
             <DialogTitle>Agent settings</DialogTitle>
             <DialogDescription>
-              Flows execute on this node using your local models, MCP, and the shared{" "}
-              <strong className="text-foreground">vectX</strong> vector store. File search nodes use collection
-              names you create via the API or console.
+              Flows execute on this node using your local models, the same <strong className="text-foreground">MCP</strong>{" "}
+              servers as the MCP console / Settings, and the shared <strong className="text-foreground">vectX</strong> vector
+              store. MCP nodes list tools from <code className="text-foreground/90">/api/mcp/status</code>. File search uses
+              collection names from the API or console.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 text-xs text-muted-foreground">
@@ -673,6 +710,11 @@ function AgentBuilderInner() {
                 node={selectedNode}
                 disabled={preview}
                 modelIds={modelIds}
+                mcpTools={mcpTools}
+                mcpEnabled={mcpEnabled}
+                mcpHint={mcpHint}
+                onOpenMcpConsole={() => setView("mcp")}
+                onRefreshMcpCatalog={refreshMcpCatalog}
                 onChangeData={(patch) => updateNodeData(selectedNode.id, patch)}
               />
             ) : (
