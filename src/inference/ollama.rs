@@ -332,6 +332,9 @@ impl OllamaProvider {
         struct OllamaStreamDeltaMessage {
             #[serde(default)]
             content: String,
+            /// Some cloud-proxied models (e.g. GLM) put text in reasoning_content.
+            #[serde(default)]
+            reasoning_content: String,
         }
 
         let mut stream = resp.bytes_stream();
@@ -353,10 +356,17 @@ impl OllamaProvider {
                     continue;
                 }
                 if let Ok(obj) = serde_json::from_str::<OllamaChatStreamLine>(&raw) {
-                    if let Some(m) = obj.message {
-                        if !m.content.is_empty() {
-                            on_delta(&m.content);
-                            full_text.push_str(&m.content);
+                    if let Some(m) = &obj.message {
+                        let delta = if !m.content.is_empty() {
+                            &m.content
+                        } else if !m.reasoning_content.is_empty() {
+                            &m.reasoning_content
+                        } else {
+                            ""
+                        };
+                        if !delta.is_empty() {
+                            on_delta(delta);
+                            full_text.push_str(delta);
                         }
                     }
                     if obj.done {
@@ -369,10 +379,17 @@ impl OllamaProvider {
         let tail = line_buf.trim();
         if !tail.is_empty() {
             if let Ok(obj) = serde_json::from_str::<OllamaChatStreamLine>(tail) {
-                if let Some(m) = obj.message {
-                    if !m.content.is_empty() {
-                        on_delta(&m.content);
-                        full_text.push_str(&m.content);
+                if let Some(m) = &obj.message {
+                    let delta = if !m.content.is_empty() {
+                        &m.content
+                    } else if !m.reasoning_content.is_empty() {
+                        &m.reasoning_content
+                    } else {
+                        ""
+                    };
+                    if !delta.is_empty() {
+                        on_delta(delta);
+                        full_text.push_str(delta);
                     }
                 }
                 if obj.done {
@@ -380,6 +397,13 @@ impl OllamaProvider {
                     eval_ns = obj.eval_duration;
                 }
             }
+        }
+        if full_text.is_empty() && tokens > 0 {
+            tracing::warn!(
+                model = %ollama_model,
+                tokens,
+                "Ollama returned tokens but no text — model may use an unsupported response field"
+            );
         }
 
         let elapsed = start.elapsed();
