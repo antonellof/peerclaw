@@ -256,7 +256,7 @@ export function ConsoleOverviewPage() {
               <Link to="/">Chat (Agent goal)</Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <Link to={workspaceHref("crews")}>Crews</Link>
+              <Link to={workspaceHref("crews")}>Agent builder</Link>
             </Button>
           </div>
         </div>

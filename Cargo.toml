@@ -110,6 +110,11 @@ serde_yaml = "0.9"
 which = "7"
 url = "2"
 cron = "0.13"
+cel = { version = "0.13", default-features = false, features = [
+    "json",
+    "regex",
+    "chrono",
+] }
 
 [dev-dependencies]
 tempfile = "3"

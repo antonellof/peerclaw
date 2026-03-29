@@ -240,10 +240,11 @@ export function ChatPanel({ onRegisterControls }: Props) {
         block: "center",
       })
     })
-    const { focusAgentTaskId: _, ...rest } = st as Record<string, unknown>
+    const stObj = { ...(st as Record<string, unknown>) }
+    delete stObj.focusAgentTaskId
     navigate(
       { pathname: location.pathname, search: location.search, hash: location.hash },
-      { replace: true, state: Object.keys(rest).length ? rest : {} },
+      { replace: true, state: Object.keys(stObj).length ? stObj : {} },
     )
   }, [location.state, location.pathname, location.search, location.hash, navigate])
 

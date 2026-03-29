@@ -32,3 +32,11 @@ fn examples_flows_minimal_json() {
     spec.validate().expect("FlowSpec::validate");
     spec.execution_order().expect("FlowSpec::execution_order");
 }
+
+#[test]
+fn examples_flows_interpreter_linear_json() {
+    let p = format!("{}/examples/flows/interpreter-linear.json", manifest_dir());
+    let raw = std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {p}: {e}"));
+    let spec: FlowSpec = serde_json::from_str(&raw).expect("parse FlowSpec");
+    spec.validate_for_run().expect("FlowSpec::validate_for_run");
+}

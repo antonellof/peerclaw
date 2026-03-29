@@ -1,4 +1,19 @@
-//! Declarative flow graphs (DAG over named steps).
+//! Declarative flow graphs for the web **Agent builder** (OpenAI-style).
+//!
+//! ## Execution modes
+//! - **Legacy DAG** — no `start` node: all nodes run in topological order (backward compatible with
+//!   `examples/flows/minimal.json`). Each LLM step sees outputs of all prior steps.
+//! - **Interpreter** — exactly one node with `kind: "start"`: execution begins at `start` and follows
+//!   outgoing edges. Branching uses edge `label` values (`true`/`false`, `loop`/`exit`, `pass`/`fail`).
+//!
+//! ## CEL (If / While)
+//! Expressions are evaluated with variables: `inputs`, `outputs`, `state` (maps), `input_as_text` (string),
+//! and `iteration` (uint, for while loops — completed iterations before the current check).
+//!
+//! See [OpenAI node reference](https://developers.openai.com/api/docs/guides/node-reference/) for the
+//! conceptual catalog (Start, Agent, Note, File search, Guardrails, MCP, If/else, While, …).
+
+mod interpreter;
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -6,10 +21,12 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use crate::agent::AgentTaskExtras;
-use crate::crew;
-use crate::executor::task::{ExecutionTask, InferenceTask, TaskData};
+use crate::agent::AgenticInferenceSink;
 use crate::executor::TaskExecutor;
+use crate::prompts::PromptBundle;
+use crate::safety::SafetyLayer;
 use crate::tools::{NodeToolTx, ToolRegistry};
+use crate::vector::VectorStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlowSpec {
@@ -24,17 +41,62 @@ pub struct FlowNode {
     pub id: String,
     #[serde(default)]
     pub kind: String,
+    /// Display title in the agent builder UI.
+    #[serde(default)]
+    pub name: String,
     #[serde(default)]
     pub prompt: String,
-    /// When `kind` is `crew` (or this is set), run a nested [`crew::CrewSpec`].
+    /// When `kind` is `crew` (or this is set), run a nested [`crate::crew::CrewSpec`].
     #[serde(default)]
     pub crew_spec: Option<crate::crew::CrewSpec>,
+    // --- Agent ---
+    #[serde(default)]
+    pub instructions: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    // --- If / While ---
+    #[serde(default)]
+    pub condition_cel: String,
+    /// 0 = default cap (100) in the interpreter.
+    #[serde(default)]
+    pub max_iterations: u32,
+    // --- Guardrails ---
+    #[serde(default)]
+    pub source_node_id: String,
+    #[serde(default)]
+    pub guardrail_checks: Vec<String>,
+    // --- MCP ---
+    #[serde(default)]
+    pub mcp_tool_id: String,
+    #[serde(default)]
+    pub mcp_arguments_json: String,
+    // --- File search (local vector) ---
+    #[serde(default)]
+    pub vector_collection: String,
+    #[serde(default)]
+    pub vector_query_template: String,
+    // --- Transform / set_state ---
+    #[serde(default)]
+    pub transform_from_node_id: String,
+    #[serde(default)]
+    pub state_key: String,
+    #[serde(default)]
+    pub state_value_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlowEdge {
     pub from: String,
     pub to: String,
+    /// Branch label: `true`/`false`, `loop`/`exit`, `pass`/`fail`, `default`, etc.
+    #[serde(default)]
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,7 +221,24 @@ impl FlowSpec {
         Ok(())
     }
 
-    /// Topological order of nodes respecting edges (Kahn).
+    /// `true` if this spec uses the graph interpreter (requires exactly one `start` node).
+    pub fn has_interpreter_start(&self) -> bool {
+        self.nodes
+            .iter()
+            .any(|n| n.kind.eq_ignore_ascii_case("start"))
+    }
+
+    /// Validate for kickoff: legacy flows must be acyclic; interpreter flows use [`interpreter::validate_interpreter`].
+    pub fn validate_for_run(&self) -> Result<(), String> {
+        self.validate()?;
+        if self.has_interpreter_start() {
+            interpreter::validate_interpreter(self)
+        } else {
+            self.execution_order().map(|_| ())
+        }
+    }
+
+    /// Topological order of nodes respecting edges (Kahn). Fails on cycles — used for legacy mode only.
     pub fn execution_order(&self) -> Result<Vec<String>, String> {
         self.validate()?;
         let mut indeg: HashMap<String, usize> = HashMap::new();
@@ -196,8 +275,9 @@ impl FlowSpec {
     }
 }
 
-/// Execute flow steps in topological order (LLM nodes + optional nested crews).
-pub async fn run_flow(
+/// Used by the web server and `serve` loop; passes optional vector + safety for file_search / guardrails.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_flow_with_extras(
     spec: &FlowSpec,
     inputs: &serde_json::Value,
     default_model: &str,
@@ -205,74 +285,27 @@ pub async fn run_flow(
     tools: Arc<ToolRegistry>,
     peer_id: String,
     node_tool_tx: Option<NodeToolTx>,
-    inference_sink: Option<Arc<dyn crate::agent::AgenticInferenceSink>>,
-    prompts: Arc<crate::prompts::PromptBundle>,
+    inference_sink: Option<Arc<dyn AgenticInferenceSink>>,
+    prompts: Arc<PromptBundle>,
     extras: AgentTaskExtras,
+    vector_store: Option<Arc<VectorStore>>,
+    safety: Option<Arc<SafetyLayer>>,
 ) -> Result<FlowRunOutput, String> {
-    spec.validate()?;
-    let order = spec.execution_order()?;
-    let mut step_outputs: HashMap<String, serde_json::Value> = HashMap::new();
-    let mut ordered_steps = Vec::new();
-
-    for node_id in order {
-        let node = spec
-            .nodes
-            .iter()
-            .find(|n| n.id == node_id)
-            .ok_or_else(|| format!("missing node {node_id}"))?;
-        let kind = node.kind.to_lowercase();
-        if kind == "crew" || node.crew_spec.is_some() {
-            let crew = node.crew_spec.as_ref().ok_or_else(|| {
-                format!("flow node {}: crew steps require \"crew_spec\"", node.id)
-            })?;
-            crew.validate()?;
-            let merged_inputs = if node.prompt.is_empty() {
-                inputs.clone()
-            } else {
-                serde_json::json!({ "flow_prompt": interpolate_inputs(&node.prompt, inputs) })
-            };
-            let out = crew::run_crew(
-                crew,
-                &merged_inputs,
-                executor.clone(),
-                tools.clone(),
-                peer_id.clone(),
-                node_tool_tx.clone(),
-                inference_sink.clone(),
-                prompts.clone(),
-                None,
-                extras.clone(),
-            )
-            .await?;
-            let v = serde_json::to_value(&out).map_err(|e| e.to_string())?;
-            step_outputs.insert(node.id.clone(), v.clone());
-            ordered_steps.push(serde_json::json!({"id": node.id, "kind": "crew", "output": v}));
-            continue;
-        }
-
-        let prompt = interpolate_inputs(&node.prompt, inputs);
-        let mut ctx = prompt;
-        for (k, v) in &step_outputs {
-            ctx.push_str(&format!("\n\n--- prior step {k} ---\n{v}"));
-        }
-        let task = InferenceTask::new(default_model, ctx).with_max_tokens(512);
-        let res = executor
-            .execute(ExecutionTask::Inference(task))
-            .await
-            .map_err(|e| e.to_string())?;
-        let text = match res.data {
-            TaskData::Inference(r) => r.text,
-            TaskData::Error(e) => return Err(e),
-            _ => return Err("non-inference flow step".into()),
-        };
-        let j = serde_json::json!({ "text": text });
-        step_outputs.insert(node.id.clone(), j.clone());
-        ordered_steps.push(serde_json::json!({"id": node.id, "kind": "llm", "output": j}));
-    }
-
-    Ok(FlowRunOutput {
-        steps: ordered_steps,
-    })
+    interpreter::run_flow(
+        spec,
+        inputs,
+        default_model,
+        executor,
+        tools,
+        peer_id,
+        node_tool_tx,
+        inference_sink,
+        prompts,
+        extras,
+        vector_store,
+        safety,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -287,19 +320,54 @@ mod tests {
                 FlowNode {
                     id: "a".into(),
                     kind: String::new(),
+                    name: String::new(),
                     prompt: String::new(),
                     crew_spec: None,
+                    instructions: String::new(),
+                    model: String::new(),
+                    tools: vec![],
+                    temperature: None,
+                    max_tokens: None,
+                    condition_cel: String::new(),
+                    max_iterations: 0,
+                    source_node_id: String::new(),
+                    guardrail_checks: vec![],
+                    mcp_tool_id: String::new(),
+                    mcp_arguments_json: String::new(),
+                    vector_collection: String::new(),
+                    vector_query_template: String::new(),
+                    transform_from_node_id: String::new(),
+                    state_key: String::new(),
+                    state_value_json: String::new(),
                 },
                 FlowNode {
                     id: "b".into(),
                     kind: String::new(),
+                    name: String::new(),
                     prompt: String::new(),
                     crew_spec: None,
+                    instructions: String::new(),
+                    model: String::new(),
+                    tools: vec![],
+                    temperature: None,
+                    max_tokens: None,
+                    condition_cel: String::new(),
+                    max_iterations: 0,
+                    source_node_id: String::new(),
+                    guardrail_checks: vec![],
+                    mcp_tool_id: String::new(),
+                    mcp_arguments_json: String::new(),
+                    vector_collection: String::new(),
+                    vector_query_template: String::new(),
+                    transform_from_node_id: String::new(),
+                    state_key: String::new(),
+                    state_value_json: String::new(),
                 },
             ],
             edges: vec![FlowEdge {
                 from: "a".into(),
                 to: "b".into(),
+                label: None,
             }],
         };
         assert_eq!(f.execution_order().unwrap(), vec!["a", "b"]);

@@ -21,6 +21,7 @@ export const WORKSPACE_VIEWS: WorkspaceView[] = [
 
 export function parseWorkspaceView(raw: string | null): WorkspaceView {
   if (raw === "tasks" || raw === "agent") return "chat"
+  if (raw === "agent-builder" || raw === "agent_builder") return "crews"
   /** Legacy sidebar URL; shell redirects to P2P Network with hash. */
   if (raw === "join") return "overview"
   if (raw && WORKSPACE_VIEWS.includes(raw as WorkspaceView)) return raw as WorkspaceView
@@ -46,4 +47,5 @@ export const LEGACY_CONSOLE_REDIRECT: Record<string, WorkspaceView> = {
   skills: "skills",
   mcp: "mcp",
   crews: "crews",
+  "agent-builder": "crews",
 }

@@ -782,10 +782,7 @@ struct CrewKickoffResponse {
 }
 
 async fn api_flow_validate(Json(spec): Json<crate::flow::FlowSpec>) -> Json<serde_json::Value> {
-    match spec
-        .validate()
-        .and_then(|_| spec.execution_order().map(|_| ()))
-    {
+    match spec.validate_for_run() {
         Ok(()) => Json(serde_json::json!({ "ok": true })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e })),
     }
@@ -816,11 +813,7 @@ async fn api_flow_kickoff(
             error: Some("flow kickoff not wired on this node".to_string()),
         });
     };
-    if let Err(e) = body
-        .spec
-        .validate()
-        .and_then(|_| body.spec.execution_order().map(|_| ()))
-    {
+    if let Err(e) = body.spec.validate_for_run() {
         return Json(FlowKickoffResponse {
             success: false,
             run_id: None,

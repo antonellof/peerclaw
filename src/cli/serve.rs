@@ -984,7 +984,9 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         crate::web::broadcast_flows_changed(&ws);
                         continue;
                     }
-                    let res = crate::flow::run_flow(
+                    let vector_store = st.vector_store.clone();
+                    let safety = Some(Arc::new(crate::safety::SafetyLayer::new()));
+                    let res = crate::flow::run_flow_with_extras(
                         &job.spec,
                         &job.inputs,
                         &default_model,
@@ -995,6 +997,8 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         crew_sink.clone(),
                         runtime.prompts.clone(),
                         extras,
+                        vector_store,
+                        safety,
                     )
                     .await;
                     match res {

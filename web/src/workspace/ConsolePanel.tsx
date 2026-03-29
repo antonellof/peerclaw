@@ -5,12 +5,12 @@ import { ConsoleOverviewPage } from "@/pages/console/ConsoleOverviewPage"
 import { ConsoleProvidersPage } from "@/pages/console/ConsoleProvidersPage"
 import { ConsoleSkillsPage } from "@/pages/console/ConsoleSkillsPage"
 import { ConsoleMcpPage } from "@/pages/console/ConsoleMcpPage"
-import { ConsoleCrewsPage } from "@/pages/console/ConsoleCrewsPage"
+import { AgentBuilderPage } from "@/pages/console/agent-builder/AgentBuilderPage"
 
 const TITLES: Partial<Record<WorkspaceView, string>> = {
   home: "Home",
   overview: "P2P Network",
-  crews: "Crews",
+  crews: "Agent builder",
   jobs: "Jobs",
   providers: "Providers",
   skills: "Skills",
@@ -38,10 +38,20 @@ export function ConsolePanel({ view }: { view: Exclude<WorkspaceView, "chat"> })
           <h1 className="text-sm font-semibold tracking-tight text-foreground">{title}</h1>
         </header>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6">
+      <div
+        className={
+          view === "crews"
+            ? "min-h-0 flex-1 overflow-hidden"
+            : "min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6"
+        }
+      >
         {view === "home" && <ConsoleHomePage />}
         {view === "overview" && <ConsoleOverviewPage />}
-        {view === "crews" && <ConsoleCrewsPage />}
+        {view === "crews" && (
+          <div className="h-full min-h-0 px-2 py-2 md:px-3 md:py-3">
+            <AgentBuilderPage />
+          </div>
+        )}
         {view === "jobs" && <ConsoleJobsPage />}
         {view === "providers" && <ConsoleProvidersPage />}
         {view === "skills" && <ConsoleSkillsPage />}

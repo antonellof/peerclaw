@@ -33,9 +33,10 @@ export function ConsoleHomePage() {
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Turn a goal into an outcome</h1>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
           Describe what you need. Your <span className="text-violet-400">agent</span> plans steps, runs tools within a{" "}
-          <strong>budget</strong>, and returns a structured answer. For <strong>multi-agent crews</strong> and{" "}
-          <strong>declarative flows</strong>, use the node&apos;s <code className="text-foreground/90">/api/crews</code> and{" "}
-          <code className="text-foreground/90">/api/flows</code> endpoints or the <strong>Python SDK</strong> in{" "}
+          <strong>budget</strong>, and returns a structured answer. For <strong>multi-agent crews</strong> (API) and{" "}
+          <strong>visual flows</strong>, use <strong>Agent builder</strong> (
+          <code className="text-foreground/90">/api/flows</code>), <code className="text-foreground/90">/api/crews</code>, or the{" "}
+          <strong>Python SDK</strong> in{" "}
           <code className="text-foreground/90">sdk/python</code>. In <strong>Chat</strong>, switch to <strong>Agent goal</strong>{" "}
           for multi-step work, or stay in <strong>Chat</strong> for quick messages.
         </p>
@@ -48,7 +49,7 @@ export function ConsoleHomePage() {
             Join the mesh
           </Button>
           <Button variant="outline" onClick={() => nav({ pathname: "/", search: "?view=crews" })}>
-            Crew builder
+            Agent builder
           </Button>
           <Button variant="secondary" onClick={() => nav({ pathname: "/", search: "?view=overview", hash: "health" })}>
             Node overview
@@ -120,8 +121,8 @@ export function ConsoleHomePage() {
             <strong className="text-foreground">Distributed crews</strong> — other peers can share inference (
             <code className="text-foreground/90">--share-inference</code>) or claim crew steps (
             <code className="text-foreground/90">--crew-worker</code>). Under <strong>P2P Network</strong> →{" "}
-            <strong>Join the mesh</strong> for copy-paste commands and live stats; use <strong>Crews</strong> in the sidebar
-            to configure agents and kick off runs.
+            <strong>Join the mesh</strong> for copy-paste commands and live stats; use <strong>Agent builder</strong> in the
+            sidebar to design flows and run them.
           </p>
         </CardContent>
       </Card>

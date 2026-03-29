@@ -1,0 +1,12 @@
+{
+  "name": "interpreter-linear",
+  "nodes": [
+    { "id": "s", "kind": "start" },
+    { "id": "a", "kind": "llm", "prompt": "Reply with exactly: ok" },
+    { "id": "e", "kind": "end" }
+  ],
+  "edges": [
+    { "from": "s", "to": "a" },
+    { "from": "a", "to": "e" }
+  ]
+}

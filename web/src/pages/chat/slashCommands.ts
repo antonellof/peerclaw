@@ -14,7 +14,7 @@ export type SlashCommandDef = { cmd: string; desc: string; args?: string; catego
 export const SLASH_COMMANDS: SlashCommandDef[] = [
   { cmd: "/help", desc: "Show available commands", category: "General" },
   { cmd: "/guide", desc: "Open help (agents & commands)", category: "General" },
-  { cmd: "/open", desc: "Open workspace panel", args: "overview|join|crews|jobs|…", category: "Workspace" },
+  { cmd: "/open", desc: "Open workspace panel", args: "overview|join|crews|agent-builder|jobs|…", category: "Workspace" },
   { cmd: "/overview", desc: "Open P2P Network (mesh & swarm)", category: "Workspace" },
   { cmd: "/home", desc: "Open Home (starters)", category: "Workspace" },
   { cmd: "/providers", desc: "Open Providers", category: "Workspace" },
@@ -126,10 +126,12 @@ export async function runSlashCommand(input: string, ctx: SlashContext): Promise
         mcp: "mcp",
         crews: "crews",
         crew: "crews",
+        "agent-builder": "crews",
+        agentbuilder: "crews",
       }
       const v = map[target]
       if (!v) {
-        return "Usage: /open chat|home|overview|join|jobs|providers|skills|mcp|crews"
+        return "Usage: /open chat|home|overview|join|jobs|providers|skills|mcp|crews|agent-builder"
       }
       ctx.setWorkspaceView(v)
       if (v === "chat" && (target === "tasks" || target === "agent")) {

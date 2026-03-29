@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Briefcase, BookOpen, Cpu, HardDrive, Home, LayoutGrid, Plug, Radio, Terminal, Users } from "lucide-react"
+import { Briefcase, BookOpen, Cpu, HardDrive, Home, LayoutGrid, Plug, Radio, Terminal, Workflow } from "lucide-react"
 
 import {
   downloadGgufModel,
@@ -246,8 +246,8 @@ export function WorkspaceSettingsDialog({
                     <span className="text-sm font-medium">Join the mesh</span>
                   </Button>
                   <Button variant="outline" className="h-auto justify-start gap-2 py-3 text-left" onClick={() => go("crews")}>
-                    <Users className="size-4 shrink-0 opacity-80" />
-                    <span className="text-sm font-medium">Crews</span>
+                    <Workflow className="size-4 shrink-0 opacity-80" />
+                    <span className="text-sm font-medium">Agent builder</span>
                   </Button>
                 </div>
               </div>

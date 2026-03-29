@@ -1160,3 +1160,102 @@ export async function stopCrewRun(id: string): Promise<{ ok: boolean }> {
   const j = (await r.json().catch(() => ({}))) as { ok?: boolean }
   return { ok: j.ok === true && r.ok }
 }
+
+// ── Flows (Agent builder / OpenAI-style graph) ───────────────────────────────
+
+export type FlowEdgeJson = {
+  from: string
+  to: string
+  label?: string | null
+}
+
+export type FlowNodeJson = {
+  id: string
+  kind?: string
+  name?: string
+  prompt?: string
+  crew_spec?: unknown
+  instructions?: string
+  model?: string
+  tools?: string[]
+  temperature?: number | null
+  max_tokens?: number | null
+  condition_cel?: string
+  max_iterations?: number
+  source_node_id?: string
+  guardrail_checks?: string[]
+  mcp_tool_id?: string
+  mcp_arguments_json?: string
+  vector_collection?: string
+  vector_query_template?: string
+  transform_from_node_id?: string
+  state_key?: string
+  state_value_json?: string
+}
+
+export type FlowSpecJson = {
+  name?: string
+  nodes: FlowNodeJson[]
+  edges: FlowEdgeJson[]
+}
+
+export type FlowKickoffBody = {
+  spec: FlowSpecJson
+  inputs?: unknown
+}
+
+export type FlowKickoffResponse = {
+  success: boolean
+  run_id?: string | null
+  error?: string | null
+}
+
+export type FlowRunOutputJson = {
+  steps: unknown[]
+}
+
+export type FlowRunRecordJson = {
+  id: string
+  status: string
+  flow_name: string
+  error?: string | null
+  output?: FlowRunOutputJson | null
+  created_at: string
+  completed_at?: string | null
+  logs?: string[] | null
+}
+
+export async function validateFlow(spec: FlowSpecJson): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/flows/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(spec),
+  })
+  const j = (await r.json()) as { ok?: boolean; error?: string }
+  if (!r.ok) {
+    return { ok: false, error: j.error ?? `HTTP ${r.status}` }
+  }
+  return { ok: j.ok === true, error: j.error }
+}
+
+export async function kickoffFlow(body: FlowKickoffBody): Promise<FlowKickoffResponse> {
+  const r = await apiFetch("/api/flows/kickoff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ spec: body.spec, inputs: body.inputs ?? {} }),
+  })
+  return r.json() as Promise<FlowKickoffResponse>
+}
+
+export async function fetchFlowRuns(): Promise<FlowRunRecordJson[]> {
+  const r = await apiFetch("/api/flows/runs")
+  if (!r.ok) throw new Error(`flows/runs ${r.status}`)
+  return r.json()
+}
+
+export async function fetchFlowRun(id: string): Promise<FlowRunRecordJson | null> {
+  const r = await apiFetch(`/api/flows/runs/${encodeURIComponent(id)}`)
+  if (r.status === 404) return null
+  if (!r.ok) throw new Error(`flow run ${r.status}`)
+  return r.json()
+}
