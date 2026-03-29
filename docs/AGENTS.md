@@ -403,7 +403,7 @@ Submit job to network: inference task with llama-3.3-70b, budget 5 PCLAW
 
 ## Example Agents
 
-Ready-to-use agent configurations in `examples/agents/`:
+Ready-to-use agent configurations in `templates/agents/`:
 
 | Agent | File | Purpose |
 |-------|------|---------|
@@ -417,14 +417,14 @@ Ready-to-use agent configurations in `examples/agents/`:
 
 ```bash
 # Deploy a research assistant
-peerclaw agent run examples/agents/researcher.toml
+peerclaw agent run templates/agents/researcher.toml
 
 # Deploy a Telegram bot (set token first)
 echo 'TELEGRAM_BOT_TOKEN=your_token_here' >> ~/.peerclaw/.env
-peerclaw agent run examples/agents/telegram-bot.toml
+peerclaw agent run templates/agents/telegram-bot.toml
 
 # Deploy a network monitor with scheduled checks
-peerclaw agent run examples/agents/monitor.toml
+peerclaw agent run templates/agents/monitor.toml
 
 # Check running agents
 peerclaw agent list
@@ -435,7 +435,7 @@ peerclaw agent info <agent-id>
 
 ### Creating Your Own Agent
 
-1. Copy an example: `cp examples/agents/researcher.toml my-agent.toml`
+1. Copy an example: `cp templates/agents/researcher.toml my-agent.toml`
 2. Customize the `[model]` section (model name, temperature, system prompt)
 3. Set `[capabilities]` based on what the agent needs
 4. Configure `[tools]` with builtin tools and optional WASM tools

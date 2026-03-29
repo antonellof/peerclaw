@@ -1,4 +1,4 @@
-//! Declarative flow graphs for the web **Agent builder** (OpenAI-style).
+//! Declarative flow graphs for the web **Workflow builder** (OpenAI-style).
 //!
 //! ## Execution modes
 //! - **Legacy DAG** — no `start` node: all nodes run in topological order (backward compatible with
@@ -41,7 +41,7 @@ pub struct FlowNode {
     pub id: String,
     #[serde(default)]
     pub kind: String,
-    /// Display title in the agent builder UI.
+    /// Display title in the workflow builder UI.
     #[serde(default)]
     pub name: String,
     #[serde(default)]
