@@ -9,6 +9,7 @@
 //! - Tick: `{ "type": "status", "data": { ... } }` (resource + peers + job counts)
 //! - Push: `{ "type": "tasks_changed" }` when agent tasks are created or updated (console debounces `GET /api/tasks`)
 //! - `{ "type": "task_stream_delta", "task_id": "…", "text": "…" }` — live LLM chunks during agentic tasks (chat UI)
+//! - `{ "type": "agents_library_changed" }` — saved agent list updated (`POST/DELETE /api/agents/library`)
 
 pub mod openai;
 
@@ -223,6 +224,9 @@ pub struct WebState {
     pub flow_kickoff_tx: Option<mpsc::Sender<FlowKickoffJob>>,
     /// Prompt templates (embedded + optional overlay); stubs use [`default_web_prompts`].
     pub prompts: Arc<crate::prompts::PromptBundle>,
+    /// User-saved agents (flows + task shortcuts); merged with [`crate::agent_library::builtin_entries`] for `GET`.
+    pub agent_library_path: PathBuf,
+    pub agent_library_user: Arc<RwLock<Vec<crate::agent_library::AgentLibraryEntry>>>,
 }
 
 /// Enqueued by `POST /api/crews/kickoff`, executed on the node event loop.
@@ -371,6 +375,8 @@ fn api_router() -> Router<Arc<WebState>> {
     Router::new()
         .merge(api_tasks_router())
         .merge(api_crews_router())
+        .route("/agents/library", get(api_agent_library_list).post(api_agent_library_post))
+        .route("/agents/library/:id", delete(api_agent_library_delete))
         .route("/status", get(api_status))
         .route("/onboarding", get(api_onboarding))
         .route("/peers/dial", post(api_peers_dial))
@@ -506,6 +512,8 @@ pub fn create_web_state(
         flow_store: crate::flow::FlowRunStore::new(),
         flow_kickoff_tx: None,
         prompts: default_web_prompts(),
+        agent_library_path: crate::bootstrap::base_dir().join("agent_library.json"),
+        agent_library_user: Arc::new(RwLock::new(Vec::new())),
     })
 }
 
@@ -555,6 +563,8 @@ pub fn create_web_state_with_channels(
         flow_store: crate::flow::FlowRunStore::new(),
         flow_kickoff_tx: None,
         prompts: default_web_prompts(),
+        agent_library_path: crate::bootstrap::base_dir().join("agent_library.json"),
+        agent_library_user: Arc::new(RwLock::new(Vec::new())),
     })
 }
 
@@ -603,6 +613,8 @@ pub fn create_web_state_with_inference(
         flow_store: crate::flow::FlowRunStore::new(),
         flow_kickoff_tx: None,
         prompts: default_web_prompts(),
+        agent_library_path: crate::bootstrap::base_dir().join("agent_library.json"),
+        agent_library_user: Arc::new(RwLock::new(Vec::new())),
     })
 }
 
@@ -651,6 +663,8 @@ pub fn create_web_state_with_swarm(
         flow_store: crate::flow::FlowRunStore::new(),
         flow_kickoff_tx: None,
         prompts: default_web_prompts(),
+        agent_library_path: crate::bootstrap::base_dir().join("agent_library.json"),
+        agent_library_user: Arc::new(RwLock::new(Vec::new())),
     })
 }
 
@@ -857,6 +871,125 @@ async fn api_flow_runs_list(
     State(state): State<Arc<WebState>>,
 ) -> Json<Vec<crate::flow::FlowRunRecord>> {
     Json(state.flow_store.list())
+}
+
+async fn api_agent_library_list(
+    State(state): State<Arc<WebState>>,
+) -> Json<Vec<crate::agent_library::AgentLibraryEntry>> {
+    let user = state.agent_library_user.read().await.clone();
+    let mut out = crate::agent_library::builtin_entries();
+    out.extend(user);
+    out.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    Json(out)
+}
+
+async fn api_agent_library_post(
+    State(state): State<Arc<WebState>>,
+    Json(mut entry): Json<crate::agent_library::AgentLibraryEntry>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if entry.is_builtin() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "id cannot use builtin- prefix"})),
+        ));
+    }
+    if entry.id.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"ok": false, "error": "id required"})),
+        ));
+    }
+    match entry.kind {
+        crate::agent_library::AgentLibraryKind::Flow => {
+            let Some(spec) = entry.flow_spec.clone() else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"ok": false, "error": "flow_spec required for flow agents"})),
+                ));
+            };
+            if let Err(e) = spec.validate_for_run() {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"ok": false, "error": e})),
+                ));
+            }
+        }
+        crate::agent_library::AgentLibraryKind::Task => {
+            let Some(tt) = entry
+                .task_type
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"ok": false, "error": "task_type required for task agents"})),
+                ));
+            };
+            entry.task_type = Some(tt.to_string());
+        }
+    }
+    {
+        let mut user = state.agent_library_user.write().await;
+        if let Some(i) = user.iter().position(|e| e.id == entry.id) {
+            user[i] = entry.clone();
+        } else {
+            user.push(entry.clone());
+        }
+        let to_save = user.clone();
+        drop(user);
+        if let Err(e) = crate::agent_library::save_user_entries(&state.agent_library_path, &to_save).await {
+            tracing::warn!("agent_library save: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"ok": false, "error": "could not persist agent library"})),
+            ));
+        }
+    }
+    let _ = state
+        .ws_control_tx
+        .send(serde_json::json!({ "type": "agents_library_changed" }));
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+async fn api_agent_library_delete(
+    State(state): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if id.starts_with("builtin-") {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"ok": false, "error": "cannot delete built-in agents"})),
+        ));
+    }
+    let mut user = state.agent_library_user.write().await;
+    let before = user.len();
+    user.retain(|e| e.id != id);
+    if user.len() == before {
+        drop(user);
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"ok": false, "error": "not found"})),
+        ));
+    }
+    let to_save = user.clone();
+    drop(user);
+    if let Err(e) = crate::agent_library::save_user_entries(&state.agent_library_path, &to_save).await {
+        tracing::warn!("agent_library save: {}", e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"ok": false, "error": "could not persist agent library"})),
+        ));
+    }
+    let _ = state
+        .ws_control_tx
+        .send(serde_json::json!({ "type": "agents_library_changed" }));
+    Ok(Json(serde_json::json!({"ok": true})))
 }
 
 async fn api_crew_validate(Json(spec): Json<crate::crew::CrewSpec>) -> Json<serde_json::Value> {

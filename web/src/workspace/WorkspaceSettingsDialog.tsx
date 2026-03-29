@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Briefcase, BookOpen, Cpu, HardDrive, Home, LayoutGrid, Plug, Radio, Terminal, Workflow } from "lucide-react"
+import { Briefcase, BookOpen, CircleHelp, Cpu, HardDrive, LayoutGrid, Plug, Radio, Terminal, Workflow } from "lucide-react"
 
 import {
   downloadGgufModel,
@@ -205,9 +205,9 @@ export function WorkspaceSettingsDialog({
                   Open console panels. Same destinations as <code className="text-primary">/open</code> slash routes.
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Button variant="outline" className="h-auto justify-start gap-2 py-3 text-left" onClick={() => go("home")}>
-                    <Home className="size-4 shrink-0 opacity-80" />
-                    <span className="text-sm font-medium">Home</span>
+                  <Button variant="outline" className="h-auto justify-start gap-2 py-3 text-left" onClick={() => go("help")}>
+                    <CircleHelp className="size-4 shrink-0 opacity-80" />
+                    <span className="text-sm font-medium">Help &amp; getting started</span>
                   </Button>
                   <Button variant="outline" className="h-auto justify-start gap-2 py-3 text-left" onClick={() => go("jobs")}>
                     <Briefcase className="size-4 shrink-0 opacity-80" />
@@ -259,7 +259,9 @@ export function WorkspaceSettingsDialog({
               <div className="space-y-4 px-5 py-4 pr-3">
                 <p className="text-xs text-muted-foreground">
                   Defaults for the chat composer. Slash commands like <code className="text-primary">/model</code> still
-                  override for the session.
+                  override for the session. Pick a <strong className="text-foreground/90">Saved agent</strong> in the chat
+                  toolbar to run flows from Agent builder (stored in the node&apos;s <code className="text-foreground/80">agent_library.json</code>
+                  ) or built-in example presets.
                 </p>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Default model</Label>

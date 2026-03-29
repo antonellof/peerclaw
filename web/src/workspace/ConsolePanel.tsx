@@ -1,5 +1,5 @@
 import type { WorkspaceView } from "./views"
-import { ConsoleHomePage } from "@/pages/console/ConsoleHomePage"
+import { ConsoleHelpPage } from "@/pages/console/ConsoleHelpPage"
 import { ConsoleJobsPage } from "@/pages/console/ConsoleJobsPage"
 import { ConsoleOverviewPage } from "@/pages/console/ConsoleOverviewPage"
 import { ConsoleProvidersPage } from "@/pages/console/ConsoleProvidersPage"
@@ -8,7 +8,7 @@ import { ConsoleMcpPage } from "@/pages/console/ConsoleMcpPage"
 import { AgentBuilderPage } from "@/pages/console/agent-builder/AgentBuilderPage"
 
 const TITLES: Partial<Record<WorkspaceView, string>> = {
-  home: "Home",
+  help: "Help & getting started",
   overview: "P2P Network",
   crews: "Agent builder",
   jobs: "Jobs",
@@ -18,7 +18,7 @@ const TITLES: Partial<Record<WorkspaceView, string>> = {
 }
 
 const SHOW_TOP_BAR: Record<Exclude<WorkspaceView, "chat">, boolean> = {
-  home: false,
+  help: true,
   overview: false,
   crews: false,
   jobs: true,
@@ -45,7 +45,7 @@ export function ConsolePanel({ view }: { view: Exclude<WorkspaceView, "chat"> })
             : "min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6"
         }
       >
-        {view === "home" && <ConsoleHomePage />}
+        {view === "help" && <ConsoleHelpPage />}
         {view === "overview" && <ConsoleOverviewPage />}
         {view === "crews" && (
           <div className="h-full min-h-0">

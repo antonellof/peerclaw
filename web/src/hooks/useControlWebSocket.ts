@@ -15,6 +15,8 @@ export function useControlWebSocket(handlers: {
   onTasksChanged?: () => void
   /** Live LLM text chunks for dashboard agent tasks (`task_stream_delta` on `/ws`). */
   onTaskStreamDelta?: (taskId: string, text: string) => void
+  /** Node persisted agent library updated (`POST/DELETE /api/agents/library`). */
+  onAgentsLibraryChanged?: () => void
 }) {
   const handlersRef = useRef(handlers)
 
@@ -41,6 +43,9 @@ export function useControlWebSocket(handlers: {
         }
         if (msg.type === "task_stream_delta" && msg.task_id && msg.text != null) {
           handlersRef.current.onTaskStreamDelta?.(msg.task_id, msg.text)
+        }
+        if (msg.type === "agents_library_changed") {
+          handlersRef.current.onAgentsLibraryChanged?.()
         }
       } catch {
         /* ignore */

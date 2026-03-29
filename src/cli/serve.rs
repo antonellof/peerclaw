@@ -328,6 +328,10 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
 
     let crew_store = crate::crew::CrewRunStore::new();
     let flow_store = crate::flow::FlowRunStore::new();
+    let agent_library_path = crate::bootstrap::base_dir().join("agent_library.json");
+    let agent_library_user = std::sync::Arc::new(tokio::sync::RwLock::new(
+        crate::agent_library::load_user_entries(&agent_library_path),
+    ));
 
     // Create web state with all features: inference, jobs, swarm, tasks, providers, agent
     let (mut peer_dial_rx, web_state, mut crew_kickoff_rx, mut flow_kickoff_rx) =
@@ -386,6 +390,8 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                 flow_store: flow_store.clone(),
                 flow_kickoff_tx: Some(flow_kickoff_tx),
                 prompts: runtime.prompts.clone(),
+                agent_library_path: agent_library_path.clone(),
+                agent_library_user: agent_library_user.clone(),
             }));
             (
                 Some(peer_dial_rx),

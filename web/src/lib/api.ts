@@ -1275,3 +1275,47 @@ export async function fetchFlowRun(id: string): Promise<FlowRunRecordJson | null
   if (!r.ok) throw new Error(`flow run ${r.status}`)
   return r.json()
 }
+
+// --- Saved agent library (flows + task shortcuts; persisted on node as agent_library.json) ---
+
+export type AgentLibraryKind = "flow" | "task"
+
+export type AgentLibraryEntryJson = {
+  id: string
+  name: string
+  description?: string
+  kind: AgentLibraryKind
+  flow_spec?: FlowSpecJson
+  task_type?: string | null
+  source_path?: string | null
+}
+
+export async function fetchAgentLibrary(): Promise<AgentLibraryEntryJson[]> {
+  const r = await apiFetch("/api/agents/library")
+  if (!r.ok) throw new Error(`agents/library ${r.status}`)
+  return r.json() as Promise<AgentLibraryEntryJson[]>
+}
+
+export async function upsertAgentLibraryEntry(
+  entry: AgentLibraryEntryJson,
+): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/agents/library", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  })
+  const j = (await r.json()) as { ok?: boolean; error?: string }
+  if (!r.ok) {
+    return { ok: false, error: j.error ?? `HTTP ${r.status}` }
+  }
+  return { ok: j.ok === true, error: j.error }
+}
+
+export async function deleteAgentLibraryEntry(id: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/agents/library/${encodeURIComponent(id)}`, { method: "DELETE" })
+  const j = (await r.json()) as { ok?: boolean; error?: string }
+  if (!r.ok) {
+    return { ok: false, error: j.error ?? `HTTP ${r.status}` }
+  }
+  return { ok: j.ok === true, error: j.error }
+}

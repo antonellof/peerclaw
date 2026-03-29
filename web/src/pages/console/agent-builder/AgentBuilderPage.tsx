@@ -17,6 +17,7 @@ import {
   useStore,
 } from "@xyflow/react"
 import {
+  BookmarkPlus,
   ChevronDown,
   ChevronLeft,
   ChevronUp,
@@ -38,6 +39,7 @@ import {
   fetchFlowRuns,
   fetchOpenAiModels,
   kickoffFlow,
+  upsertAgentLibraryEntry,
   validateFlow,
   type FlowRunRecordJson,
   type FlowSpecJson,
@@ -205,7 +207,7 @@ function AgentBuilderInner() {
   const [codeText, setCodeText] = useState("")
   const [validateMsg, setValidateMsg] = useState<string | null>(null)
   const [runMsg, setRunMsg] = useState<string | null>(null)
-  const [busy, setBusy] = useState<"v" | "r" | null>(null)
+  const [busy, setBusy] = useState<"v" | "r" | "l" | null>(null)
   const [runs, setRuns] = useState<FlowRunRecordJson[]>([])
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [runDetail, setRunDetail] = useState<FlowRunRecordJson | null>(null)
@@ -419,8 +421,8 @@ function AgentBuilderInner() {
             variant="ghost"
             size="icon"
             className="size-8 shrink-0"
-            aria-label="Back to workspace home"
-            onClick={() => setView("home")}
+            aria-label="Back to chat"
+            onClick={() => setView("chat")}
           >
             <ChevronLeft className="size-4" />
           </Button>
@@ -468,7 +470,7 @@ function AgentBuilderInner() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setView("home")}>Home</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setView("chat")}>Chat</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setView("chat")}>Chat</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setView("overview")}>P2P network</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setSettingsOpen(true)}>Settings…</DropdownMenuItem>
@@ -494,6 +496,45 @@ function AgentBuilderInner() {
           >
             {busy === "v" ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
             Evaluate
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1 text-xs"
+            disabled={busy !== null || preview}
+            title="Store on the node (agent_library.json) and select this flow in Chat → Saved agent"
+            onClick={() => {
+              setBusy("l")
+              setValidateMsg(null)
+              setRunPanelTab("inputs")
+              setRunPanelCollapsed(false)
+              void validateFlow(spec).then((v) => {
+                if (!v.ok) {
+                  setValidateMsg(v.error ?? "Fix the graph before saving to the library.")
+                  setBusy(null)
+                  return
+                }
+                const id = `user-flow-${crypto.randomUUID().slice(0, 12)}`
+                void upsertAgentLibraryEntry({
+                  id,
+                  name: flowName.trim() || "Saved flow",
+                  description: "Saved from Agent builder",
+                  kind: "flow",
+                  flow_spec: spec,
+                }).then((r) => {
+                  setBusy(null)
+                  setValidateMsg(
+                    r.ok
+                      ? `Saved to agent library. In Chat, open Saved agent and pick «${flowName.trim() || "Saved flow"}».`
+                      : (r.error ?? "Could not save to library."),
+                  )
+                })
+              })
+            }}
+          >
+            {busy === "l" ? <Loader2 className="size-3.5 animate-spin" /> : <BookmarkPlus className="size-3.5" />}
+            Save to library
           </Button>
           <Button type="button" size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={openCode}>
             <Code2 className="size-3.5" />

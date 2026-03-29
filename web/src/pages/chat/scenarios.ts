@@ -1,4 +1,4 @@
-/** Pre-fill Agent goal in chat (Home starters). */
+/** Pre-fill Agent goal in chat (Help page starters). */
 export const SCENARIO_PRESETS: Record<string, { type: string; text: string }> = {
   trip: {
     type: "research",

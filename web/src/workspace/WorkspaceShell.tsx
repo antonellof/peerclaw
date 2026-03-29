@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { BookOpen, Menu, PanelLeftClose, Plus, Settings2, X } from "lucide-react"
+import { Menu, PanelLeftClose, Plus, Settings2, X } from "lucide-react"
 
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
 import { fetchOnboarding, fetchStatus } from "@/lib/api"
@@ -16,7 +16,6 @@ import { ChatPanel } from "@/pages/chat/ChatPanel"
 import { parseWorkspaceView, type WorkspaceView } from "./views"
 import { WorkspaceNavProvider, type ChatControls } from "./WorkspaceNavContext"
 import { ConsolePanel } from "./ConsolePanel"
-import { WorkspaceHelpDialog } from "./WorkspaceHelpDialog"
 import { WorkspaceSettingsDialog } from "./WorkspaceSettingsDialog"
 import { WorkspaceSidebarAgentRuns } from "./WorkspaceSidebarAgentRuns"
 import { WorkspaceSidebarNav, workspaceNavTitle } from "./WorkspaceSidebarNav"
@@ -44,7 +43,6 @@ export function WorkspaceShell() {
     }
   }, [rawViewParam, navigate])
 
-  const [helpOpen, setHelpOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chatPreferences, setChatPreferencesState] = useState(loadWorkspaceChatPreferences)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -125,7 +123,7 @@ export function WorkspaceShell() {
   const navValue = {
     view,
     setView,
-    openHelp: () => setHelpOpen(true),
+    openHelp: () => setView("help"),
     openSettings: () => setSettingsOpen(true),
     chatPreferences,
     setChatPreferences,
@@ -214,18 +212,6 @@ export function WorkspaceShell() {
               <Settings2 className="size-4 shrink-0" />
               {!sidebarCollapsed && <span className="ml-2">Settings</span>}
             </Button>
-            <Button
-              variant="ghost"
-              className={cn(
-                "mb-2 w-full justify-start text-muted-foreground hover:text-foreground",
-                sidebarCollapsed && "justify-center px-0",
-              )}
-              size="sm"
-              onClick={() => setHelpOpen(true)}
-            >
-              <BookOpen className="size-4 shrink-0" />
-              {!sidebarCollapsed && <span className="ml-2">Help</span>}
-            </Button>
           </div>
         </aside>
 
@@ -307,11 +293,6 @@ export function WorkspaceShell() {
         </DialogContent>
       </Dialog>
 
-      <WorkspaceHelpDialog
-        open={helpOpen}
-        onOpenChange={setHelpOpen}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
       <WorkspaceSettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}

@@ -5,6 +5,7 @@
 
 pub mod a2a;
 pub mod agent;
+pub mod agent_library;
 pub mod bootstrap;
 pub mod channel;
 pub mod channels;

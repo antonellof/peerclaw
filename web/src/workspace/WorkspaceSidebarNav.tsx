@@ -1,20 +1,20 @@
 /* eslint-disable react-refresh/only-export-components -- nav config + helper exported for shell title */
-import { Home, LayoutGrid, MessageSquare, Workflow } from "lucide-react"
+import { BookOpen, LayoutGrid, MessageSquare, Workflow } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import type { WorkspaceView } from "./views"
 
 /** Primary sidebar destinations; Jobs, Providers, Skills are under Settings. */
 export const WORKSPACE_NAV_ITEMS: { view: WorkspaceView; label: string; icon: typeof MessageSquare }[] = [
-  { view: "home", label: "Home", icon: Home },
   { view: "chat", label: "Chat", icon: MessageSquare },
-  { view: "overview", label: "P2P Network", icon: LayoutGrid },
   { view: "crews", label: "Agent builder", icon: Workflow },
+  { view: "overview", label: "P2P Network", icon: LayoutGrid },
+  { view: "help", label: "Help", icon: BookOpen },
 ]
 
 export const WORKSPACE_VIEW_TITLES: Record<WorkspaceView, string> = {
   chat: "Chat",
-  home: "Home",
+  help: "Help",
   overview: "P2P Network",
   jobs: "Jobs",
   providers: "Providers",

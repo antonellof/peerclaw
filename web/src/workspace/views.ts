@@ -1,6 +1,6 @@
 export type WorkspaceView =
   | "chat"
-  | "home"
+  | "help"
   | "overview"
   | "jobs"
   | "providers"
@@ -10,7 +10,7 @@ export type WorkspaceView =
 
 export const WORKSPACE_VIEWS: WorkspaceView[] = [
   "chat",
-  "home",
+  "help",
   "overview",
   "jobs",
   "providers",
@@ -22,6 +22,8 @@ export const WORKSPACE_VIEWS: WorkspaceView[] = [
 export function parseWorkspaceView(raw: string | null): WorkspaceView {
   if (raw === "tasks" || raw === "agent") return "chat"
   if (raw === "agent-builder" || raw === "agent_builder") return "crews"
+  /** Legacy Home panel → full Help page. */
+  if (raw === "home") return "help"
   /** Legacy sidebar URL; shell redirects to P2P Network with hash. */
   if (raw === "join") return "overview"
   if (raw && WORKSPACE_VIEWS.includes(raw as WorkspaceView)) return raw as WorkspaceView
@@ -36,8 +38,8 @@ export function workspaceHref(view: WorkspaceView, hash?: string): string {
 }
 
 export const LEGACY_CONSOLE_REDIRECT: Record<string, WorkspaceView> = {
-  "": "home",
-  home: "home",
+  "": "chat",
+  home: "help",
   tasks: "chat",
   agent: "chat",
   overview: "overview",

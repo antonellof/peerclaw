@@ -1,14 +1,26 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { ChevronDown, Send, Settings2, Zap } from "lucide-react"
+import { Bot, ChevronDown, Send, Settings2, Zap } from "lucide-react"
 
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
-import { createTask, fetchOpenAiModels, fetchTaskDetail, postChatStream, stopWebTask } from "@/lib/api"
+import {
+  createTask,
+  fetchAgentLibrary,
+  fetchFlowRun,
+  fetchOpenAiModels,
+  fetchTaskDetail,
+  kickoffFlow,
+  postChatStream,
+  stopWebTask,
+  type AgentLibraryEntryJson,
+  type FlowSpecJson,
+} from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -31,6 +43,35 @@ const AGENT_POLL_MS = 900
 const AGENT_POLL_MAX_FAILS = 8
 /** Stop polling only after this long (agent tasks may run for hours). */
 const AGENT_POLL_MAX_MS = 48 * 60 * 60 * 1000
+const FLOW_CHAT_POLL_MS = 450
+const FLOW_CHAT_POLL_MAX = 400
+
+async function runFlowFromChat(spec: FlowSpecJson, message: string): Promise<{ ok: boolean; text: string }> {
+  const kick = await kickoffFlow({
+    spec,
+    inputs: { input_as_text: message, topic: message },
+  })
+  if (!kick.success || !kick.run_id) {
+    return { ok: false, text: kick.error ?? "Flow kickoff failed." }
+  }
+  const runId = kick.run_id
+  for (let i = 0; i < FLOW_CHAT_POLL_MAX; i++) {
+    await new Promise((r) => setTimeout(r, FLOW_CHAT_POLL_MS))
+    const run = await fetchFlowRun(runId)
+    if (!run) continue
+    const st = (run.status || "").toLowerCase()
+    if (st === "failed") {
+      return { ok: false, text: run.error ?? "Flow failed." }
+    }
+    if (st === "completed") {
+      const body = run.output != null ? JSON.stringify(run.output, null, 2) : "(no output)"
+      const logs = run.logs?.length ? `\n\n--- flow logs ---\n${run.logs.slice(-40).join("\n")}` : ""
+      const combined = (body + logs).slice(0, 14_000)
+      return { ok: true, text: combined || "Done." }
+    }
+  }
+  return { ok: false, text: "Flow run timed out (still running or pending)." }
+}
 
 type MsgRole = "user" | "assistant" | "system" | "error"
 
@@ -174,6 +215,31 @@ export function ChatPanel({ onRegisterControls }: Props) {
   const [agentTaskType, setAgentTaskType] = useState("general")
   const [agentBudget, setAgentBudget] = useState(5)
   const [transcriptReady, setTranscriptReady] = useState(false)
+  const [agentLibrary, setAgentLibrary] = useState<AgentLibraryEntryJson[]>([])
+
+  const refetchAgentLibrary = useCallback(() => {
+    void fetchAgentLibrary()
+      .then(setAgentLibrary)
+      .catch(() => setAgentLibrary([]))
+  }, [])
+
+  useEffect(() => {
+    refetchAgentLibrary()
+  }, [refetchAgentLibrary])
+
+  const selectedLibraryEntry = useMemo(() => {
+    const id = chatPreferences.selectedAgentLibraryId
+    if (!id) return null
+    return agentLibrary.find((e) => e.id === id) ?? null
+  }, [agentLibrary, chatPreferences.selectedAgentLibraryId])
+
+  useEffect(() => {
+    const id = chatPreferences.selectedAgentLibraryId
+    if (!id || agentLibrary.length === 0) return
+    if (!agentLibrary.some((e) => e.id === id)) {
+      setChatPreferences({ selectedAgentLibraryId: null })
+    }
+  }, [agentLibrary, chatPreferences.selectedAgentLibraryId, setChatPreferences])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -448,6 +514,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
         ),
       )
     },
+    onAgentsLibraryChanged: refetchAgentLibrary,
   })
 
   useEffect(() => {
@@ -544,6 +611,87 @@ export function ChatPanel({ onRegisterControls }: Props) {
       setMessages((m) => [...m, { id: newId(), role: "system", content: `Running: ${content}` }])
       const out = await runSlashCommand(content, slashCtx)
       setMessages((m) => [...m, { id: newId(), role: "system", content: out }])
+      return
+    }
+
+    if (selectedLibraryEntry) {
+      setInput("")
+      setShowWelcome(false)
+      setMessages((m) => [...m, { id: newId(), role: "user", content }])
+      setTyping(true)
+      try {
+        if (selectedLibraryEntry.kind === "flow") {
+          if (!selectedLibraryEntry.flow_spec) {
+            setMessages((m) => [
+              ...m,
+              {
+                id: newId(),
+                role: "error",
+                content: "This saved flow has no graph spec. Re-save it from Agent builder.",
+              },
+            ])
+            setTyping(false)
+            return
+          }
+          const fr = await runFlowFromChat(selectedLibraryEntry.flow_spec, content)
+          setMessages((m) => [
+            ...m,
+            {
+              id: newId(),
+              role: fr.ok ? "assistant" : "error",
+              content: fr.text,
+              meta: "flow run",
+            },
+          ])
+          setTyping(false)
+          return
+        }
+        const tt = selectedLibraryEntry.task_type?.trim()
+        if (!tt) {
+          setMessages((m) => [
+            ...m,
+            { id: newId(), role: "error", content: "Saved task agent has no task_type." },
+          ])
+          setTyping(false)
+          return
+        }
+        let budget = agentBudget
+        if (!Number.isFinite(budget) || budget < 0.5) budget = 5
+        const res = await createTask({
+          task_type: tt,
+          description: content,
+          budget,
+          model,
+          use_mcp: chatPreferences.useMcp,
+          session_id: sessionId,
+        })
+        if (!res.success || !res.task_id) {
+          setMessages((m) => [
+            ...m,
+            { id: newId(), role: "error", content: res.error ?? "Could not create task." },
+          ])
+        } else {
+          const tid = res.task_id
+          setMessages((m) => [
+            ...m,
+            {
+              id: newId(),
+              role: "system",
+              content: `Agent task ${tid.slice(0, 8)}… (${selectedLibraryEntry.name})`,
+              agentTaskId: tid,
+              agentLogs: [],
+              agentStatusLine: "starting…",
+            },
+          ])
+          startAgentPoll(tid)
+        }
+      } catch (e) {
+        setMessages((m) => [
+          ...m,
+          { id: newId(), role: "error", content: e instanceof Error ? e.message : "Agent error" },
+        ])
+      }
+      setTyping(false)
       return
     }
 
@@ -686,7 +834,16 @@ export function ChatPanel({ onRegisterControls }: Props) {
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center border-b border-border/70 bg-card/20 px-3 md:px-4">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-foreground">Assistant</p>
+          <p className="truncate text-sm font-medium text-foreground">
+            {selectedLibraryEntry?.name ?? "Assistant"}
+          </p>
+          <p className="truncate text-[10px] text-muted-foreground">
+            {selectedLibraryEntry
+              ? selectedLibraryEntry.kind === "flow"
+                ? "Saved flow — runs on the node"
+                : `Saved task · ${selectedLibraryEntry.task_type ?? "general"}`
+              : "Chat, tools, or pick a saved agent below"}
+          </p>
         </div>
       </header>
 
@@ -851,9 +1008,13 @@ export function ChatPanel({ onRegisterControls }: Props) {
               ref={textareaRef}
               rows={1}
               placeholder={
-                deepTaskMode
-                  ? "Describe the goal for the agent…"
-                  : "Message, or type / for commands…"
+                selectedLibraryEntry
+                  ? selectedLibraryEntry.kind === "flow"
+                    ? "Message becomes flow input_as_text (and topic)…"
+                    : `Describe the goal for «${selectedLibraryEntry.name}»…`
+                  : deepTaskMode
+                    ? "Describe the goal for the agent…"
+                    : "Message, or type / for commands…"
               }
               value={input}
               onChange={(e) => onInputChange(e.target.value)}
@@ -1014,6 +1175,70 @@ export function ChatPanel({ onRegisterControls }: Props) {
                       </DropdownMenuCheckboxItem>
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {/* Saved agents (Agent builder + examples catalog on node) */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex max-w-[10rem] items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <Bot className="size-3 shrink-0 opacity-80" />
+                    <span className="truncate">
+                      {selectedLibraryEntry ? selectedLibraryEntry.name : "Saved agent"}
+                    </span>
+                    <ChevronDown className="size-3 shrink-0 opacity-50" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-72 w-72 overflow-y-auto">
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Run with saved agent
+                  </DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={chatPreferences.selectedAgentLibraryId ?? "__default__"}
+                    onValueChange={(v) =>
+                      setChatPreferences({
+                        selectedAgentLibraryId: v === "__default__" ? null : v,
+                      })
+                    }
+                  >
+                    <DropdownMenuRadioItem value="__default__" className="text-xs">
+                      Default (chat / mode below)
+                    </DropdownMenuRadioItem>
+                    {agentLibrary
+                      .filter((e) => e.kind === "flow")
+                      .map((e) => (
+                        <DropdownMenuRadioItem key={e.id} value={e.id} className="text-xs">
+                          <span className="font-medium">Flow</span> · {e.name}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    {agentLibrary.filter((e) => e.kind === "task").length > 0 ? (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          Task presets (examples / skills)
+                        </DropdownMenuLabel>
+                        {agentLibrary
+                          .filter((e) => e.kind === "task")
+                          .map((e) => (
+                            <DropdownMenuRadioItem key={e.id} value={e.id} className="text-xs">
+                              <span className="font-medium">Task</span> · {e.name}
+                            </DropdownMenuRadioItem>
+                          ))}
+                      </>
+                    ) : null}
+                  </DropdownMenuRadioGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-xs"
+                    onClick={() => {
+                      setView("crews")
+                    }}
+                  >
+                    Open Agent builder…
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
 
