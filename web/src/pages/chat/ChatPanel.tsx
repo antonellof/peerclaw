@@ -86,6 +86,8 @@ type ChatMessage = {
   workflowName?: string
   /** Whether this message represents a running workflow (shows pulsing indicator). */
   workflowRunning?: boolean
+  /** Tool call logs from the agentic loop (shown as collapsible details). */
+  toolLogs?: string[]
 }
 
 function newId() {
@@ -802,9 +804,10 @@ export function ChatPanel({ onRegisterControls }: Props) {
       ]
         .filter(Boolean)
         .join(" · ")
+      const toolLogs = data.tool_logs?.filter((l) => l.trim()) ?? []
       setMessages((m) =>
         m.map((x) =>
-          x.id === assistId ? { ...x, content: data.response, meta } : x,
+          x.id === assistId ? { ...x, content: data.response, meta, toolLogs: toolLogs.length > 0 ? toolLogs : undefined } : x,
         ),
       )
       setSessionStats((s) => ({
@@ -982,6 +985,20 @@ export function ChatPanel({ onRegisterControls }: Props) {
                     </div>
                   )}
                   {m.meta && <div className="mt-2 text-[11px] text-muted-foreground">{m.meta}</div>}
+                  {m.toolLogs && m.toolLogs.length > 0 && (
+                    <details className="mt-2 rounded-lg border border-border/60 bg-muted/20">
+                      <summary className="cursor-pointer px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground">
+                        {m.toolLogs.length} tool step{m.toolLogs.length === 1 ? "" : "s"} used
+                      </summary>
+                      <div className="space-y-0.5 px-3 pb-2 pt-1">
+                        {m.toolLogs.map((log, i) => (
+                          <div key={i} className="text-[10px] leading-relaxed text-muted-foreground">
+                            {log}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </div>
               </div>
             ))}

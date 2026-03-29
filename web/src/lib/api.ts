@@ -726,6 +726,7 @@ export type ChatResponse = {
   tokens_per_second: number
   location: string
   provider_peer_id: string | null
+  tool_logs?: string[]
 }
 
 export async function postChat(payload: {
@@ -834,6 +835,7 @@ export async function postChatStream(
         tokens_per_second?: number
         location?: string
         provider_peer_id?: string | null
+        tool_logs?: string[]
       }
       try {
         j = JSON.parse(raw) as typeof j
@@ -848,6 +850,7 @@ export async function postChatStream(
           tokens_per_second: j.tokens_per_second ?? 0,
           location: j.location ?? "",
           provider_peer_id: j.provider_peer_id ?? null,
+          tool_logs: j.tool_logs ?? [],
         }
       }
     }

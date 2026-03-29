@@ -2666,7 +2666,7 @@ async fn api_chat_stream(
                     );
                     let (_, infer_out) = tokio::join!(sse_forward, run_infer);
                     match infer_out {
-                        Ok((response, _)) => {
+                        Ok((response, tool_logs)) => {
                             if let Some(ref sid) = session_id {
                                 save_session_turn_persistent(
                                     &sessions,
@@ -2685,6 +2685,7 @@ async fn api_chat_stream(
                                 "location": response.location,
                                 "provider_peer_id": response.provider_peer_id,
                                 "session_state": session_state_spawn,
+                                "tool_logs": tool_logs,
                             })
                             .to_string();
                             let _ = sse_tx.send(Ok(Event::default().data(done))).await;
@@ -2768,7 +2769,7 @@ async fn api_chat_stream(
                     );
                     let (_, infer_out) = tokio::join!(sse_forward, run_infer);
                     match infer_out {
-                        Ok((response, _)) => {
+                        Ok((response, tool_logs)) => {
                             if let Some(ref sid) = session_id {
                                 save_session_turn_persistent(
                                     &sessions,
@@ -2787,6 +2788,7 @@ async fn api_chat_stream(
                                 "location": response.location,
                                 "provider_peer_id": response.provider_peer_id,
                                 "session_state": session_state_spawn,
+                                "tool_logs": tool_logs,
                             })
                             .to_string();
                             let _ = sse_tx.send(Ok(Event::default().data(done))).await;
