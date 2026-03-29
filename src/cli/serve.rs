@@ -377,7 +377,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                 session_store: None,
                 channel_registry: None,
                 wallet: None,
-                vector_store: None,
+                vector_store: Some(crate::vector::get_or_init_vector_store()),
                 verbose_agentic_io: args.verbose_agentic,
                 a2a: runtime.a2a.clone(),
                 a2a_public_base_url: format!("http://{}", config.web.listen_addr),
@@ -986,6 +986,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                     }
                     let vector_store = st.vector_store.clone();
                     let safety = Some(Arc::new(crate::safety::SafetyLayer::new()));
+                    let flow_log = Some((fs.clone(), job.run_id.clone()));
                     let res = crate::flow::run_flow_with_extras(
                         &job.spec,
                         &job.inputs,
@@ -999,6 +1000,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                         extras,
                         vector_store,
                         safety,
+                        flow_log,
                     )
                     .await;
                     match res {

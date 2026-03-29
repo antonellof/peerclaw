@@ -1180,17 +1180,33 @@ export type FlowNodeJson = {
   tools?: string[]
   temperature?: number | null
   max_tokens?: number | null
+  include_chat_history?: boolean
+  output_format?: string
+  agent_session_key?: string
+  classify_categories?: string[]
+  classify_model?: string
+  classify_input_template?: string
+  classify_examples_json?: string
   condition_cel?: string
+  if_case_name?: string
   max_iterations?: number
   source_node_id?: string
   guardrail_checks?: string[]
+  guardrail_input_template?: string
+  guardrail_continue_on_error?: boolean
+  guardrail_custom_substring?: string
   mcp_tool_id?: string
   mcp_arguments_json?: string
   vector_collection?: string
   vector_query_template?: string
+  vector_top_k?: number
   transform_from_node_id?: string
+  transform_mode?: string
+  transform_expressions_json?: string
+  transform_object_json?: string
   state_key?: string
   state_value_json?: string
+  state_value_cel?: string
 }
 
 export type FlowSpecJson = {

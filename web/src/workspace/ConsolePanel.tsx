@@ -20,7 +20,7 @@ const TITLES: Partial<Record<WorkspaceView, string>> = {
 const SHOW_TOP_BAR: Record<Exclude<WorkspaceView, "chat">, boolean> = {
   home: false,
   overview: false,
-  crews: true,
+  crews: false,
   jobs: true,
   providers: true,
   skills: true,
@@ -48,7 +48,7 @@ export function ConsolePanel({ view }: { view: Exclude<WorkspaceView, "chat"> })
         {view === "home" && <ConsoleHomePage />}
         {view === "overview" && <ConsoleOverviewPage />}
         {view === "crews" && (
-          <div className="h-full min-h-0 px-2 py-2 md:px-3 md:py-3">
+          <div className="h-full min-h-0">
             <AgentBuilderPage />
           </div>
         )}

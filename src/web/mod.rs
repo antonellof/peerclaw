@@ -497,7 +497,7 @@ pub fn create_web_state(
         inference: None,
         channel_registry: None,
         wallet: None,
-        vector_store: None,
+        vector_store: Some(crate::vector::get_or_init_vector_store()),
         verbose_agentic_io: false,
         a2a: crate::a2a::A2aState::new(),
         a2a_public_base_url: "http://127.0.0.1:8080".to_string(),
@@ -546,7 +546,7 @@ pub fn create_web_state_with_channels(
         inference: None,
         channel_registry: None,
         wallet: None,
-        vector_store: None,
+        vector_store: Some(crate::vector::get_or_init_vector_store()),
         verbose_agentic_io: false,
         a2a: crate::a2a::A2aState::new(),
         a2a_public_base_url: "http://127.0.0.1:8080".to_string(),
@@ -594,7 +594,7 @@ pub fn create_web_state_with_inference(
         inference: None,
         channel_registry: None,
         wallet: None,
-        vector_store: None,
+        vector_store: Some(crate::vector::get_or_init_vector_store()),
         verbose_agentic_io: false,
         a2a: crate::a2a::A2aState::new(),
         a2a_public_base_url: "http://127.0.0.1:8080".to_string(),
@@ -642,7 +642,7 @@ pub fn create_web_state_with_swarm(
         inference: None,
         channel_registry: None,
         wallet: None,
-        vector_store: None,
+        vector_store: Some(crate::vector::get_or_init_vector_store()),
         verbose_agentic_io: false,
         a2a: crate::a2a::A2aState::new(),
         a2a_public_base_url: "http://127.0.0.1:8080".to_string(),
@@ -4231,19 +4231,7 @@ async fn api_wallet_transactions(
 async fn api_vector_list_collections(
     State(state): State<Arc<WebState>>,
 ) -> Json<serde_json::Value> {
-    let store = state
-        .vector_store
-        .as_ref()
-        .cloned()
-        .or_else(|| crate::vector::get_vector_store());
-
-    let Some(store) = store else {
-        return Json(serde_json::json!({
-            "collections": [],
-            "hint": "No vector store initialized"
-        }));
-    };
-
+    let store = crate::vector::resolve_vector_store(state.vector_store.clone());
     let collections = store.list_collections();
     let items: Vec<serde_json::Value> = collections
         .iter()
@@ -4272,18 +4260,7 @@ async fn api_vector_create_collection(
     State(state): State<Arc<WebState>>,
     Json(payload): Json<CreateCollectionPayload>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let store = state
-        .vector_store
-        .as_ref()
-        .cloned()
-        .or_else(|| crate::vector::get_vector_store());
-
-    let Some(store) = store else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({ "error": "No vector store initialized" })),
-        );
-    };
+    let store = crate::vector::resolve_vector_store(state.vector_store.clone());
 
     let result = if let Some(dim) = payload.dimension {
         store.create_collection_with_dim(&payload.name, dim)
@@ -4315,18 +4292,7 @@ async fn api_vector_delete_collection(
     State(state): State<Arc<WebState>>,
     Path(name): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let store = state
-        .vector_store
-        .as_ref()
-        .cloned()
-        .or_else(|| crate::vector::get_vector_store());
-
-    let Some(store) = store else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({ "error": "No vector store initialized" })),
-        );
-    };
+    let store = crate::vector::resolve_vector_store(state.vector_store.clone());
 
     match store.delete_collection(&name) {
         Ok(true) => (
@@ -4355,18 +4321,7 @@ async fn api_vector_search(
     State(state): State<Arc<WebState>>,
     Json(payload): Json<VectorSearchPayload>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let store = state
-        .vector_store
-        .as_ref()
-        .cloned()
-        .or_else(|| crate::vector::get_vector_store());
-
-    let Some(store) = store else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({ "error": "No vector store initialized" })),
-        );
-    };
+    let store = crate::vector::resolve_vector_store(state.vector_store.clone());
 
     let top_k = payload.top_k.unwrap_or(10).min(100);
 
@@ -4416,18 +4371,7 @@ async fn api_vector_insert(
     State(state): State<Arc<WebState>>,
     Json(payload): Json<VectorInsertPayload>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let store = state
-        .vector_store
-        .as_ref()
-        .cloned()
-        .or_else(|| crate::vector::get_vector_store());
-
-    let Some(store) = store else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({ "error": "No vector store initialized" })),
-        );
-    };
+    let store = crate::vector::resolve_vector_store(state.vector_store.clone());
 
     let result = if let Some(text) = &payload.text {
         store.upsert_text(

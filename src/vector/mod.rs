@@ -579,9 +579,39 @@ pub fn get_vector_store() -> Option<Arc<VectorStore>> {
     store.clone()
 }
 
+/// Install a default in-memory vectx [`VectorStore`] in the process-global slot if unset.
+///
+/// Used by `serve` and by [`resolve_vector_store`] so HTTP and flows (e.g. `file_search`) always
+/// have a store without a separate init step.
+pub fn get_or_init_vector_store() -> Arc<VectorStore> {
+    let mut guard = VECTOR_STORE.write();
+    if let Some(s) = guard.as_ref() {
+        return s.clone();
+    }
+    let s = Arc::new(VectorStore::new(VectorStoreConfig::default()));
+    *guard = Some(s.clone());
+    s
+}
+
+/// Prefer an explicit handle (e.g. [`crate::web::WebState::vector_store`]), then the global slot
+/// from [`init_vector_store`], then [`get_or_init_vector_store`].
+pub fn resolve_vector_store(explicit: Option<Arc<VectorStore>>) -> Arc<VectorStore> {
+    match explicit {
+        Some(s) => s,
+        None => get_vector_store().unwrap_or_else(get_or_init_vector_store),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn get_or_init_vector_store_is_idempotent() {
+        let a = super::get_or_init_vector_store();
+        let b = super::get_or_init_vector_store();
+        assert!(std::sync::Arc::ptr_eq(&a, &b));
+    }
 
     #[test]
     fn test_create_collection() {

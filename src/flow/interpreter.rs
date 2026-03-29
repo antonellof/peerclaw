@@ -1,9 +1,10 @@
 //! Graph interpreter for [`super::FlowSpec`] (OpenAI Agent Builder–style branching).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use cel::{Context, Program};
+use regex::Regex;
 use serde_json::{json, Map, Value};
 
 use crate::agent::runtime::{AgentConfig, AgentRuntime, AgentTaskExtras};
@@ -13,11 +14,18 @@ use crate::executor::task::{ExecutionTask, InferenceTask, TaskData};
 use crate::executor::TaskExecutor;
 use crate::mcp::McpManager;
 use crate::prompts::PromptBundle;
+use crate::safety::ssrf::validate_url_relaxed;
 use crate::safety::SafetyLayer;
 use crate::tools::{NodeToolTx, ToolRegistry};
 use crate::vector::VectorStore;
 
-use super::{interpolate_inputs, FlowNode, FlowRunOutput, FlowSpec};
+use super::{interpolate_inputs, FlowNode, FlowRunOutput, FlowRunStore, FlowSpec};
+
+fn flow_step_log(log: &Option<(Arc<FlowRunStore>, String)>, line: impl std::fmt::Display) {
+    if let Some((store, id)) = log {
+        store.push_log(id, line.to_string());
+    }
+}
 
 /// Extended `{{key}}` interpolation: `ctx` should be a JSON object (merged inputs + stringified outputs).
 pub fn interpolate_context(template: &str, ctx: &Value) -> String {
@@ -56,13 +64,23 @@ fn value_to_string(v: &Value) -> String {
     }
 }
 
-fn cel_bool(expr: &str, activation: &Value, iteration: u32) -> Result<bool, String> {
-    let expr = expr.trim();
-    if expr.is_empty() {
-        return Ok(false);
-    }
-    let program = Program::compile(expr).map_err(|e| format!("CEL parse: {e:?}"))?;
-    let mut ctx = Context::default();
+fn activation_for_cel(
+    inputs: &Value,
+    outputs: &HashMap<String, Value>,
+    state_map: &Map<String, Value>,
+    input_as_text: &str,
+    iteration: u32,
+) -> Value {
+    json!({
+        "inputs": inputs.clone(),
+        "outputs": Value::Object(outputs.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+        "state": Value::Object(state_map.clone()),
+        "input_as_text": input_as_text,
+        "iteration": iteration,
+    })
+}
+
+fn cel_fill_context(ctx: &mut Context, activation: &Value, iteration: u32) -> Result<(), String> {
     ctx.add_variable("inputs", activation.get("inputs").cloned().unwrap_or(Value::Null))
         .map_err(|e| e.to_string())?;
     ctx.add_variable("outputs", activation.get("outputs").cloned().unwrap_or(Value::Null))
@@ -78,6 +96,17 @@ fn cel_bool(expr: &str, activation: &Value, iteration: u32) -> Result<bool, Stri
         .map_err(|e| e.to_string())?;
     ctx.add_variable("iteration", iteration as i64)
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn cel_bool(expr: &str, activation: &Value, iteration: u32) -> Result<bool, String> {
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return Ok(false);
+    }
+    let program = Program::compile(expr).map_err(|e| format!("CEL parse: {e:?}"))?;
+    let mut ctx = Context::default();
+    cel_fill_context(&mut ctx, activation, iteration)?;
     let v = program.execute(&ctx).map_err(|e| format!("CEL exec: {e}"))?;
     match v {
         cel::Value::Bool(b) => Ok(b),
@@ -86,6 +115,30 @@ fn cel_bool(expr: &str, activation: &Value, iteration: u32) -> Result<bool, Stri
         cel::Value::Null => Ok(false),
         _ => Err(format!("CEL result is not bool: {v:?}")),
     }
+}
+
+fn cel_json_value(expr: &str, activation: &Value, iteration: u32) -> Result<Value, String> {
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return Err("empty CEL expression".to_string());
+    }
+    let program = Program::compile(expr).map_err(|e| format!("CEL parse: {e:?}"))?;
+    let mut ctx = Context::default();
+    cel_fill_context(&mut ctx, activation, iteration)?;
+    let v = program.execute(&ctx).map_err(|e| format!("CEL exec: {e}"))?;
+    v.json().map_err(|e| format!("CEL→JSON: {e}"))
+}
+
+static URL_IN_TEXT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"https?://[^\s]+").expect("url pattern"));
+
+fn guard_urls_allowed(text: &str) -> bool {
+    for m in URL_IN_TEXT.find_iter(text) {
+        if validate_url_relaxed(m.as_str()).is_err() {
+            return false;
+        }
+    }
+    true
 }
 
 fn normalize_label(l: &Option<String>) -> Option<String> {
@@ -166,6 +219,19 @@ fn pick_next(
                 from.id, want
             ))
         }
+        "human_approval" | "humanapproval" | "user_approval" | "userapproval" => {
+            let want = branch.ok_or_else(|| format!("node {}: user approval internal error", from.id))?;
+            let want = want.to_ascii_lowercase();
+            for (to, lab) in outs {
+                if normalize_label(lab).as_deref() == Some(want.as_str()) {
+                    return Ok(Some(to.clone()));
+                }
+            }
+            Err(format!(
+                "node {}: missing '{}' labeled outgoing edge",
+                from.id, want
+            ))
+        }
         _ => {
             if outs.is_empty() {
                 return Ok(None);
@@ -235,6 +301,7 @@ pub async fn run_flow(
     extras: AgentTaskExtras,
     vector_store: Option<Arc<VectorStore>>,
     safety: Option<Arc<SafetyLayer>>,
+    flow_run_log: Option<(Arc<FlowRunStore>, String)>,
 ) -> Result<FlowRunOutput, String> {
     spec.validate_for_run()?;
     if spec.has_interpreter_start() {
@@ -251,6 +318,7 @@ pub async fn run_flow(
             extras,
             vector_store,
             safety,
+            flow_run_log,
         )
         .await
     } else {
@@ -265,6 +333,7 @@ pub async fn run_flow(
             inference_sink,
             prompts,
             extras,
+            flow_run_log,
         )
         .await
     }
@@ -281,6 +350,7 @@ async fn run_legacy_topo(
     inference_sink: Option<Arc<dyn AgenticInferenceSink>>,
     prompts: Arc<PromptBundle>,
     extras: AgentTaskExtras,
+    flow_run_log: Option<(Arc<FlowRunStore>, String)>,
 ) -> Result<FlowRunOutput, String> {
     let order = spec.execution_order()?;
     let mut step_outputs: HashMap<String, Value> = HashMap::new();
@@ -293,6 +363,10 @@ async fn run_legacy_topo(
             .find(|n| n.id == node_id)
             .ok_or_else(|| format!("missing node {node_id}"))?;
         let kind = node.kind.to_ascii_lowercase();
+        flow_step_log(
+            &flow_run_log,
+            format!("[step] {node_id} ({kind}) [legacy DAG]"),
+        );
         if kind == "note" {
             continue;
         }
@@ -362,7 +436,9 @@ async fn run_interpreter(
     extras: AgentTaskExtras,
     vector_store: Option<Arc<VectorStore>>,
     safety: Option<Arc<SafetyLayer>>,
+    flow_run_log: Option<(Arc<FlowRunStore>, String)>,
 ) -> Result<FlowRunOutput, String> {
+    let vector_store = crate::vector::resolve_vector_store(vector_store);
     let start_ids: Vec<_> = spec
         .nodes
         .iter()
@@ -408,6 +484,7 @@ async fn run_interpreter(
             .find(|n| n.id == cur)
             .ok_or_else(|| format!("missing node {cur}"))?;
         let kind = node.kind.to_ascii_lowercase();
+        flow_step_log(&flow_run_log, format!("[step] {cur} ({kind})"));
         let outs = out_adj.get(&cur).map(|v| v.as_slice()).unwrap_or(&[]);
 
         match kind.as_str() {
@@ -425,11 +502,34 @@ async fn run_interpreter(
                 ordered_steps.push(json!({"id": cur, "kind": "end", "output": null}));
                 break;
             }
-            "human_approval" | "humanapproval" => {
-                return Err(format!(
-                    "node {}: Human approval is not implemented yet (phase 2)",
-                    node.id
-                ));
+            "human_approval" | "humanapproval" | "user_approval" | "userapproval" => {
+                // Until pause/resume exists, branch is driven by flow inputs (for builder testing).
+                let raw = inputs
+                    .get("human_approval")
+                    .or_else(|| inputs.get("simulated_human_approval"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("approve");
+                let branch = if raw.eq_ignore_ascii_case("reject") {
+                    "reject"
+                } else {
+                    "approve"
+                };
+                flow_step_log(
+                    &flow_run_log,
+                    format!(
+                        "[user_approval] {cur} → {branch} (set inputs.human_approval to approve|reject)"
+                    ),
+                );
+                let msg = node.prompt.trim();
+                let out = json!({
+                    "branch": branch,
+                    "message": msg,
+                    "simulated": true,
+                });
+                outputs.insert(cur.clone(), out.clone());
+                ordered_steps.push(json!({"id": cur, "kind": "user_approval", "branch": branch, "output": out}));
+                cursor = pick_next(node, outs, Some(branch))?;
+                continue;
             }
             "if" | "ifelse" => {
                 let act = json!({
@@ -440,6 +540,10 @@ async fn run_interpreter(
                 });
                 let cond = cel_bool(&node.condition_cel, &act, 0)?;
                 let branch = if cond { "true" } else { "false" };
+                flow_step_log(
+                    &flow_run_log,
+                    format!("[branch] if {cur} → {branch}"),
+                );
                 cursor = pick_next(node, outs, Some(branch))?;
                 ordered_steps.push(json!({"id": cur, "kind": kind, "branch": branch}));
                 continue;
@@ -453,6 +557,10 @@ async fn run_interpreter(
                 let done = *while_iter.get(&cur).unwrap_or(&0);
                 if done >= max_iter {
                     while_iter.remove(&cur);
+                    flow_step_log(
+                        &flow_run_log,
+                        format!("[branch] while {cur} → exit (max_iterations)"),
+                    );
                     cursor = pick_next(node, outs, Some("exit"))?;
                     ordered_steps.push(json!({"id": cur, "kind": "while", "branch": "exit", "reason": "max_iterations"}));
                     continue;
@@ -467,47 +575,68 @@ async fn run_interpreter(
                 let cond = cel_bool(&node.condition_cel, &act, done)?;
                 if !cond {
                     while_iter.remove(&cur);
+                    flow_step_log(&flow_run_log, format!("[branch] while {cur} → exit"));
                     cursor = pick_next(node, outs, Some("exit"))?;
                     ordered_steps.push(json!({"id": cur, "kind": "while", "branch": "exit"}));
                     continue;
                 }
                 *while_iter.entry(cur.clone()).or_insert(0) += 1;
+                flow_step_log(
+                    &flow_run_log,
+                    format!("[branch] while {cur} → loop (iter {done})"),
+                );
                 cursor = pick_next(node, outs, Some("loop"))?;
                 ordered_steps.push(json!({"id": cur, "kind": "while", "branch": "loop", "iteration": done}));
                 continue;
             }
             "guardrails" => {
-                let sid = node.source_node_id.trim();
-                if sid.is_empty() {
-                    return Err(format!("node {}: guardrails needs source_node_id", node.id));
-                }
-                let text = outputs
-                    .get(sid)
-                    .map(value_to_string)
-                    .unwrap_or_default();
-                let pass = if let Some(ref layer) = safety {
+                let tpl_ctx = build_template_context(inputs, &outputs);
+                let text = if !node.guardrail_input_template.trim().is_empty() {
+                    interpolate_context(&node.guardrail_input_template, &tpl_ctx)
+                } else {
+                    let sid = node.source_node_id.trim();
+                    if sid.is_empty() {
+                        return Err(format!(
+                            "node {}: guardrails needs source_node_id or guardrail_input_template",
+                            node.id
+                        ));
+                    }
+                    outputs
+                        .get(sid)
+                        .map(value_to_string)
+                        .unwrap_or_default()
+                };
+                let mut pass = if let Some(ref layer) = safety {
                     let mut ok = true;
-                    let checks: Vec<&str> = if node.guardrail_checks.is_empty() {
-                        vec!["leak", "injection", "policy"]
+                    let checks: Vec<String> = if node.guardrail_checks.is_empty() {
+                        vec![
+                            "leak".into(),
+                            "injection".into(),
+                            "policy".into(),
+                        ]
                     } else {
-                        node.guardrail_checks.iter().map(|s| s.as_str()).collect()
+                        node.guardrail_checks.clone()
                     };
-                    for c in checks {
-                        match c {
+                    for c in &checks {
+                        let c = c.to_ascii_lowercase();
+                        match c.as_str() {
                             "leak" | "pii" => {
                                 if layer.scan_inbound(&text).is_err() {
                                     ok = false;
                                     break;
                                 }
                             }
-                            "injection" => {
+                            "injection" | "jailbreak" => {
                                 let san = layer.sanitizer().sanitize(&text);
                                 if !san.warnings.is_empty() {
                                     ok = false;
                                     break;
                                 }
                             }
-                            "policy" => {
+                            "policy"
+                            | "moderation"
+                            | "hallucination"
+                            | "nsfw" => {
                                 let violations = layer.policy().check(&text);
                                 if violations.iter().any(|v| {
                                     matches!(
@@ -519,6 +648,21 @@ async fn run_interpreter(
                                     break;
                                 }
                             }
+                            "url" | "url_filter" => {
+                                if !guard_urls_allowed(&text) {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+                            "custom" => {
+                                let needle = node.guardrail_custom_substring.trim();
+                                if !needle.is_empty()
+                                    && text.to_ascii_lowercase().contains(&needle.to_ascii_lowercase())
+                                {
+                                    ok = false;
+                                    break;
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -526,10 +670,27 @@ async fn run_interpreter(
                 } else {
                     true
                 };
+                let mut forced = false;
+                if !pass && node.guardrail_continue_on_error {
+                    pass = true;
+                    forced = true;
+                    flow_step_log(
+                        &flow_run_log,
+                        format!("[guardrails] {cur} continue_on_error → treating as pass"),
+                    );
+                }
                 let branch = if pass { "pass" } else { "fail" };
+                flow_step_log(
+                    &flow_run_log,
+                    format!("[branch] guardrails {cur} → {branch}"),
+                );
                 outputs.insert(
                     cur.clone(),
-                    json!({ "pass": pass, "text_preview": text.chars().take(500).collect::<String>() }),
+                    json!({
+                        "pass": pass,
+                        "forced_pass": forced,
+                        "text_preview": text.chars().take(500).collect::<String>()
+                    }),
                 );
                 ordered_steps.push(json!({"id": cur, "kind": "guardrails", "branch": branch, "output": outputs.get(&cur)}));
                 cursor = pick_next(node, outs, Some(branch))?;
@@ -573,6 +734,13 @@ async fn run_interpreter(
                 });
                 outputs.insert(cur.clone(), out.clone());
                 ordered_steps.push(json!({"id": cur, "kind": "mcp", "output": out}));
+                flow_step_log(
+                    &flow_run_log,
+                    format!(
+                        "[mcp] {cur} tool={tool_id} error={}",
+                        result.is_error
+                    ),
+                );
                 cursor = pick_next(node, outs, None)?;
                 continue;
             }
@@ -586,12 +754,21 @@ async fn run_interpreter(
                 if q.trim().is_empty() {
                     return Err(format!("node {}: file_search needs vector_query_template", node.id));
                 }
-                let Some(ref vs) = vector_store else {
-                    return Err("vector store not available for file_search".to_string());
+                let top_k = if node.vector_top_k == 0 {
+                    10
+                } else {
+                    (node.vector_top_k as usize).min(100)
                 };
-                let results = vs
-                    .search_text(coll, &q, 10)
+                let results = vector_store
+                    .search_text(coll, &q, top_k)
                     .map_err(|e| format!("vector search: {e}"))?;
+                flow_step_log(
+                    &flow_run_log,
+                    format!(
+                        "[file_search] {cur} collection={coll} hits={}",
+                        results.len()
+                    ),
+                );
                 let items: Vec<Value> = results
                     .iter()
                     .map(|r| {
@@ -614,12 +791,17 @@ async fn run_interpreter(
                 if key.is_empty() {
                     return Err(format!("node {}: set_state needs state_key", node.id));
                 }
-                let tpl_ctx = build_template_context(inputs, &outputs);
-                let raw = interpolate_context(&node.state_value_json, &tpl_ctx);
-                let val: Value = if raw.trim().is_empty() {
-                    Value::Null
+                let act = activation_for_cel(inputs, &outputs, &state_map, &input_as_text, 0);
+                let val: Value = if !node.state_value_cel.trim().is_empty() {
+                    cel_json_value(&node.state_value_cel, &act, 0)?
                 } else {
-                    serde_json::from_str(&raw).unwrap_or(Value::String(raw))
+                    let tpl_ctx = build_template_context(inputs, &outputs);
+                    let raw = interpolate_context(&node.state_value_json, &tpl_ctx);
+                    if raw.trim().is_empty() {
+                        Value::Null
+                    } else {
+                        serde_json::from_str(&raw).unwrap_or(Value::String(raw))
+                    }
                 };
                 state_map.insert(key.to_string(), val.clone());
                 outputs.insert(cur.clone(), json!({ "state_key": key, "value": val }));
@@ -628,20 +810,88 @@ async fn run_interpreter(
                 continue;
             }
             "transform" => {
-                let from_id = node.transform_from_node_id.trim();
-                let sk = node.state_key.trim();
-                if from_id.is_empty() || sk.is_empty() {
-                    return Err(format!(
-                        "node {}: transform needs transform_from_node_id and state_key",
-                        node.id
-                    ));
+                let act = activation_for_cel(inputs, &outputs, &state_map, &input_as_text, 0);
+                let mode = node.transform_mode.to_ascii_lowercase();
+                let has_obj = !node.transform_object_json.trim().is_empty();
+                let has_expr = !node.transform_expressions_json.trim().is_empty();
+                let use_object = mode == "object" || (has_obj && mode != "copy" && mode != "expressions");
+                let use_expr = mode == "expressions" || (has_expr && mode != "object" && !use_object);
+
+                if use_object {
+                    let tpl_ctx = build_template_context(inputs, &outputs);
+                    let raw_obj =
+                        interpolate_context(&node.transform_object_json.trim(), &tpl_ctx);
+                    let map_val: Value = serde_json::from_str(&raw_obj).map_err(|e| {
+                        format!("node {}: transform_object_json: {e}", node.id)
+                    })?;
+                    let obj = map_val.as_object().ok_or_else(|| {
+                        format!("node {}: transform_object_json must be a JSON object", node.id)
+                    })?;
+                    let keys: Vec<String> = obj.keys().cloned().collect();
+                    for (k, v) in obj {
+                        state_map.insert(k.clone(), v.clone());
+                    }
+                    outputs.insert(
+                        cur.clone(),
+                        json!({ "mode": "object", "keys": keys }),
+                    );
+                } else if use_expr {
+                    let rows: Vec<Value> = serde_json::from_str(&node.transform_expressions_json)
+                        .map_err(|e| {
+                        format!(
+                            "node {}: transform_expressions_json must be a JSON array: {e}",
+                            node.id
+                        )
+                    })?;
+                    if rows.is_empty() {
+                        return Err(format!(
+                            "node {}: transform expressions mode needs at least one {{key, cel}} row",
+                            node.id
+                        ));
+                    }
+                    let mut applied = Vec::new();
+                    for row in rows {
+                        let key = row
+                            .get("key")
+                            .and_then(|x| x.as_str())
+                            .ok_or_else(|| {
+                                format!("node {}: each transform row needs string key", node.id)
+                            })?
+                            .to_string();
+                        let cel_e = row
+                            .get("cel")
+                            .and_then(|x| x.as_str())
+                            .ok_or_else(|| {
+                                format!("node {}: each transform row needs string cel", node.id)
+                            })?
+                            .to_string();
+                        let v = cel_json_value(&cel_e, &act, 0)?;
+                        state_map.insert(key.clone(), v.clone());
+                        applied.push(json!({ "key": key, "value": v }));
+                    }
+                    outputs.insert(
+                        cur.clone(),
+                        json!({ "mode": "expressions", "applied": applied }),
+                    );
+                } else {
+                    let from_id = node.transform_from_node_id.trim();
+                    let sk = node.state_key.trim();
+                    if from_id.is_empty() || sk.is_empty() {
+                        return Err(format!(
+                            "node {}: transform (copy) needs transform_from_node_id and state_key, or use expressions/object mode",
+                            node.id
+                        ));
+                    }
+                    let v = outputs
+                        .get(from_id)
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    state_map.insert(sk.to_string(), v.clone());
+                    outputs.insert(
+                        cur.clone(),
+                        json!({ "copied_from": from_id, "state_key": sk, "mode": "copy" }),
+                    );
                 }
-                let v = outputs
-                    .get(from_id)
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                state_map.insert(sk.to_string(), v.clone());
-                outputs.insert(cur.clone(), json!({ "copied_from": from_id, "state_key": sk }));
                 ordered_steps.push(json!({"id": cur, "kind": "transform", "output": outputs.get(&cur)}));
                 cursor = pick_next(node, outs, None)?;
                 continue;
@@ -672,6 +922,7 @@ async fn run_interpreter(
                 let v = serde_json::to_value(&out).map_err(|e| e.to_string())?;
                 outputs.insert(cur.clone(), v.clone());
                 ordered_steps.push(json!({"id": cur, "kind": "crew", "output": v}));
+                flow_step_log(&flow_run_log, format!("[crew] {cur} done"));
                 cursor = pick_next(node, outs, None)?;
                 continue;
             }
@@ -686,11 +937,14 @@ async fn run_interpreter(
                 } else {
                     node.tools.clone()
                 };
-                let system = if node.instructions.trim().is_empty() {
+                let mut system = if node.instructions.trim().is_empty() {
                     "You are a helpful assistant.".to_string()
                 } else {
                     node.instructions.clone()
                 };
+                if node.output_format.eq_ignore_ascii_case("json") {
+                    system.push_str("\n\nRespond with valid JSON only. Do not wrap in markdown fences or add commentary outside the JSON.");
+                }
                 let config = AgentConfig {
                     id: format!("flow_{}", node.id),
                     name: if node.name.trim().is_empty() {
@@ -719,8 +973,22 @@ async fn run_interpreter(
                 let ctx_block = prior_context_block(spec, &cur, &outputs);
                 let user = interpolate_inputs(&node.prompt, inputs);
                 let user_block = format!("{ctx_block}\n\n## Task\n{user}\n");
+                let session_id_opt: Option<String> = if node.include_chat_history {
+                    Some(if node.agent_session_key.trim().is_empty() {
+                        format!("flow_agent_{}", node.id)
+                    } else {
+                        node.agent_session_key.clone()
+                    })
+                } else {
+                    None
+                };
                 let res = rt
-                    .run_task_with_session(&user_block, None, None, extras.clone())
+                    .run_task_with_session(
+                        &user_block,
+                        None,
+                        session_id_opt.as_deref(),
+                        extras.clone(),
+                    )
                     .await;
                 let out = json!({
                     "text": res.answer,
@@ -731,14 +999,91 @@ async fn run_interpreter(
                 });
                 outputs.insert(cur.clone(), out.clone());
                 ordered_steps.push(json!({"id": cur, "kind": "agent", "output": out}));
+                flow_step_log(
+                    &flow_run_log,
+                    format!(
+                        "[agent] {cur} iterations={} tokens={} success={}",
+                        res.iterations, res.total_tokens, res.success
+                    ),
+                );
+                cursor = pick_next(node, outs, None)?;
+                continue;
+            }
+            "classify" => {
+                if node.classify_categories.is_empty() {
+                    return Err(format!(
+                        "node {}: classify needs at least one category",
+                        node.id
+                    ));
+                }
+                let cats = node.classify_categories.join(", ");
+                let tpl_ctx = build_template_context(inputs, &outputs);
+                let input_block = if node.classify_input_template.trim().is_empty() {
+                    input_as_text.clone()
+                } else {
+                    interpolate_context(&node.classify_input_template, &tpl_ctx)
+                };
+                let mut body = format!(
+                    "You are a classifier. Possible categories (reply with exactly one label from this list): [{}].\n\nText to classify:\n{}\n\nReply with only the category label, no punctuation or explanation.",
+                    cats, input_block
+                );
+                if !node.classify_examples_json.trim().is_empty() {
+                    body.push_str("\n\nFew-shot examples (JSON):\n");
+                    body.push_str(node.classify_examples_json.trim());
+                }
+                let model = if node.classify_model.trim().is_empty() {
+                    default_model.to_string()
+                } else {
+                    node.classify_model.clone()
+                };
+                if node.output_format.eq_ignore_ascii_case("json") {
+                    body.push_str("\n\nReturn JSON: {\"category\": \"<label>\"} only.");
+                }
+                let max_t = node.max_tokens.unwrap_or(128).max(16);
+                let temp = node.temperature.unwrap_or(0.2);
+                let task = InferenceTask::new(model, body)
+                    .with_max_tokens(max_t)
+                    .with_temperature(temp);
+                let res = executor
+                    .execute(ExecutionTask::Inference(task))
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let text = match res.data {
+                    TaskData::Inference(r) => r.text,
+                    TaskData::Error(e) => return Err(e),
+                    _ => return Err("non-inference flow step".into()),
+                };
+                let label = text.trim().to_string();
+                let j = json!({
+                    "text": text,
+                    "category": label,
+                });
+                outputs.insert(cur.clone(), j.clone());
+                ordered_steps.push(json!({"id": cur, "kind": "classify", "output": j}));
+                flow_step_log(
+                    &flow_run_log,
+                    format!("[classify] {cur} → {}", label.chars().take(80).collect::<String>()),
+                );
                 cursor = pick_next(node, outs, None)?;
                 continue;
             }
             "" | "llm" => {
                 let prompt = interpolate_inputs(&node.prompt, inputs);
                 let ctx_block = prior_context_block(spec, &cur, &outputs);
-                let full = format!("{ctx_block}\n\n{prompt}");
-                let task = InferenceTask::new(default_model, full).with_max_tokens(512);
+                let mut full = format!("{ctx_block}\n\n{prompt}");
+                if node.output_format.eq_ignore_ascii_case("json") {
+                    full.push_str("\n\nRespond with valid JSON only. No markdown fences.");
+                }
+                let model = if node.model.trim().is_empty() {
+                    default_model.to_string()
+                } else {
+                    node.model.clone()
+                };
+                let max_t = node.max_tokens.unwrap_or(512);
+                let temp = node.temperature.unwrap_or(0.7);
+                let task = InferenceTask::new(model, full)
+                    .with_max_tokens(max_t)
+                    .with_temperature(temp);
                 let res = executor
                     .execute(ExecutionTask::Inference(task))
                     .await
@@ -751,6 +1096,10 @@ async fn run_interpreter(
                 let j = json!({ "text": text });
                 outputs.insert(cur.clone(), j.clone());
                 ordered_steps.push(json!({"id": cur, "kind": "llm", "output": j}));
+                flow_step_log(
+                    &flow_run_log,
+                    format!("[llm] {cur} chars={}", text.chars().count()),
+                );
                 cursor = pick_next(node, outs, None)?;
                 continue;
             }
@@ -842,6 +1191,23 @@ pub fn validate_interpreter(spec: &FlowSpec) -> Result<(), String> {
                     ));
                 }
             }
+            "human_approval" | "humanapproval" | "user_approval" | "userapproval" => {
+                let mut has_a = false;
+                let mut has_r = false;
+                for (_, lab) in outs {
+                    match normalize_label(lab).as_deref() {
+                        Some("approve") => has_a = true,
+                        Some("reject") => has_r = true,
+                        _ => {}
+                    }
+                }
+                if !has_a || !has_r {
+                    return Err(format!(
+                        "node {}: user approval needs outgoing edges labeled approve and reject",
+                        n.id
+                    ));
+                }
+            }
             "end" => {
                 if !outs.is_empty() {
                     return Err(format!("node {}: end node must have no outgoing edges", n.id));
@@ -871,22 +1237,46 @@ pub fn validate_interpreter(spec: &FlowSpec) -> Result<(), String> {
                 }
             }
         }
-        // source_node_id reference
-        if k == "guardrails" && !n.source_node_id.is_empty() && !ids.contains(n.source_node_id.as_str())
-        {
-            return Err(format!(
-                "node {}: guardrails source_node_id '{}' not found",
-                n.id, n.source_node_id
-            ));
+        if k == "guardrails" {
+            if n.guardrail_input_template.trim().is_empty() {
+                let sid = n.source_node_id.trim();
+                if sid.is_empty() {
+                    return Err(format!(
+                        "node {}: guardrails needs source_node_id or guardrail_input_template",
+                        n.id
+                    ));
+                }
+                if !ids.contains(sid) {
+                    return Err(format!(
+                        "node {}: guardrails source_node_id '{}' not found",
+                        n.id, sid
+                    ));
+                }
+            } else if !n.source_node_id.trim().is_empty()
+                && !ids.contains(n.source_node_id.trim())
+            {
+                return Err(format!(
+                    "node {}: guardrails source_node_id '{}' not found",
+                    n.id,
+                    n.source_node_id.trim()
+                ));
+            }
         }
-        if k == "transform"
-            && !n.transform_from_node_id.is_empty()
-            && !ids.contains(n.transform_from_node_id.as_str())
-        {
-            return Err(format!(
-                "node {}: transform_from_node_id '{}' not found",
-                n.id, n.transform_from_node_id
-            ));
+        if k == "transform" {
+            let mode = n.transform_mode.to_ascii_lowercase();
+            let copy_mode = mode == "copy"
+                || (mode.is_empty()
+                    && n.transform_expressions_json.trim().is_empty()
+                    && n.transform_object_json.trim().is_empty());
+            if copy_mode {
+                let fid = n.transform_from_node_id.trim();
+                if !fid.is_empty() && !ids.contains(fid) {
+                    return Err(format!(
+                        "node {}: transform_from_node_id '{}' not found",
+                        n.id, fid
+                    ));
+                }
+            }
         }
     }
 

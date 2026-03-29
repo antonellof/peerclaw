@@ -120,6 +120,8 @@ export function WorkspaceShell() {
     setView("chat")
   }, [setView])
 
+  const agentBuilderFullBleed = view === "crews"
+
   const navValue = {
     view,
     setView,
@@ -138,6 +140,7 @@ export function WorkspaceShell() {
           className={cn(
             "hidden min-h-0 shrink-0 flex-col overflow-hidden border-r border-border/80 bg-[hsl(240_8%_7%)] md:flex",
             sidebarCollapsed ? "w-[72px]" : "w-[260px]",
+            agentBuilderFullBleed && "md:hidden",
           )}
         >
           <div className="flex h-12 items-center gap-2 border-b border-border/60 px-3">
@@ -228,7 +231,12 @@ export function WorkspaceShell() {
 
         {/* Main */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/80 bg-card/30 px-3 md:px-4">
+          <header
+            className={cn(
+              "flex h-12 shrink-0 items-center gap-2 border-b border-border/80 bg-card/30 px-3 md:px-4",
+              agentBuilderFullBleed && "md:hidden",
+            )}
+          >
             <Button
               variant="ghost"
               size="icon"
@@ -237,7 +245,11 @@ export function WorkspaceShell() {
             >
               <Menu className="size-5" />
             </Button>
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">{workspaceNavTitle(view)}</span>
+            {agentBuilderFullBleed ? (
+              <span className="min-w-0 flex-1" aria-hidden />
+            ) : (
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">{workspaceNavTitle(view)}</span>
+            )}
             <div className="flex shrink-0 flex-col items-end gap-0.5 text-right sm:flex-row sm:items-center sm:gap-3">
               <div className="text-[11px] text-muted-foreground">
                 <span className="text-primary">●</span> {peerLine}

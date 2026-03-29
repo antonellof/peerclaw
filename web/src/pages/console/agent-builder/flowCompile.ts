@@ -42,17 +42,36 @@ export type FlowNodeData = {
   model?: string
   toolsStr?: string
   prompt?: string
+  temperature?: number
+  maxTokens?: number
+  includeChatHistory?: boolean
+  outputFormat?: string
+  agentSessionKey?: string
   conditionCel?: string
+  ifCaseName?: string
   maxIterations?: number
   sourceNodeId?: string
+  guardrailInputTemplate?: string
+  guardrailContinueOnError?: boolean
+  guardrailCustomSubstring?: string
   guardrailChecksStr?: string
   mcpToolId?: string
   mcpArgsJson?: string
   vectorCollection?: string
   vectorQuery?: string
+  vectorTopK?: number
+  categoriesStr?: string
+  classifyModel?: string
+  classifyInputTemplate?: string
+  classifyExamplesJson?: string
+  approvalMessage?: string
   transformFrom?: string
+  transformMode?: string
+  transformExpressionsJson?: string
+  transformObjectJson?: string
   stateKey?: string
   stateValueJson?: string
+  stateValueCel?: string
 }
 
 const SKIP_EXPORT = new Set(["note"])
@@ -103,9 +122,26 @@ function compileOne(n: Node): FlowNodeJson | null {
         instructions: d.instructions ?? "",
         model: d.model ?? "",
         tools: toolsArray(d.toolsStr),
+        temperature: d.temperature,
+        max_tokens: d.maxTokens,
+        include_chat_history: d.includeChatHistory === true,
+        output_format: d.outputFormat ?? "",
+        agent_session_key: d.agentSessionKey ?? "",
+      }
+    case "llm":
+      return {
+        ...base,
+        model: d.model ?? "",
+        temperature: d.temperature,
+        max_tokens: d.maxTokens,
+        output_format: d.outputFormat ?? "",
       }
     case "if":
-      return { ...base, condition_cel: d.conditionCel ?? "true" }
+      return {
+        ...base,
+        condition_cel: d.conditionCel ?? "true",
+        if_case_name: d.ifCaseName ?? "",
+      }
     case "while":
       return {
         ...base,
@@ -117,6 +153,9 @@ function compileOne(n: Node): FlowNodeJson | null {
         ...base,
         source_node_id: d.sourceNodeId ?? "",
         guardrail_checks: guardrailList(d.guardrailChecksStr),
+        guardrail_input_template: d.guardrailInputTemplate ?? "",
+        guardrail_continue_on_error: d.guardrailContinueOnError === true,
+        guardrail_custom_substring: d.guardrailCustomSubstring ?? "",
       }
     case "mcp":
       return {
@@ -124,27 +163,56 @@ function compileOne(n: Node): FlowNodeJson | null {
         mcp_tool_id: d.mcpToolId ?? "",
         mcp_arguments_json: d.mcpArgsJson ?? "{}",
       }
+    case "classify": {
+      const cats = (d.categoriesStr ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+      return {
+        ...base,
+        kind: "classify",
+        classify_categories: cats,
+        classify_model: d.classifyModel ?? "",
+        classify_input_template: d.classifyInputTemplate ?? "",
+        classify_examples_json: d.classifyExamplesJson ?? "",
+        output_format: d.outputFormat ?? "",
+        temperature: d.temperature,
+        max_tokens: d.maxTokens,
+        prompt: d.prompt ?? "",
+      }
+    }
+    case "userApproval":
+      return {
+        ...base,
+        kind: "user_approval",
+        prompt: d.approvalMessage ?? d.prompt ?? "",
+      }
     case "fileSearch":
       return {
         ...base,
         vector_collection: d.vectorCollection ?? "",
         vector_query_template: d.vectorQuery ?? "",
+        vector_top_k:
+          d.vectorTopK != null && d.vectorTopK > 0 ? Math.min(100, Math.floor(d.vectorTopK)) : 0,
       }
     case "setState":
       return {
         ...base,
         state_key: d.stateKey ?? "",
         state_value_json: d.stateValueJson ?? "null",
+        state_value_cel: d.stateValueCel ?? "",
       }
     case "transform":
       return {
         ...base,
         transform_from_node_id: d.transformFrom ?? "",
         state_key: d.stateKey ?? "",
+        transform_mode: d.transformMode ?? "",
+        transform_expressions_json: d.transformExpressionsJson ?? "",
+        transform_object_json: d.transformObjectJson ?? "",
       }
     case "start":
     case "end":
-    case "llm":
     default:
       return base
   }
@@ -179,6 +247,10 @@ function rustKindToRf(k: string): string {
       return "fileSearch"
     case "set_state":
       return "setState"
+    case "user_approval":
+      return "userApproval"
+    case "classify":
+      return "classify"
     default:
       return k || "llm"
   }
@@ -193,17 +265,36 @@ export function flowSpecToReactFlow(spec: FlowSpecJson): { nodes: Node[]; edges:
       instructions: n.instructions,
       model: n.model,
       toolsStr: n.tools?.join(", "),
+      temperature: n.temperature ?? undefined,
+      maxTokens: n.max_tokens ?? undefined,
+      includeChatHistory: n.include_chat_history === true,
+      outputFormat: n.output_format ?? "",
+      agentSessionKey: n.agent_session_key ?? "",
       conditionCel: n.condition_cel,
+      ifCaseName: n.if_case_name ?? "",
       maxIterations: n.max_iterations,
       sourceNodeId: n.source_node_id,
+      guardrailInputTemplate: n.guardrail_input_template ?? "",
+      guardrailContinueOnError: n.guardrail_continue_on_error === true,
+      guardrailCustomSubstring: n.guardrail_custom_substring ?? "",
       guardrailChecksStr: n.guardrail_checks?.join(", "),
       mcpToolId: n.mcp_tool_id,
       mcpArgsJson: n.mcp_arguments_json,
       vectorCollection: n.vector_collection,
       vectorQuery: n.vector_query_template,
+      vectorTopK: n.vector_top_k,
+      categoriesStr: n.classify_categories?.join(", ") ?? "",
+      classifyModel: n.classify_model ?? "",
+      classifyInputTemplate: n.classify_input_template ?? "",
+      classifyExamplesJson: n.classify_examples_json ?? "",
+      approvalMessage: n.kind === "user_approval" ? n.prompt : undefined,
       transformFrom: n.transform_from_node_id,
+      transformMode: n.transform_mode ?? "",
+      transformExpressionsJson: n.transform_expressions_json ?? "",
+      transformObjectJson: n.transform_object_json ?? "",
       stateKey: n.state_key,
       stateValueJson: n.state_value_json,
+      stateValueCel: n.state_value_cel ?? "",
     }
     return {
       id: n.id,

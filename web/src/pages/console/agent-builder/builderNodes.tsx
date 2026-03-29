@@ -1,7 +1,21 @@
 /* eslint-disable react-refresh/only-export-components -- nodeTypes map is required by React Flow */
 import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
-import { Bot, CirclePlay, Diamond, FileSearch, Flag, GitBranch, MessageSquare, Repeat, Shield, StickyNote, Wrench } from "lucide-react"
+import {
+  Bot,
+  CirclePlay,
+  Diamond,
+  FileSearch,
+  Flag,
+  GitBranch,
+  LayoutList,
+  MessageSquare,
+  Repeat,
+  Shield,
+  StickyNote,
+  UserCheck,
+  Wrench,
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -86,6 +100,55 @@ export const NoteNode = memo(({ data, selected }: NodeProps) => {
   )
 })
 NoteNode.displayName = "NoteNode"
+
+export const ClassifyNode = memo(({ data, selected }: NodeProps) => {
+  const d = (data || {}) as FlowNodeData
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
+      <Handle type="source" position={Position.Bottom} className="!size-2 !border-border !bg-primary" />
+      {shell(
+        !!selected,
+        "bg-amber-500/15 text-amber-300",
+        <LayoutList className="size-4" />,
+        "Classify",
+        d.title || "Classify",
+      )}
+    </>
+  )
+})
+ClassifyNode.displayName = "ClassifyNode"
+
+export const UserApprovalNode = memo(({ data, selected }: NodeProps) => {
+  const d = (data || {}) as FlowNodeData
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="approve"
+        className="!size-2 !border-border !bg-emerald-500"
+        style={{ left: "35%" }}
+      />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="reject"
+        className="!size-2 !border-border !bg-rose-500"
+        style={{ left: "65%" }}
+      />
+      {shell(
+        !!selected,
+        "bg-orange-500/15 text-orange-200",
+        <UserCheck className="size-4" />,
+        "User approval",
+        d.title || "Human gate",
+      )}
+    </>
+  )
+})
+UserApprovalNode.displayName = "UserApprovalNode"
 
 export const LlmNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
@@ -296,6 +359,8 @@ export const builderNodeTypes = {
   note: NoteNode,
   llm: LlmNode,
   agent: AgentNode,
+  classify: ClassifyNode,
+  userApproval: UserApprovalNode,
   if: IfNode,
   while: WhileNode,
   guardrails: GuardrailsNode,

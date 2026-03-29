@@ -60,9 +60,32 @@ pub struct FlowNode {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
+    /// Persist turns across flow runs (same key) when set with [`Self::include_chat_history`].
+    #[serde(default)]
+    pub include_chat_history: bool,
+    /// `text` (default) or `json` — steers the model to emit JSON only when `json`.
+    #[serde(default)]
+    pub output_format: String,
+    /// Session id for chat history; if empty with `include_chat_history`, defaults per node id.
+    #[serde(default)]
+    pub agent_session_key: String,
+    // --- Classify (dedicated kind) ---
+    #[serde(default)]
+    pub classify_categories: Vec<String>,
+    #[serde(default)]
+    pub classify_model: String,
+    /// `{{var}}` template against flow context; empty uses `input_as_text`.
+    #[serde(default)]
+    pub classify_input_template: String,
+    /// JSON array of `{ "input": "...", "category": "..." }` few-shot examples.
+    #[serde(default)]
+    pub classify_examples_json: String,
     // --- If / While ---
     #[serde(default)]
     pub condition_cel: String,
+    /// Optional label for documentation / UI (not used by the engine).
+    #[serde(default)]
+    pub if_case_name: String,
     /// 0 = default cap (100) in the interpreter.
     #[serde(default)]
     pub max_iterations: u32,
@@ -71,6 +94,15 @@ pub struct FlowNode {
     pub source_node_id: String,
     #[serde(default)]
     pub guardrail_checks: Vec<String>,
+    /// Interpolate `{{...}}` from inputs + outputs; when non-empty, overrides raw `source_node_id` text.
+    #[serde(default)]
+    pub guardrail_input_template: String,
+    /// If true, failed checks still follow the **pass** edge (logged).
+    #[serde(default)]
+    pub guardrail_continue_on_error: bool,
+    /// With check `custom`, fail when this substring appears (case-insensitive).
+    #[serde(default)]
+    pub guardrail_custom_substring: String,
     // --- MCP ---
     #[serde(default)]
     pub mcp_tool_id: String,
@@ -81,13 +113,28 @@ pub struct FlowNode {
     pub vector_collection: String,
     #[serde(default)]
     pub vector_query_template: String,
+    /// Max hits for `search_text` (0 = default 10).
+    #[serde(default)]
+    pub vector_top_k: u32,
     // --- Transform / set_state ---
     #[serde(default)]
     pub transform_from_node_id: String,
+    /// `copy` (default), `expressions`, or `object`.
+    #[serde(default)]
+    pub transform_mode: String,
+    /// JSON `[{ "key": "k", "cel": "expression" }]`.
+    #[serde(default)]
+    pub transform_expressions_json: String,
+    /// JSON object merged into `state` when `transform_mode` is `object`.
+    #[serde(default)]
+    pub transform_object_json: String,
     #[serde(default)]
     pub state_key: String,
     #[serde(default)]
     pub state_value_json: String,
+    /// When non-empty, evaluated as CEL instead of parsing [`Self::state_value_json`].
+    #[serde(default)]
+    pub state_value_cel: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,14 +212,21 @@ impl FlowRunStore {
             r.output = Some(out);
             r.completed_at = Some(chrono::Utc::now().to_rfc3339());
             r.error = None;
+            r.logs
+                .get_or_insert_with(Vec::new)
+                .push("[flow] completed successfully".to_string());
         }
     }
 
     pub fn complete_err(&self, id: &str, err: impl Into<String>) {
+        let msg = err.into();
         if let Some(r) = self.runs.write().get_mut(id) {
             r.status = "failed".to_string();
-            r.error = Some(err.into());
+            r.error = Some(msg.clone());
             r.completed_at = Some(chrono::Utc::now().to_rfc3339());
+            r.logs
+                .get_or_insert_with(Vec::new)
+                .push(format!("[flow] failed: {msg}"));
         }
     }
 
@@ -290,6 +344,7 @@ pub async fn run_flow_with_extras(
     extras: AgentTaskExtras,
     vector_store: Option<Arc<VectorStore>>,
     safety: Option<Arc<SafetyLayer>>,
+    flow_run_log: Option<(Arc<FlowRunStore>, String)>,
 ) -> Result<FlowRunOutput, String> {
     interpreter::run_flow(
         spec,
@@ -304,6 +359,7 @@ pub async fn run_flow_with_extras(
         extras,
         vector_store,
         safety,
+        flow_run_log,
     )
     .await
 }
@@ -328,17 +384,33 @@ mod tests {
                     tools: vec![],
                     temperature: None,
                     max_tokens: None,
+                    include_chat_history: false,
+                    output_format: String::new(),
+                    agent_session_key: String::new(),
+                    classify_categories: vec![],
+                    classify_model: String::new(),
+                    classify_input_template: String::new(),
+                    classify_examples_json: String::new(),
                     condition_cel: String::new(),
+                    if_case_name: String::new(),
                     max_iterations: 0,
                     source_node_id: String::new(),
                     guardrail_checks: vec![],
+                    guardrail_input_template: String::new(),
+                    guardrail_continue_on_error: false,
+                    guardrail_custom_substring: String::new(),
                     mcp_tool_id: String::new(),
                     mcp_arguments_json: String::new(),
                     vector_collection: String::new(),
                     vector_query_template: String::new(),
+                    vector_top_k: 0,
                     transform_from_node_id: String::new(),
+                    transform_mode: String::new(),
+                    transform_expressions_json: String::new(),
+                    transform_object_json: String::new(),
                     state_key: String::new(),
                     state_value_json: String::new(),
+                    state_value_cel: String::new(),
                 },
                 FlowNode {
                     id: "b".into(),
@@ -351,17 +423,33 @@ mod tests {
                     tools: vec![],
                     temperature: None,
                     max_tokens: None,
+                    include_chat_history: false,
+                    output_format: String::new(),
+                    agent_session_key: String::new(),
+                    classify_categories: vec![],
+                    classify_model: String::new(),
+                    classify_input_template: String::new(),
+                    classify_examples_json: String::new(),
                     condition_cel: String::new(),
+                    if_case_name: String::new(),
                     max_iterations: 0,
                     source_node_id: String::new(),
                     guardrail_checks: vec![],
+                    guardrail_input_template: String::new(),
+                    guardrail_continue_on_error: false,
+                    guardrail_custom_substring: String::new(),
                     mcp_tool_id: String::new(),
                     mcp_arguments_json: String::new(),
                     vector_collection: String::new(),
                     vector_query_template: String::new(),
+                    vector_top_k: 0,
                     transform_from_node_id: String::new(),
+                    transform_mode: String::new(),
+                    transform_expressions_json: String::new(),
+                    transform_object_json: String::new(),
                     state_key: String::new(),
                     state_value_json: String::new(),
+                    state_value_cel: String::new(),
                 },
             ],
             edges: vec![FlowEdge {
