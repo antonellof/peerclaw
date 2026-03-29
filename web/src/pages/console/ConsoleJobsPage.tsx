@@ -34,7 +34,7 @@ export function ConsoleJobsPage() {
           <p>
             Marketplace jobs are submitted by the <strong className="text-foreground">agent</strong> via the{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-xs text-foreground">job_submit</code> tool (from chat
-            or an agent goal), not from a form here. Use{" "}
+            or a workflow), not from a form here. Use{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-xs text-foreground">job_status</code> with the returned{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-xs text-foreground">job_id</code> to poll until work
             completes on the network.

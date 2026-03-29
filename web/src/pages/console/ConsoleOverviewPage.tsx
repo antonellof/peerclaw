@@ -38,10 +38,41 @@ import { JoinMeshSection } from "@/pages/console/JoinMeshSection"
 
 const SECTIONS = [
   { id: "health", label: "Resources" },
+  { id: "sharing", label: "Resource sharing" },
   { id: "join-mesh", label: "Join the mesh" },
   { id: "p2p", label: "P2P mesh" },
   { id: "swarm", label: "Swarm" },
 ] as const
+
+function SharingSlider({
+  label,
+  value,
+  onChange,
+  barClass,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+  barClass: string
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <span className="font-mono text-xs tabular-nums text-foreground">{value}%</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={5}
+        value={value}
+        onChange={(e) => onChange(parseInt(e.target.value, 10))}
+        className={cn("h-2 w-full cursor-pointer appearance-none rounded-full bg-muted [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full", barClass)}
+      />
+    </div>
+  )
+}
 
 function ResourceMeter({
   label,
@@ -90,6 +121,10 @@ export function ConsoleOverviewPage() {
   const [nodeOpen, setNodeOpen] = useState(false)
   const [nodeDetail, setNodeDetail] = useState<NodeDetailResponse | null>(null)
   const [loadingNode, setLoadingNode] = useState(false)
+
+  const [shareCpu, setShareCpu] = useState(25)
+  const [shareGpu, setShareGpu] = useState(0)
+  const [shareRam, setShareRam] = useState(10)
 
   const [activeSection, setActiveSection] = useState<string>("health")
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
@@ -234,15 +269,11 @@ export function ConsoleOverviewPage() {
         <div className="pointer-events-none absolute -bottom-16 left-1/3 size-48 rounded-full bg-violet-500/10 blur-3xl" />
         <div className="relative flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-semibold tracking-tight md:text-2xl">P2P Network</h1>
-              <Badge variant={online ? "default" : "secondary"} className="font-normal">
-                {online ? "Node online" : "Offline"}
-              </Badge>
-            </div>
+            <Badge variant={online ? "default" : "secondary"} className="font-normal">
+              {online ? "Node online" : "Offline"}
+            </Badge>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-              Resources, how to join the mesh, libp2p connectivity, and swarm agents. Peer count and balance stay in the
-              header so they are not repeated here.
+              Node resources, mesh connectivity, and swarm agents.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 md:justify-end">
@@ -338,6 +369,95 @@ export function ConsoleOverviewPage() {
               <Button variant="secondary" className="w-full" size="sm" asChild>
                 <Link to={workspaceHref("jobs")}>Open jobs</Link>
               </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      {/* —— Resource sharing (SETI@Home-style sliders) —— */}
+      <section
+        ref={(el) => {
+          sectionRefs.current.sharing = el
+        }}
+        id="sharing"
+        className="scroll-mt-28 space-y-4"
+      >
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Resource sharing</h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Control how much of your node&apos;s capacity is available to the P2P network. Peers requesting inference or
+            compute jobs will use up to these limits.
+          </p>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-5">
+          <Card className="border-border/80 lg:col-span-2">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Share limits</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <SharingSlider
+                label="CPU"
+                value={shareCpu}
+                onChange={setShareCpu}
+                barClass="[&::-webkit-slider-thumb]:bg-primary"
+              />
+              <SharingSlider
+                label="GPU"
+                value={shareGpu}
+                onChange={setShareGpu}
+                barClass="[&::-webkit-slider-thumb]:bg-amber-500"
+              />
+              <SharingSlider
+                label="RAM"
+                value={shareRam}
+                onChange={setShareRam}
+                barClass="[&::-webkit-slider-thumb]:bg-emerald-500"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                These limits cap what remote peers can consume. Your own tasks always have priority. Fine-tune inference
+                rate limits under{" "}
+                <Link to={workspaceHref("providers")} className="text-primary underline-offset-4 hover:underline">
+                  Providers
+                </Link>
+                .
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/80 lg:col-span-3">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-base">Peers using your node</CardTitle>
+                <span className="text-xs text-muted-foreground">
+                  {peerList.length} connected
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {peerList.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  No peers connected. Join the mesh or dial a bootstrap to start sharing.
+                </p>
+              ) : (
+                <div className="max-h-[260px] space-y-2 overflow-y-auto pr-1">
+                  {peerList.map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/10 px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-mono text-[11px] text-foreground">
+                          ...{p.id.slice(-16)}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 text-[10px] font-normal">
+                        connected
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -552,9 +672,9 @@ export function ConsoleOverviewPage() {
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               Registered agents and their relationships.{" "}
               <Link to="/" className="text-primary underline-offset-4 hover:underline">
-                Run agent goals
+                Run tasks
               </Link>{" "}
-              from Chat (Agent goal); jobs and providers are separate flows.
+              from Chat; jobs and providers are separate flows.
             </p>
           </div>
           <Badge variant="outline" className="w-fit font-mono text-xs">

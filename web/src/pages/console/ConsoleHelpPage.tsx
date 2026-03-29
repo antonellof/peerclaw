@@ -41,13 +41,12 @@ export function ConsoleHelpPage() {
             <BookOpen className="size-5 text-primary" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Help &amp; getting started</h1>
+            <h2 className="text-lg font-semibold tracking-tight">Getting started</h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               The app opens on <strong className="text-foreground">Chat</strong>. Describe a goal and the node runs tools
-              within a <strong className="text-foreground">budget</strong>. Use <strong className="text-foreground">Saved agent</strong>{" "}
-              for flows from Agent builder, <strong className="text-foreground">Agent goal</strong> for ad-hoc multi-step
-              tasks, or stay in streaming chat. Crews and flows API:{" "}
-              <code className="text-foreground/90">/api/crews</code>, <code className="text-foreground/90">/api/flows</code>.
+              within a <strong className="text-foreground">budget</strong>. Use <strong className="text-foreground">Workflows</strong>{" "}
+              for multi-step orchestrated flows, or stay in streaming chat. Workflows API:{" "}
+              <code className="text-foreground/90">/api/workflows</code>, <code className="text-foreground/90">/api/flows</code>.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Button size="sm" onClick={() => setView("chat")}>
@@ -63,24 +62,25 @@ export function ConsoleHelpPage() {
       </div>
 
       <section className="space-y-3 text-sm text-muted-foreground">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-foreground">Chat vs agents</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-foreground">Chat and workflows</h2>
         <ul className="list-inside list-disc space-y-2 text-xs leading-relaxed">
           <li>
-            <strong className="text-foreground">Chat</strong> — streaming assistant; session memory when a session id is set.
+            <strong className="text-foreground">Chat</strong> — streaming assistant with tool use; session memory when a session id is set.
           </li>
           <li>
-            <strong className="text-foreground">Saved agent</strong> — run a stored flow (kickoff) or a task preset from the
-            node library (<code className="text-foreground/80">agent_library.json</code>).
+            <strong className="text-foreground">Workflows</strong> — multi-step orchestrated flows built in the workflow editor. Launch from the
+            sidebar or via the <code className="text-foreground/80">/api/workflows</code> API.
           </li>
           <li>
-            <strong className="text-foreground">Agent goal</strong> — one-off task; logs and results stay in the thread. Past
-            runs appear under <strong className="text-foreground">Agent runs</strong> in the sidebar.
+            <strong className="text-foreground">Agent runs</strong> — past task executions appear in the sidebar for review.
           </li>
         </ul>
         <p className="text-xs leading-relaxed">
           Type <kbd className="rounded border border-border px-1 font-mono">/</kbd> for slash commands (full list under{" "}
-          <strong className="text-foreground">Settings</strong> → Commands). Sidebar: <strong className="text-foreground">P2P Network</strong>,{" "}
-          <strong className="text-foreground">Agent builder</strong>, and other console panels.
+          <strong className="text-foreground">Settings</strong> &rarr; Commands). Sidebar:{" "}
+          <strong className="text-foreground">Tools</strong>, <strong className="text-foreground">Skills</strong>,{" "}
+          <strong className="text-foreground">MCP</strong>, <strong className="text-foreground">Providers</strong>, and{" "}
+          <strong className="text-foreground">P2P Network</strong>.
         </p>
       </section>
 
@@ -122,8 +122,8 @@ export function ConsoleHelpPage() {
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Shortcuts</h2>
         <p className="mt-1 text-sm text-muted-foreground">Jump to common console destinations.</p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => nav("/", { state: { openAgent: true } })}>
-            Start with Agent
+          <Button variant="outline" size="sm" onClick={() => nav("/")}>
+            Open Chat
           </Button>
           <Button variant="outline" size="sm" onClick={() => setView("workflows")}>
             Workflows
@@ -139,7 +139,7 @@ export function ConsoleHelpPage() {
 
       <div>
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Starters</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Opens Chat in Agent goal mode — edit the prompt and send.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Opens Chat with a starter prompt — edit and send.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {(
             [
@@ -170,9 +170,9 @@ export function ConsoleHelpPage() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>
-            Other peers can share inference (<code className="text-foreground/90">--share-inference</code>) or claim crew
-            steps (<code className="text-foreground/90">--crew-worker</code>). Use <strong className="text-foreground">P2P Network</strong>{" "}
-            → <strong className="text-foreground">Join the mesh</strong> for commands and stats.
+            Other peers can share inference (<code className="text-foreground/90">--share-inference</code>) or claim workflow
+            steps (<code className="text-foreground/90">--workflow-worker</code>). Use <strong className="text-foreground">P2P Network</strong>{" "}
+            &rarr; <strong className="text-foreground">Join the mesh</strong> for commands and stats.
           </p>
         </CardContent>
       </Card>

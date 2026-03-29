@@ -98,10 +98,12 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **Coverage** — Agentic system prefix, unified-loop nudges/errors, web chat/task bodies, crew templates, legacy agent tool block, and related strings
 
 ### Multi-agent orchestration
-- **Crews** — Define agents, tasks, and a **sequential** or **hierarchical** process; kick off runs over HTTP with optional **distributed** execution across peers (`pod_id`, `campaign_id`)
-- **P2P crew task market** — Signed offers, claims, and results on `peerclaw/crew/v1`; peers can join as workers with `--crew-worker` (alongside `--share-inference` for LLM capacity)
+- **Workflows (unified)** — All orchestration uses declarative **FlowSpec** graphs (steps, listeners, shared state); crew orchestration is now a node type within flows rather than a separate concept
+- **Workflow builder** — Visual builder in the web dashboard for assembling workflow graphs
+- **Agent library** — All-flows library (Task kind removed); browse and instantiate from the dashboard
+- **P2P workflow market** — Signed offers, claims, and results on `peerclaw/crew/v1`; peers can join as workers with `--crew-worker` (alongside `--share-inference` for LLM capacity)
 - **Pods & campaigns** — Gossip topics for inter-pod handoffs (`peerclaw/pod/v1`) and campaign-scale aggregates (`peerclaw/world/...`) so large meshes stay sharded
-- **Flows** — Declarative **FlowSpec** graphs (steps, listeners, shared state); validate and kick off via `/api/flows/*` like crews
+- **API** — Primary endpoint `/api/workflows/*`; `/api/crews/*` and `/api/flows/*` remain as aliases
 
 ### A2A-style HTTP surface
 - **Agent Card** — `GET /.well-known/agent-card.json` describes capabilities and endpoints for integrations
@@ -119,14 +121,14 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **Pricing** — Set your own price multiplier on the base token economy rates
 
 ### Web Dashboard
-- **Console home** — Quick paths to chat, node health, and scenario starters; copy highlights **crews**, **flows**, and the **Python SDK** for multi-step automation
-- **Join the mesh** — Section inside **P2P Network** with live peer/swarm stats and copy-paste `serve` commands (`--share-inference`, `--crew-worker`); sidebar link removed in favor of **Crews** + in-page anchor `#join-mesh`
+- **Console home** — Quick paths to chat, node health, and scenario starters; copy highlights **workflows**, **flows**, and the **Python SDK** for multi-step automation
+- **Join the mesh** — Section inside **P2P Network** with live peer/swarm stats and copy-paste `serve` commands (`--share-inference`, `--crew-worker`); sidebar link removed in favor of **Workflows** + in-page anchor `#join-mesh`
 - **Network topology** — Interactive D3.js graph, click nodes to see details
 - **Agentic chat** — Default **Tools** mode: ReAct loop over the node’s tool registry (including `job_submit` / `job_status` for network work); optional **MCP** adds external servers; plain single-shot replies when Tools is off
 - **Chat API** — `POST /api/chat` and `/api/chat/stream` support `agentic`, `use_mcp`, and `session_id` for bounded server-side history
 - **MCP console** — Configure MCP in the UI (`PUT /api/mcp/config`) and inspect connection status
 - **Task management** — Create, monitor, and view results of agent tasks (tool traces in logs when using the unified loop)
-- **Crews** — Dashboard **Crew builder** (agents, tasks, validate, kick off) plus REST + SSE (`/api/crews/*`); **flows** remain API/SDK-first (`/api/flows/*`); Agent Card + `/a2a` for external agents
+- **Workflows** — Dashboard **Workflow builder** (agents, tasks, validate, kick off) plus REST + SSE (`/api/workflows/*`, with `/api/crews/*` and `/api/flows/*` as aliases); crew orchestration is now a node type within flows; Agent Card + `/a2a` for external agents
 - **Provider settings** — Configure LLM sharing, view discovered network providers
 - **Resource monitoring** — Real-time CPU, RAM, GPU stats
 - **Job tracking** — List and monitor marketplace jobs; submission is intended via chat/agents (`job_submit`), not a separate submit form
@@ -184,7 +186,7 @@ Configure Ollama, local GGUF models, and remote OpenAI-compatible APIs. Priority
 
 ### Settings — Workspace panels
 
-Quick navigation to console panels — Home, Jobs, Providers, Skills, MCP servers, **Crews**, **Join the mesh** (opens P2P `#join-mesh`), and P2P Network.
+Quick navigation to console panels — Home, Jobs, Providers, Skills, MCP servers, **Workflows**, **Join the mesh** (opens P2P `#join-mesh`), and P2P Network.
 
 <p align="center">
   <img src="docs/screenshots/settings-workspace.png" alt="Workspace settings with panel shortcuts" width="720" />
@@ -241,10 +243,10 @@ curl -L -o ~/.peerclaw/models/llama-3.2-1b-instruct-q4_k_m.gguf \
 ./target/release/peerclaw serve --web 127.0.0.1:8080
 
 # Start with Ollama + personal assistant agent
-./target/release/peerclaw serve --web 127.0.0.1:8080 --ollama --agent examples/agents/assistant.toml
+./target/release/peerclaw serve --web 127.0.0.1:8080 --ollama --agent templates/agents/assistant.toml
 
 # Share your LLM with the P2P network (earn CLAW tokens)
-./target/release/peerclaw serve --web 127.0.0.1:8080 --ollama --share-inference --agent examples/agents/assistant.toml
+./target/release/peerclaw serve --web 127.0.0.1:8080 --ollama --share-inference --agent templates/agents/assistant.toml
 
 # Also claim distributed crew tasks from other peers (inference-focused workers)
 ./target/release/peerclaw serve --web 127.0.0.1:8080 --crew-worker
@@ -252,14 +254,14 @@ curl -L -o ~/.peerclaw/models/llama-3.2-1b-instruct-q4_k_m.gguf \
 
 ---
 
-## Agent Examples
+## Agent Templates
 
 ### Personal Assistant
 
-The built-in assistant agent (`examples/agents/assistant.toml`) can solve everyday tasks:
+The built-in assistant agent (`templates/agents/assistant.toml`) can solve everyday tasks:
 
 ```bash
-peerclaw serve --web 127.0.0.1:8080 --ollama --agent examples/agents/assistant.toml
+peerclaw serve --web 127.0.0.1:8080 --ollama --agent templates/agents/assistant.toml
 ```
 
 Then open the dashboard at http://127.0.0.1:8080. In **Chat**, leave **Tools** on (default) for the agentic loop, enable **MCP** if you configured servers under Workspace → MCP. Use **Tasks** for longer goals. Example prompts:
@@ -320,7 +322,7 @@ peerclaw serve --ollama --share-inference
 peerclaw serve --ollama --share-inference --provider-max-requests 120 --provider-max-tokens-day 500000
 
 # Full setup: web + agent + provider sharing
-peerclaw serve --web 127.0.0.1:8080 --ollama --share-inference --agent examples/agents/assistant.toml
+peerclaw serve --web 127.0.0.1:8080 --ollama --share-inference --agent templates/agents/assistant.toml
 ```
 
 Other peers on the network can then use your LLM by paying CLAW tokens. Configure pricing in the **Providers** tab of the dashboard.
@@ -455,22 +457,18 @@ for chunk in response:
 
 ---
 
-## Crew & flow HTTP API
+## Workflow HTTP API
 
-With `peerclaw serve --web …`, the node exposes JSON endpoints for multi-agent runs (see `src/web/mod.rs` for the canonical list).
+With `peerclaw serve --web …`, the node exposes JSON endpoints for multi-agent runs (see `src/web/mod.rs` for the canonical list). The primary namespace is `/api/workflows/*`; `/api/crews/*` and `/api/flows/*` remain as aliases.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/api/crews/validate` | Validate a `CrewSpec` |
-| `POST` | `/api/crews/kickoff` | Start a crew run (`inputs`, `stream`, `distributed`, `pod_id`, `campaign_id`, …) |
-| `GET` | `/api/crews/runs` | List crew runs |
-| `GET` | `/api/crews/runs/:id` | Run status and output |
-| `GET` | `/api/crews/runs/:id/stream` | SSE progress / stream |
-| `POST` | `/api/crews/runs/:id/stop` | Cooperative cancel |
-| `POST` | `/api/flows/validate` | Validate a `FlowSpec` |
-| `POST` | `/api/flows/kickoff` | Start a flow run |
-| `GET` | `/api/flows/runs` | List flow runs |
-| `GET` | `/api/flows/runs/:id` | Flow run status |
+| `POST` | `/api/workflows/validate` | Validate a workflow spec |
+| `POST` | `/api/workflows/kickoff` | Start a workflow run (`inputs`, `stream`, `distributed`, `pod_id`, `campaign_id`, …) |
+| `GET` | `/api/workflows/runs` | List workflow runs |
+| `GET` | `/api/workflows/runs/:id` | Run status and output |
+| `GET` | `/api/workflows/runs/:id/stream` | SSE progress / stream |
+| `POST` | `/api/workflows/runs/:id/stop` | Cooperative cancel |
 
 **Integrations:** `GET /.well-known/agent-card.json`, `POST /a2a`, `GET /a2a/peers`.
 
@@ -501,32 +499,32 @@ export PEERCLAW_PROMPTS_DIR=/etc/peerclaw/prompts
 peerclaw serve --web 127.0.0.1:8080
 ```
 
-### Crew validate / kickoff (`curl`)
+### Workflow validate / kickoff (`curl`)
 
-`POST /api/crews/validate` expects a **raw** [`CrewSpec`](src/crew/spec.rs) JSON body. `POST /api/crews/kickoff` wraps the spec plus `inputs`, `distributed`, optional `pod_id` / `campaign_id`.
+`POST /api/workflows/validate` expects a **raw** workflow spec JSON body. `POST /api/workflows/kickoff` wraps the spec plus `inputs`, `distributed`, optional `pod_id` / `campaign_id`. The legacy `/api/crews/*` and `/api/flows/*` paths still work as aliases.
 
 ```bash
 # Validate (from repo root)
-curl -sS -X POST http://127.0.0.1:8080/api/crews/validate \
+curl -sS -X POST http://127.0.0.1:8080/api/workflows/validate \
   -H 'Content-Type: application/json' \
-  --data-binary @examples/crews/minimal.json
+  --data-binary @templates/crews/minimal.json
 
 # Kick off a run (requires `peerclaw serve` with web + inference; edit `llm` in JSON to match an available model)
-curl -sS -X POST http://127.0.0.1:8080/api/crews/kickoff \
+curl -sS -X POST http://127.0.0.1:8080/api/workflows/kickoff \
   -H 'Content-Type: application/json' \
-  --data-binary @examples/crews/kickoff-minimal.json
+  --data-binary @templates/crews/kickoff-minimal.json
 ```
 
 See also `sdk/python/examples/minimal.py` for the same shape via the SDK.
 
 ### Flow validate (`curl`)
 
-`POST /api/flows/validate` expects a raw [`FlowSpec`](src/flow/mod.rs) JSON body (nodes + edges; optional `crew_spec` on nodes).
+`POST /api/workflows/validate` also accepts a raw [`FlowSpec`](src/flow/mod.rs) JSON body (nodes + edges; optional `crew_spec` on nodes).
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8080/api/flows/validate \
+curl -sS -X POST http://127.0.0.1:8080/api/workflows/validate \
   -H 'Content-Type: application/json' \
-  --data-binary @examples/flows/minimal.json
+  --data-binary @templates/flows/minimal.json
 ```
 
 ---
@@ -607,14 +605,14 @@ policy_enforcement = true
 - [x] Rustyline chat CLI
 - [x] `peerclaw doctor` diagnostics
 
-### v0.4 — Agents & Provider Sharing (Current)
+### v0.4 — Agents & Provider Sharing
 - [x] Agent Runtime with ReAct loop (plan → tool call → iterate)
 - [x] LLM Provider Sharing protocol (share Ollama/GGUF over P2P)
 - [x] Remote execution wired (RemoteExecutor → P2P job flow)
 - [x] Interactive dashboard: Tasks, Providers, clickable topology nodes
 - [x] Budget enforcement (per-request/hour/day/total)
 - [x] Task management API
-- [x] Example agents (assistant, coder, researcher, monitor, data-analyst)
+- [x] Agent templates (assistant, coder, researcher, monitor, data-analyst)
 - [x] Web agentic chat: unified ReAct path (local tools + optional MCP + long-horizon tool iterations)
 - [x] P2P `job_submit` / `job_status` tools connected to the serve node (GossipSub + `JobManager`)
 - [x] Marketplace job types: inference, web_fetch, wasm, compute, storage (web + tool path)
@@ -626,14 +624,17 @@ policy_enforcement = true
 - [x] **Join network** landing in the web dashboard
 - [x] **Externalized prompts** — `prompts/*.txt` defaults with runtime overlay (`[prompts].directory`, `PEERCLAW_PROMPTS_DIR`, `~/.peerclaw/prompts`)
 
-### v0.5 — Product themes (release checklist)
+### v0.5 — Unified Workflows & Agent Library (Current)
 
-Ship when the items below meet acceptance criteria in the engineering plan.
-
+- [x] **Unified workflows** — Crews are now a node type within flows; "Crews" view renamed to "Workflows" in the dashboard
+- [x] **Workflow builder** — Visual builder in the web dashboard (formerly "Agent builder")
+- [x] **Agent library (all-flows)** — Task kind removed; library is entirely flow-based
+- [x] **API consolidation** — Primary endpoint `/api/workflows/*`; `/api/crews/*` and `/api/flows/*` as aliases
+- [x] **Templates directory** — `examples/` renamed to `templates/` (agents, flows, crews, skills)
 - [ ] **Distributed inference** — Pipeline / tensor-parallel style execution across peers (beyond today’s single-request remote provider path)
-- [ ] **Multi-agent hardening** — Production QA for crews, flows, and the P2P crew market (deterministic failure modes, load tests, docs, CI fixtures)
+- [ ] **Multi-agent hardening** — Production QA for workflows and the P2P workflow market (deterministic failure modes, load tests, docs, CI fixtures)
 - [ ] **Durable agent runs** — Checkpoint task + conversation state; resume after process restart; export for audit
-- [ ] **Observability** — Structured traces/metrics for agent passes, tool latency, P2P job phases, and crew/flow runs (dashboard + optional OTLP)
+- [ ] **Observability** — Structured traces/metrics for agent passes, tool latency, P2P job phases, and workflow runs (dashboard + optional OTLP)
 - [ ] **Cross-peer tool execution** — Discover remote tools, quote execution, escrow/settlement hooks, and basic **reputation** signals on the marketplace
 - [ ] **Human-in-the-loop (HITL)** — Policy-gated pause/approve for high-risk tools or spend thresholds (web + API)
 - [ ] **Context compaction (productized)** — Unify strategies across chat, tasks, and `--agent`: optional LLM summarization, token-budget UX, and tests (heuristic pruning exists today; see *Agent Runtime*)
@@ -641,7 +642,7 @@ Ship when the items below meet acceptance criteria in the engineering plan.
 ### v0.5 — Engineering plan (how we build it)
 
 **Phase 0 — Baseline & contracts (1–2 weeks)**  
-Freeze public HTTP/JSON shapes for crews, flows, tasks, and A2A where stable; add golden JSON under `examples/` + contract tests; document error codes and idempotency for kickoff/stop.
+Freeze public HTTP/JSON shapes for crews, flows, tasks, and A2A where stable; add golden JSON under `templates/` + contract tests; document error codes and idempotency for kickoff/stop.
 
 **Phase 1 — Observability & durability foundations**  
 Introduce a small **run record** schema (crew/flow/agent task): run id, spec hash, inputs redaction, per-pass events, tool records, cancellation reason. Persist to `redb` (or extend existing stores); expose `GET` APIs and console panels. Checkpoints build on the same event log.
@@ -670,4 +671,4 @@ Wire optional **LLM summary** compaction (code in `agent/compaction.rs` has hook
 
 ---
 
-*Cargo package version: **0.3.0**. README “v0.4” labels the in-tree feature wave (orchestration, A2A, prompts); crates.io may lag the binary feature set until the next semver publish.*
+*Cargo package version: **0.3.0**. README “v0.5” labels the in-tree feature wave (unified workflows, agent library, A2A, prompts); crates.io may lag the binary feature set until the next semver publish.*

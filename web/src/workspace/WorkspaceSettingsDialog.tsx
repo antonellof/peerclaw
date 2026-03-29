@@ -259,9 +259,8 @@ export function WorkspaceSettingsDialog({
               <div className="space-y-4 px-5 py-4 pr-3">
                 <p className="text-xs text-muted-foreground">
                   Defaults for the chat composer. Slash commands like <code className="text-primary">/model</code> still
-                  override for the session. Pick a <strong className="text-foreground/90">Saved agent</strong> in the chat
-                  toolbar to run flows from Agent builder (stored in the node&apos;s <code className="text-foreground/80">agent_library.json</code>
-                  ) or built-in example presets.
+                  override for the session. Use <strong className="text-foreground/90">Workflows</strong> in the sidebar
+                  for multi-step orchestrated flows, or configure tools and models here for chat.
                 </p>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Default model</Label>

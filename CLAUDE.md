@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PeerClaw is a fully decentralized peer-to-peer AI agent network written in Rust. It ships as a single static binary where autonomous AI agents collaborate, share resources, and transact using a native token economy.
 
-**Current Status:** Cargo **0.3.0**; in-tree feature set includes **v0.4** orchestration (crews, flows, P2P crew market, A2A-shaped HTTP, Python SDK), agentic web chat/tasks, provider sharing, externalized `prompts/*.txt` overlays, plus P2P networking, inference, vector memory, skills, MCP, safety, and messaging. See root **README.md** roadmap for **v0.5** plan.
+**Current Status:** Cargo **0.3.0**; in-tree feature set includes **v0.5** unified workflows (flows subsume crews as a node type, workflow builder, agent library, P2P workflow market, A2A-shaped HTTP, Python SDK), agentic web chat/tasks, provider sharing, externalized `prompts/*.txt` overlays, plus P2P networking, inference, vector memory, skills, MCP, safety, and messaging. See root **README.md** roadmap for details.
 
 ## Build Commands
 
@@ -90,7 +90,7 @@ One statically-linked binary operates in multiple modes based on flags/subcomman
 | MCP | `src/mcp/` | Model Context Protocol client |
 | Executor | `src/executor/` | Local/remote task routing |
 | Swarm | `src/swarm/` | Agent visualization, topology, event timeline |
-| Web | `src/web/` | Dashboard, OpenAI-compatible API, swarm visualization |
+| Web | `src/web/` | Dashboard (workflows view, workflow builder), OpenAI-compatible API, swarm visualization |
 
 ### Key Dependencies
 
@@ -177,12 +177,18 @@ The `ironclaw/` directory contains additional tools and channel adapters:
 - [x] Task management API (POST/GET /api/tasks, /api/tasks/:id)
 - [x] Provider API (GET/POST /api/providers, /api/providers/config, /api/nodes/:id)
 - [x] `--share-inference`, `--provider-max-requests`, `--provider-max-tokens-day` CLI flags
-- [x] Example agent: `examples/agents/assistant.toml` (personal AI assistant)
+- [x] Example agent: `templates/agents/assistant.toml` (personal AI assistant)
 
-### Planned (v0.5)
+### Implemented (v0.5)
+- [x] Unified workflows — crews are now a node type within flows; "Crews" view renamed to "Workflows"
+- [x] Workflow builder (formerly "Agent builder") in web dashboard
+- [x] Agent library is all-flows (Task kind removed)
+- [x] API: primary endpoint `/api/workflows/*`, with `/api/crews/*` and `/api/flows/*` as aliases
+- [x] `examples/` renamed to `templates/` (agents, flows, crews, skills)
+
+### Planned (v0.6+)
 - [ ] Distributed inference (pipeline parallelism)
 - [ ] Dynamic WASM tool building
-- [ ] Multi-agent collaboration
 - [ ] Reputation system
 - [ ] Provider failover/circuit breaker
 - [ ] Context compaction for long conversations

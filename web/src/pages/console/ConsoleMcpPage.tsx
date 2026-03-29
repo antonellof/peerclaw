@@ -99,8 +99,7 @@ export function ConsoleMcpPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
-        <h2 className="text-lg font-semibold tracking-tight">MCP servers</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Edit JSON matching the node&apos;s <code className="text-foreground">McpConfig</code> shape, then Apply.
           Stdio servers need <code className="text-foreground">command</code> and <code className="text-foreground">args</code>
           ; HTTP MCP transport is not enabled in the client yet. Turn on <strong className="text-foreground">MCP</strong> in

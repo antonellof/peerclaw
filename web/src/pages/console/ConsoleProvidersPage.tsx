@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 
+import { workspaceHref } from "@/workspace/views"
 import { fetchProviderConfig, fetchProviders, setProviderConfig, type ProviderInfo } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -46,6 +48,13 @@ export function ConsoleProvidersPage() {
       <Card>
         <CardHeader>
           <CardTitle>Local provider</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Inference-specific sharing settings. For general CPU / GPU / RAM sharing limits, see{" "}
+            <Link to={workspaceHref("overview") + "#sharing"} className="text-primary underline-offset-4 hover:underline">
+              P2P Network &rarr; Resource sharing
+            </Link>
+            .
+          </p>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <label className="flex items-center gap-2 text-sm">

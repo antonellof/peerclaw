@@ -717,19 +717,6 @@ export function ChatPanel({ onRegisterControls }: Props) {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <header className="flex h-12 shrink-0 items-center border-b border-border/70 bg-card/20 px-3 md:px-4">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-foreground">
-            {selectedLibraryEntry?.name ?? "Assistant"}
-          </p>
-          <p className="truncate text-[10px] text-muted-foreground">
-            {selectedLibraryEntry
-              ? "Workflow — runs on the node"
-              : "Chat with tools, or pick a workflow below"}
-          </p>
-        </div>
-      </header>
-
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
