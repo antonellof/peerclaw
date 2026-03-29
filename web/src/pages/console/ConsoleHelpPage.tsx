@@ -72,7 +72,7 @@ export function ConsoleHelpPage() {
             sidebar or via the <code className="text-foreground/80">/api/workflows</code> API.
           </li>
           <li>
-            <strong className="text-foreground">Agent runs</strong> — past task executions appear in the sidebar for review.
+            <strong className="text-foreground">Runs</strong> — past task and workflow executions appear in the sidebar for review.
           </li>
         </ul>
         <p className="text-xs leading-relaxed">

@@ -23,7 +23,7 @@ function statusVariant(s: string): "default" | "secondary" | "success" | "warnin
 
 export type AgentTaskHistoryProps = {
   className?: string
-  /** `panel`: right-rail layout — no outer “Agent runs” row; list is always visible when non-empty. */
+  /** `panel`: right-rail layout — no outer “Runs” row; list is always visible when non-empty. */
   variant?: "default" | "panel"
 }
 
@@ -90,8 +90,7 @@ export function AgentTaskHistory({ className, variant = "default" }: AgentTaskHi
   const emptyCopy =
     variant === "panel" ? (
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        No agent runs yet. Use <span className="font-medium text-foreground">Agent goal</span> in the composer and send
-        a goal.
+        No runs yet. Send a message in chat or run a workflow.
       </p>
     ) : (
       <div
@@ -100,7 +99,7 @@ export function AgentTaskHistory({ className, variant = "default" }: AgentTaskHi
           className,
         )}
       >
-        No agent runs yet — switch to <span className="font-medium text-foreground">Agent goal</span> and send a goal.
+        No runs yet — send a message in chat or run a workflow.
       </div>
     )
 
@@ -108,7 +107,7 @@ export function AgentTaskHistory({ className, variant = "default" }: AgentTaskHi
     <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Agent run</DialogTitle>
+          <DialogTitle>Run details</DialogTitle>
           <DialogDescription className="font-mono text-xs">{detailTask?.id}</DialogDescription>
         </DialogHeader>
         {detailLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
@@ -185,7 +184,7 @@ export function AgentTaskHistory({ className, variant = "default" }: AgentTaskHi
           className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-muted/40"
         >
           {inlineOpen ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
-          Agent runs
+          Runs
           <span className="ml-auto font-mono text-[10px] text-muted-foreground">{tasks.length}</span>
         </button>
         {inlineOpen && (

@@ -8,11 +8,11 @@ export type WorkspaceChatPreferences = {
   distributed: boolean
   /** When true (default), chat uses the node ToolRegistry ReAct loop (job_submit, shell, …). */
   useAgentic: boolean
-  /** When true, chat and agent-goal tasks send `use_mcp` so the node runs the MCP tool loop. */
+  /** When true, chat tasks send `use_mcp` so the node runs the MCP tool loop. */
   useMcp: boolean
   /**
-   * When set, messages run that saved agent: `flow` → `/api/flows/kickoff`, `task` → `/api/tasks`.
-   * Built-ins and Agent builder saves live in the node `agent_library.json`.
+   * When set, messages run that workflow: `flow` → `/api/flows/kickoff`, `task` → `/api/tasks`.
+   * Built-ins and workflow builder saves live in the node `agent_library.json`.
    */
   selectedAgentLibraryId: string | null
 }

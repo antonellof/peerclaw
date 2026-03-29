@@ -139,7 +139,7 @@ export async function runSlashCommand(input: string, ctx: SlashContext): Promise
       }
       ctx.setWorkspaceView(v)
       if (v === "chat" && (target === "tasks" || target === "agent")) {
-        return "Opened Chat. Switch the composer to **Agent goal** for multi-step agent runs."
+        return "Opened Chat. Use workflows or enable tools for multi-step runs."
       }
       return `Opened ${v === "chat" ? "chat" : v} panel.`
     }

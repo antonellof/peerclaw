@@ -112,6 +112,15 @@ pub async fn run_crew(
 ) -> Result<CrewOutput, String> {
     spec.validate()?;
 
+    // --- Delegate mode: first agent (or manager) picks the best agent per task ---
+    if spec.process == CrewProcess::Delegate {
+        return run_crew_delegate(
+            spec, inputs, executor, tools, peer_id, node_tool_tx, inference_sink, prompts, cancel,
+            extras,
+        )
+        .await;
+    }
+
     let mut plan_preamble = String::new();
     if spec.process == CrewProcess::Hierarchical {
         let mgr_id = spec
@@ -191,6 +200,103 @@ pub async fn run_crew(
         tasks_output.push(CrewTaskOutput {
             task_id: task.id.clone(),
             agent_id: task.agent_id.clone(),
+            answer: res.answer.clone(),
+            iterations: res.iterations,
+            tokens: res.total_tokens,
+            success: res.success,
+            error: res.error.clone(),
+        });
+    }
+
+    let raw = outputs
+        .get(spec.tasks.last().map(|t| t.id.as_str()).unwrap_or(""))
+        .cloned()
+        .unwrap_or_default();
+
+    Ok(CrewOutput {
+        raw,
+        tasks_output,
+        token_usage: json!({ "total_tokens": total_tokens }),
+    })
+}
+
+/// Score how well an agent matches a task description via simple keyword overlap
+/// between the description and the agent's role + goal.
+fn delegate_score(description: &str, agent: &super::spec::CrewAgentDef) -> usize {
+    let desc_lower = description.to_lowercase();
+    let words: Vec<&str> = desc_lower.split_whitespace().collect();
+    let haystack = format!("{} {}", agent.role, agent.goal).to_lowercase();
+    words.iter().filter(|w| haystack.contains(*w)).count()
+}
+
+/// Delegate process: for each task the manager (first agent or `manager_agent_id`) picks the
+/// best-matching agent based on role/goal keyword overlap with the task description, then that
+/// agent executes the task.
+#[allow(clippy::too_many_arguments)]
+async fn run_crew_delegate(
+    spec: &CrewSpec,
+    inputs: &serde_json::Value,
+    executor: Arc<TaskExecutor>,
+    tools: Arc<ToolRegistry>,
+    peer_id: String,
+    node_tool_tx: Option<NodeToolTx>,
+    inference_sink: Option<Arc<dyn crate::agent::AgenticInferenceSink>>,
+    prompts: Arc<crate::prompts::PromptBundle>,
+    cancel: Option<&AtomicBool>,
+    extras: AgentTaskExtras,
+) -> Result<CrewOutput, String> {
+    let manager_id = spec
+        .manager_agent_id
+        .clone()
+        .or_else(|| spec.agents.first().map(|a| a.id.clone()))
+        .ok_or_else(|| "delegate crew needs manager_agent_id or at least one agent".to_string())?;
+
+    let mut outputs: HashMap<String, String> = HashMap::new();
+    let mut tasks_output: Vec<CrewTaskOutput> = Vec::new();
+    let mut total_tokens = 0u32;
+
+    for task in &spec.tasks {
+        let desc = interpolate_template(&task.description, inputs);
+
+        // Manager picks the best agent: score each agent by keyword overlap, pick the highest.
+        // If nothing matches well, fall back to the assigned agent_id from the spec.
+        let chosen = spec
+            .agents
+            .iter()
+            .filter(|a| a.id != manager_id) // prefer delegating to non-manager agents
+            .max_by_key(|a| delegate_score(&desc, a))
+            .or_else(|| spec.agents.iter().find(|a| a.id == task.agent_id))
+            .ok_or_else(|| format!("no agent available for task {}", task.id))?;
+
+        let mut ctx = String::new();
+        for cid in &task.context {
+            if let Some(prev) = outputs.get(cid) {
+                ctx.push_str(&format!("## Prior task {cid}\n{prev}\n\n"));
+            }
+        }
+
+        let exp = interpolate_template(&task.expected_output, inputs);
+        let user_block = format!(
+            "{ctx}## Current task\n{desc}\n\nExpected output: {exp}\nProduce the final deliverable clearly."
+        );
+
+        let mut rt = make_runtime_for_agent(
+            chosen,
+            executor.clone(),
+            tools.clone(),
+            peer_id.clone(),
+            node_tool_tx.clone(),
+            prompts.clone(),
+            inference_sink.clone(),
+        );
+        let res = rt
+            .run_task_with_session(&user_block, cancel, None, extras.clone())
+            .await;
+        total_tokens += res.total_tokens;
+        outputs.insert(task.id.clone(), res.answer.clone());
+        tasks_output.push(CrewTaskOutput {
+            task_id: task.id.clone(),
+            agent_id: chosen.id.clone(),
             answer: res.answer.clone(),
             iterations: res.iterations,
             tokens: res.total_tokens,

@@ -15,7 +15,7 @@ export function useControlWebSocket(handlers: {
   onTasksChanged?: () => void
   /** Live LLM text chunks for dashboard agent tasks (`task_stream_delta` on `/ws`). */
   onTaskStreamDelta?: (taskId: string, text: string) => void
-  /** Node persisted agent library updated (`POST/DELETE /api/agents/library`). */
+  /** Node persisted workflow library updated (`POST/DELETE /api/agents/library`). */
   onAgentsLibraryChanged?: () => void
 }) {
   const handlersRef = useRef(handlers)

@@ -1,4 +1,4 @@
-//! Graph interpreter for [`super::FlowSpec`] (OpenAI Agent Builder–style branching).
+//! Graph interpreter for [`super::FlowSpec`] (OpenAI Workflow Builder–style branching).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock};

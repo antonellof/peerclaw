@@ -9,6 +9,7 @@
 //! - Tick: `{ "type": "status", "data": { ... } }` (resource + peers + job counts)
 //! - Push: `{ "type": "tasks_changed" }` when agent tasks are created or updated (console debounces `GET /api/tasks`)
 //! - `{ "type": "task_stream_delta", "task_id": "…", "text": "…" }` — live LLM chunks during agentic tasks (chat UI)
+//! - `{ "type": "task_tool_call", "task_id": "…", "tool_name": "…", "status": "started"|"completed", "args": "…", "result": "…" }` — structured tool call events
 //! - `{ "type": "agents_library_changed" }` — saved agent list updated (`POST/DELETE /api/agents/library`)
 
 pub mod openai;
@@ -1664,6 +1665,23 @@ impl crate::agent::unified_loop::AgenticProgressSink for AgenticTaskProgressSink
 
     async fn record_tool_step(&self, line: String, tokens: u32) {
         AgenticTaskProgressSink::record_tool_step(self, line, tokens).await;
+    }
+
+    async fn record_tool_call(
+        &self,
+        tool_name: &str,
+        status: &str,
+        args: &str,
+        result: &str,
+    ) {
+        let _ = self.ws_tx.send(serde_json::json!({
+            "type": "task_tool_call",
+            "task_id": self.task_id,
+            "tool_name": tool_name,
+            "status": status,
+            "args": args,
+            "result": result,
+        }));
     }
 }
 

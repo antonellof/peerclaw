@@ -1,6 +1,6 @@
 import { SCENARIO_PRESETS } from "./scenarios"
 
-/** Quick-fill bodies for Agent goal mode (same set as the former Agent panel). */
+/** Quick-fill bodies for chat input (same set as the former Agent panel). */
 export const AGENT_TASK_TEMPLATES: Record<string, { taskType: string; text: string }> = {
   research: {
     taskType: "research",

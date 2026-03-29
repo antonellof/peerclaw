@@ -49,6 +49,16 @@ pub trait AgenticProgressSink: Send + Sync {
     async fn append_log(&self, line: String);
     async fn set_tokens(&self, tokens: u32);
     async fn record_tool_step(&self, line: String, tokens: u32);
+    /// Structured tool call event (started / completed).
+    async fn record_tool_call(
+        &self,
+        _tool_name: &str,
+        _status: &str,
+        _args: &str,
+        _result: &str,
+    ) {
+        // default no-op
+    }
 }
 
 /// No-op progress implementation.
@@ -542,6 +552,12 @@ pub async fn run_unified_agentic_loop(
         let call_count = calls.len();
 
         for call in calls {
+            // Emit structured "started" event.
+            if let Some(ref p) = progress {
+                let args_preview: String = call.args.to_string().chars().take(500).collect();
+                p.record_tool_call(&call.name, "started", &args_preview, "")
+                    .await;
+            }
             let start = std::time::Instant::now();
             let (summary, success) = if call.name.contains(':') {
                 match &mcp {
@@ -668,6 +684,15 @@ pub async fn run_unified_agentic_loop(
             tool_logs.push(line.clone());
             if let Some(ref p) = progress {
                 p.record_tool_step(line, total_tokens).await;
+                let result_preview: String = summary.chars().take(500).collect();
+                let args_preview: String = call.args.to_string().chars().take(500).collect();
+                p.record_tool_call(
+                    &call.name,
+                    "completed",
+                    &args_preview,
+                    &result_preview,
+                )
+                .await;
             }
             let truncated = if summary.len() > 3000 {
                 format!("{}… (truncated)", &summary[..3000])

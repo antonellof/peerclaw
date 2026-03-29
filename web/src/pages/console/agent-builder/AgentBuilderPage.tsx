@@ -539,7 +539,7 @@ function AgentBuilderInner() {
             variant="outline"
             className="h-8 gap-1 text-xs"
             disabled={busy !== null || preview}
-            title="Store on the node (agent_library.json) and select this flow in Chat → Saved agent"
+            title="Store on the node (agent_library.json) and select this workflow in Chat → Workflows"
             onClick={() => {
               setBusy("l")
               setValidateMsg(null)
@@ -554,15 +554,15 @@ function AgentBuilderInner() {
                 const id = `user-flow-${crypto.randomUUID().slice(0, 12)}`
                 void upsertAgentLibraryEntry({
                   id,
-                  name: flowName.trim() || "Saved flow",
-                  description: "Saved from Workflow builder",
+                  name: flowName.trim() || "Workflow",
+                  description: "Saved from workflow builder",
                   kind: "flow",
                   flow_spec: spec,
                 }).then((r) => {
                   setBusy(null)
                   setValidateMsg(
                     r.ok
-                      ? `Saved to agent library. In Chat, open Saved agent and pick «${flowName.trim() || "Saved flow"}».`
+                      ? `Saved to workflow library. In Chat, open Workflows and pick «${flowName.trim() || "Workflow"}».`
                       : (r.error ?? "Could not save to library."),
                   )
                 })

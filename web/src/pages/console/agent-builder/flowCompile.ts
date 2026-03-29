@@ -6,7 +6,7 @@ function newRfId() {
   return `n_${crypto.randomUUID().slice(0, 8)}`
 }
 
-/** Default Start → Agent → End graph for the agent builder canvas. */
+/** Default Start → Agent → End graph for the workflow builder canvas. */
 export function demoGraph(): { nodes: Node[]; edges: Edge[] } {
   const s = newRfId()
   const a = newRfId()

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Bot, ChevronDown, Send, Settings2 } from "lucide-react"
+import { Bot, ChevronDown, ChevronRight, Send, Settings2, Terminal, Brain, CheckCircle2 } from "lucide-react"
 
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
 import {
@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { ChatMessageMarkdown } from "@/pages/chat/ChatMessageMarkdown"
 import { AGENT_TASK_TEMPLATES, SCENARIO_PRESETS } from "@/pages/chat/agentTemplates"
@@ -108,6 +109,48 @@ type Props = {
   onRegisterControls?: (api: { clearChat: () => void; refreshModels: () => void } | null) => void
 }
 
+/** Parsed structured log entry. */
+type ParsedLogEntry =
+  | { kind: "tool"; name: string; body: string }
+  | { kind: "think"; body: string }
+  | { kind: "result"; body: string }
+  | { kind: "raw"; body: string }
+
+function parseLogLine(line: string): ParsedLogEntry {
+  const toolMatch = line.match(/^\[tool\]\s*(\S+)\s*(.*)/i)
+  if (toolMatch) return { kind: "tool", name: toolMatch[1]!, body: toolMatch[2] ?? "" }
+  const thinkMatch = line.match(/^\[think(?:ing)?]\s*(.*)/i)
+  if (thinkMatch) return { kind: "think", body: thinkMatch[1] ?? "" }
+  const resultMatch = line.match(/^\[result]\s*(.*)/i)
+  if (resultMatch) return { kind: "result", body: resultMatch[1] ?? "" }
+  return { kind: "raw", body: line }
+}
+
+/** Collapsible section for thinking/reasoning blocks. */
+function ThinkSection({ lines }: { lines: string[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="rounded-md border border-border/40 bg-muted/20">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[10px] font-medium text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Brain className="size-3 shrink-0 text-violet-500" />
+        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        Reasoning ({lines.length} step{lines.length === 1 ? "" : "s"})
+      </button>
+      {open && (
+        <div className="border-t border-border/30 px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
+          {lines.map((l, i) => (
+            <p key={i} className="whitespace-pre-wrap break-words">{l}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Agent task log stream: auto-scroll to latest line as the server appends steps. */
 function AgentTaskLiveLogs({
   logs,
@@ -118,9 +161,9 @@ function AgentTaskLiveLogs({
   running: boolean
   taskId?: string
 }) {
-  const preRef = useRef<HTMLPreElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
-    const el = preRef.current
+    const el = containerRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
   }, [logs])
@@ -128,6 +171,31 @@ function AgentTaskLiveLogs({
   const requestStop = () => {
     if (taskId) void stopWebTask(taskId)
   }
+
+  // Parse and group log lines into structured entries
+  const groups = useMemo(() => {
+    const parsed = logs.map(parseLogLine)
+    const result: (ParsedLogEntry | { kind: "think-group"; lines: string[] })[] = []
+    let thinkBuffer: string[] = []
+
+    const flushThink = () => {
+      if (thinkBuffer.length > 0) {
+        result.push({ kind: "think-group", lines: [...thinkBuffer] })
+        thinkBuffer = []
+      }
+    }
+
+    for (const entry of parsed) {
+      if (entry.kind === "think") {
+        thinkBuffer.push(entry.body)
+      } else {
+        flushThink()
+        result.push(entry)
+      }
+    }
+    flushThink()
+    return result
+  }, [logs])
 
   return (
     <div className="mt-2 rounded-lg border border-border/60 bg-background/50">
@@ -159,12 +227,64 @@ function AgentTaskLiveLogs({
           ) : null}
         </div>
       </div>
-      <pre
-        ref={preRef}
-        className="max-h-[min(40vh,280px)] overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words p-2 text-[11px] leading-relaxed text-muted-foreground"
+      <div
+        ref={containerRef}
+        className="max-h-[min(40vh,280px)] space-y-1.5 overflow-x-auto overflow-y-auto p-2"
       >
-        {logs.length > 0 ? logs.join("\n") : running ? "Waiting for first step…" : "(no steps)"}
-      </pre>
+        {groups.length > 0
+          ? groups.map((entry, i) => {
+              if ("lines" in entry && entry.kind === "think-group") {
+                return <ThinkSection key={i} lines={entry.lines} />
+              }
+              if (entry.kind === "tool") {
+                return (
+                  <div
+                    key={i}
+                    className="flex items-start gap-2 rounded-md border border-border/40 bg-card/60 px-2 py-1.5"
+                  >
+                    <Terminal className="mt-0.5 size-3 shrink-0 text-blue-500" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="secondary" className="h-4 px-1.5 text-[9px] font-medium">
+                          {entry.name}
+                        </Badge>
+                      </div>
+                      {entry.body && (
+                        <p className="mt-0.5 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-muted-foreground">
+                          {entry.body}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )
+              }
+              if (entry.kind === "result") {
+                return (
+                  <div
+                    key={i}
+                    className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2 py-1.5"
+                  >
+                    <CheckCircle2 className="mt-0.5 size-3 shrink-0 text-emerald-500" />
+                    <p className="min-w-0 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-muted-foreground">
+                      {entry.body}
+                    </p>
+                  </div>
+                )
+              }
+              // raw fallback
+              return (
+                <p
+                  key={i}
+                  className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-muted-foreground"
+                >
+                  {entry.body}
+                </p>
+              )
+            })
+          : running
+            ? <p className="text-[11px] text-muted-foreground">Waiting for first step...</p>
+            : <p className="text-[11px] text-muted-foreground">(no steps)</p>}
+      </div>
     </div>
   )
 }
@@ -455,7 +575,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
           trimmed.length > 0
             ? trimmed
             : t.status === "failed"
-              ? "Agent run failed."
+              ? "Run failed."
               : t.status === "cancelled"
                 ? "Stopped."
                 : "No summary text was returned. Open **Steps** above for tool output (the model may have stopped after tools, or only emitted tool markup). Try again or use Chat with Tools for a follow-up."

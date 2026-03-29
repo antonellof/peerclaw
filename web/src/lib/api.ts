@@ -1161,7 +1161,7 @@ export async function stopCrewRun(id: string): Promise<{ ok: boolean }> {
   return { ok: j.ok === true && r.ok }
 }
 
-// ── Flows (Agent builder / OpenAI-style graph) ───────────────────────────────
+// ── Flows (Workflow builder / OpenAI-style graph) ────────────────────────────
 
 export type FlowEdgeJson = {
   from: string

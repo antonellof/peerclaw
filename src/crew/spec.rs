@@ -8,6 +8,7 @@ pub enum CrewProcess {
     #[default]
     Sequential,
     Hierarchical,
+    Delegate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,7 +82,7 @@ impl CrewSpec {
                 }
             }
         }
-        if self.process == CrewProcess::Hierarchical {
+        if self.process == CrewProcess::Hierarchical || self.process == CrewProcess::Delegate {
             if let Some(ref mid) = self.manager_agent_id {
                 if !ids.contains(mid.as_str()) {
                     return Err(format!("manager_agent_id {mid} not found"));
