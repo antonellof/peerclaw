@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 
 import { workspaceHref } from "@/workspace/views"
 
@@ -105,7 +105,6 @@ function ResourceMeter({
 /** Console overview: node resources, libp2p mesh, and swarm — metrics deduped vs header; swarm as tabs. */
 export function ConsoleOverviewPage() {
   const location = useLocation()
-  const navigate = useNavigate()
   const [st, setSt] = useState<Awaited<ReturnType<typeof fetchStatus>> | null>(null)
   const [peerList, setPeerList] = useState<{ id: string }[]>([])
   const [p2pNet, setP2pNet] = useState<P2pNetworkResponse | null>(null)
@@ -197,13 +196,20 @@ export function ConsoleOverviewPage() {
 
   const scrollToSection = useCallback(
     (id: string) => {
-      navigate(`${location.pathname}#${id}`, { replace: true })
-      requestAnimationFrame(() => {
-        document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })
-      })
       setActiveSection(id)
+      const el = sectionRefs.current[id] ?? document.getElementById(id)
+      if (el) {
+        // Find the nearest scrollable ancestor (ConsolePanel wrapper)
+        const scroller = el.closest("[class*='overflow-y']") ?? el.parentElement
+        if (scroller) {
+          const top = el.offsetTop - 24
+          scroller.scrollTo({ top, behavior: "smooth" })
+        } else {
+          el.scrollIntoView({ behavior: "smooth", block: "start" })
+        }
+      }
     },
-    [location.pathname, navigate],
+    [],
   )
 
   const openNode = async (id: string) => {
@@ -263,39 +269,21 @@ export function ConsoleOverviewPage() {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Hero + in-page nav */}
-      <div className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-card via-card to-muted/30 p-6 md:p-8">
-        <div className="pointer-events-none absolute -right-20 -top-20 size-64 rounded-full bg-primary/5 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-16 left-1/3 size-48 rounded-full bg-violet-500/10 blur-3xl" />
-        <div className="relative flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-          <div>
-            <Badge variant={online ? "default" : "secondary"} className="font-normal">
-              {online ? "Node online" : "Offline"}
-            </Badge>
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-              Node resources, mesh connectivity, and swarm agents.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2 md:justify-end">
-            <Button variant="outline" size="sm" asChild>
-              <Link to={workspaceHref("jobs")}>Jobs</Link>
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link to={workspaceHref("providers")}>Providers</Link>
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/">Chat</Link>
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link to={workspaceHref("workflows")}>Workflows</Link>
-            </Button>
-          </div>
+      {/* Status + section nav */}
+      <div className="rounded-xl border border-border bg-card/50 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Badge variant={online ? "default" : "secondary"} className="font-normal">
+            {online ? "Node online" : "Offline — run: peerclaw serve --web 127.0.0.1:8080"}
+          </Badge>
+          {online && st && (
+            <div className="flex gap-3 text-xs text-muted-foreground">
+              <span>{peerList.length} peers</span>
+              <span>CPU {cpuPct}%</span>
+              {gpuPct != null && <span>GPU {gpuPct}%</span>}
+            </div>
+          )}
         </div>
-
-        <nav
-          className="relative mt-6 flex flex-wrap gap-1.5 border-t border-border/60 pt-5"
-          aria-label="P2P Network sections"
-        >
+        <nav className="mt-3 flex flex-wrap gap-1.5" aria-label="P2P Network sections">
           {SECTIONS.map((s) => (
             <button
               key={s.id}
