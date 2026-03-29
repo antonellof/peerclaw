@@ -1029,50 +1029,50 @@ export function ChatPanel({ onRegisterControls }: Props) {
               </div>
             )}
 
-            {/* Textarea */}
-            <Textarea
-              ref={textareaRef}
-              rows={1}
-              placeholder={
-                selectedLibraryEntry
-                  ? `Message for «${selectedLibraryEntry.name}»…`
-                  : "Message, or type / for commands…"
-              }
-              value={input}
-              onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault()
-                  void send()
+            {/* Textarea + send button row */}
+            <div className="flex items-end gap-2 px-1 pt-1">
+              <Textarea
+                ref={textareaRef}
+                rows={1}
+                placeholder={
+                  selectedLibraryEntry
+                    ? `Message for «${selectedLibraryEntry.name}»…`
+                    : "Message, or type / for commands…"
                 }
-                if (autocompleteOpen && filteredAc.length) {
-                  if (e.key === "ArrowDown") {
+                value={input}
+                onChange={(e) => onInputChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault()
-                    setAutocompleteIdx((i) => (i + 1) % filteredAc.length)
+                    void send()
                   }
-                  if (e.key === "ArrowUp") {
-                    e.preventDefault()
-                    setAutocompleteIdx((i) => (i - 1 + filteredAc.length) % filteredAc.length)
+                  if (autocompleteOpen && filteredAc.length) {
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault()
+                      setAutocompleteIdx((i) => (i + 1) % filteredAc.length)
+                    }
+                    if (e.key === "ArrowUp") {
+                      e.preventDefault()
+                      setAutocompleteIdx((i) => (i - 1 + filteredAc.length) % filteredAc.length)
+                    }
+                    if (e.key === "Tab" && filteredAc[autocompleteIdx]) {
+                      e.preventDefault()
+                      setInput(filteredAc[autocompleteIdx]!.cmd + " ")
+                    }
                   }
-                  if (e.key === "Tab" && filteredAc[autocompleteIdx]) {
-                    e.preventDefault()
-                    setInput(filteredAc[autocompleteIdx]!.cmd + " ")
-                  }
-                }
-              }}
-              className="min-h-[52px] max-h-[min(50dvh,22.5rem)] resize-none border-0 bg-transparent py-3 pr-12 focus-visible:ring-0"
-              disabled={typing || streamLocked}
-            />
-
-            {/* Send button */}
-            <Button
-              size="icon"
-              className="absolute bottom-2 right-2 size-9 shrink-0 rounded-full"
-              disabled={typing || streamLocked}
-              onClick={() => void send()}
-            >
-              <Send className="size-4" />
-            </Button>
+                }}
+                className="min-h-[44px] max-h-[min(50dvh,22.5rem)] min-w-0 flex-1 resize-none border-0 bg-transparent py-3 focus-visible:ring-0"
+                disabled={typing || streamLocked}
+              />
+              <Button
+                size="icon"
+                className="mb-2 size-9 shrink-0 rounded-full"
+                disabled={typing || streamLocked}
+                onClick={() => void send()}
+              >
+                <Send className="size-4" />
+              </Button>
+            </div>
 
             {/* Bottom toolbar */}
             <div className="flex items-center gap-1 px-3 pb-2 pt-0.5">
