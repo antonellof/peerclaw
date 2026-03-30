@@ -98,10 +98,10 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **Coverage** — Agentic system prefix, unified-loop nudges/errors, web chat/task bodies, crew templates, legacy agent tool block, and related strings
 
 ### Multi-agent orchestration
-- **Workflows (unified)** — All orchestration uses declarative **FlowSpec** graphs (steps, listeners, shared state); crew orchestration is now a node type within flows rather than a separate concept
-- **Workflow builder** — Visual builder in the web dashboard for assembling workflow graphs
+- **Agents (unified)** — All orchestration uses declarative **FlowSpec** graphs (steps, listeners, shared state); crew orchestration is now a node type within flows rather than a separate concept
+- **Agent builder** — Visual builder in the web dashboard for assembling workflow graphs
 - **Agent library** — All-flows library (Task kind removed); browse and instantiate from the dashboard
-- **P2P workflow market** — Signed offers, claims, and results on `peerclaw/crew/v1`; peers can join as workers with `--crew-worker` (alongside `--share-inference` for LLM capacity)
+- **P2P agent market** — Signed offers, claims, and results on `peerclaw/crew/v1`; peers can join as workers with `--crew-worker` (alongside `--share-inference` for LLM capacity)
 - **Pods & campaigns** — Gossip topics for inter-pod handoffs (`peerclaw/pod/v1`) and campaign-scale aggregates (`peerclaw/world/...`) so large meshes stay sharded
 - **API** — Primary endpoint `/api/workflows/*`; `/api/crews/*` and `/api/flows/*` remain as aliases
 
@@ -121,14 +121,16 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **Pricing** — Set your own price multiplier on the base token economy rates
 
 ### Web Dashboard
-- **Console home** — Quick paths to chat, node health, and scenario starters; copy highlights **workflows**, **flows**, and the **Python SDK** for multi-step automation
-- **Join the mesh** — Section inside **P2P Network** with live peer/swarm stats and copy-paste `serve` commands (`--share-inference`, `--crew-worker`); sidebar link removed in favor of **Workflows** + in-page anchor `#join-mesh`
+- **Console home** — Quick paths to chat, node health, and scenario starters; copy highlights **agents**, **flows**, and the **Python SDK** for multi-step automation
+- **Join the mesh** — Section inside **P2P Network** with live peer/swarm stats and copy-paste `serve` commands (`--share-inference`, `--crew-worker`); sidebar link removed in favor of **Agents** + in-page anchor `#join-mesh`
 - **Network topology** — Interactive D3.js graph, click nodes to see details
 - **Agentic chat** — Default **Tools** mode: ReAct loop over the node’s tool registry (including `job_submit` / `job_status` for network work); optional **MCP** adds external servers; plain single-shot replies when Tools is off
 - **Chat API** — `POST /api/chat` and `/api/chat/stream` support `agentic`, `use_mcp`, and `session_id` for bounded server-side history
 - **MCP console** — Configure MCP in the UI (`PUT /api/mcp/config`) and inspect connection status
 - **Task management** — Create, monitor, and view results of agent tasks (tool traces in logs when using the unified loop)
-- **Workflows** — Dashboard **Workflow builder** (agents, tasks, validate, kick off) plus REST + SSE (`/api/workflows/*`, with `/api/crews/*` and `/api/flows/*` as aliases); crew orchestration is now a node type within flows; Agent Card + `/a2a` for external agents
+- **Agents** — Dashboard **Agent builder** (agents, tasks, validate, kick off) plus REST + SSE (`/api/workflows/*`, with `/api/crews/*` and `/api/flows/*` as aliases); crew orchestration is now a node type within flows; Agent Card + `/a2a` for external agents
+- **Real-time streaming** — Agent runs stream step-by-step logs via WebSocket instead of polling
+- **Agent library** — Load, edit, rename, and delete saved agents from the builder
 - **Provider settings** — Configure LLM sharing, view discovered network providers
 - **Resource monitoring** — Real-time CPU, RAM, GPU stats
 - **Job tracking** — List and monitor marketplace jobs; submission is intended via chat/agents (`job_submit`), not a separate submit form
@@ -186,7 +188,7 @@ Configure Ollama, local GGUF models, and remote OpenAI-compatible APIs. Priority
 
 ### Settings — Workspace panels
 
-Quick navigation to console panels — Home, Jobs, Providers, Skills, MCP servers, **Workflows**, **Join the mesh** (opens P2P `#join-mesh`), and P2P Network.
+Quick navigation to console panels — Home, Jobs, Providers, Skills, MCP servers, **Agents**, **Join the mesh** (opens P2P `#join-mesh`), and P2P Network.
 
 <p align="center">
   <img src="docs/screenshots/settings-workspace.png" alt="Workspace settings with panel shortcuts" width="720" />
@@ -265,6 +267,19 @@ peerclaw serve --web 127.0.0.1:8080 --ollama --agent templates/agents/assistant.
 ```
 
 Then open the dashboard at http://127.0.0.1:8080. In **Chat**, leave **Tools** on (default) for the agentic loop, enable **MCP** if you configured servers under Workspace → MCP. Use **Tasks** for longer goals. Example prompts:
+
+### Built-in Multi-Step Agents
+
+PeerClaw ships with sophisticated multi-step agents (not just single-LLM wrappers):
+
+| Agent | Pipeline | Description |
+|-------|----------|-------------|
+| **Deep Researcher** | Classify → Guardrail → Research → Synthesize | Topic classification, safety check, thorough investigation, polished report |
+| **Code Reviewer** | Analyze → Refactor → Format | Structured analysis (JSON), refactoring suggestions, formatted review with severity levels |
+| **Creative Writer** | Classify → Outline → Draft → Edit | Genre detection, detailed outline, full draft, editor polish pass |
+| **Data Analyst** | Understand → Analyze → Recommend | Parse request, execute analysis, actionable insights |
+
+Select any agent in **Chat → Agents** dropdown, or open the **Agent builder** to customize.
 
 | Task | What it does |
 |------|-------------|
@@ -457,7 +472,7 @@ for chunk in response:
 
 ---
 
-## Workflow HTTP API
+## Agent / Workflow HTTP API
 
 With `peerclaw serve --web …`, the node exposes JSON endpoints for multi-agent runs (see `src/web/mod.rs` for the canonical list). The primary namespace is `/api/workflows/*`; `/api/crews/*` and `/api/flows/*` remain as aliases.
 
@@ -624,10 +639,14 @@ policy_enforcement = true
 - [x] **Join network** landing in the web dashboard
 - [x] **Externalized prompts** — `prompts/*.txt` defaults with runtime overlay (`[prompts].directory`, `PEERCLAW_PROMPTS_DIR`, `~/.peerclaw/prompts`)
 
-### v0.5 — Unified Workflows & Agent Library (Current)
+### v0.5 — Unified Agents & Agent Library (Current)
 
-- [x] **Unified workflows** — Crews are now a node type within flows; "Crews" view renamed to "Workflows" in the dashboard
-- [x] **Workflow builder** — Visual builder in the web dashboard (formerly "Agent builder")
+- [x] **Unified agents** — Crews are now a node type within flows; "Workflows" renamed to "Agents" in the dashboard
+- [x] **Agent builder redesign** — Pill-shaped nodes, visual builder in the web dashboard, library browser for saved agents
+- [x] **Real-time WebSocket streaming** — Agent runs stream step-by-step logs via WebSocket instead of polling
+- [x] **Multi-step agent templates** — Deep Researcher, Code Reviewer, Creative Writer, Data Analyst pipelines
+- [x] **Template interpolation fix** — `{{variables}}` now resolve correctly in agent specs
+- [x] **Tool parameter aliases** — Friendlier parameter names for small models
 - [x] **Agent library (all-flows)** — Task kind removed; library is entirely flow-based
 - [x] **API consolidation** — Primary endpoint `/api/workflows/*`; `/api/crews/*` and `/api/flows/*` as aliases
 - [x] **Templates directory** — `examples/` renamed to `templates/` (agents, flows, crews, skills)
@@ -671,4 +690,4 @@ Wire optional **LLM summary** compaction (code in `agent/compaction.rs` has hook
 
 ---
 
-*Cargo package version: **0.3.0**. README “v0.5” labels the in-tree feature wave (unified workflows, agent library, A2A, prompts); crates.io may lag the binary feature set until the next semver publish.*
+*Cargo package version: **0.3.0**. README “v0.5” labels the in-tree feature wave (agent builder, real-time streaming, multi-step agent templates, A2A, prompts); crates.io may lag the binary feature set until the next semver publish.*

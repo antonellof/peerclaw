@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- nodeTypes map is required by React Flow */
-import { memo } from "react"
-import { Handle, Position, type NodeProps } from "@xyflow/react"
+import { memo, useState } from "react"
+import { Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react"
 import {
   Bot,
   CirclePlay,
@@ -15,6 +15,7 @@ import {
   StickyNote,
   UserCheck,
   Wrench,
+  X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -28,14 +29,18 @@ function shell(
   accent: string,
   icon: React.ReactNode,
   label: string,
+  onDelete?: () => void,
 ) {
+  const [hovered, setHovered] = useState(false)
   return (
     <div
       className={cn(
-        "flex items-center gap-2.5 rounded-full border bg-card px-3 py-1.5 shadow-sm transition-all",
+        "group relative flex items-center gap-2.5 rounded-full border bg-card px-3 py-1.5 shadow-sm transition-all",
         "border-border/60 hover:shadow-md",
         selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
       )}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <span
         className={cn(
@@ -48,6 +53,20 @@ function shell(
       <span className="pr-1 text-[13px] font-medium leading-tight text-foreground">
         {label}
       </span>
+      {/* Delete button — appears on hover */}
+      {onDelete && hovered && (
+        <button
+          type="button"
+          className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-destructive hover:text-destructive-foreground"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          title="Remove node"
+        >
+          <X className="size-3" />
+        </button>
+      )}
     </div>
   )
 }
@@ -60,10 +79,20 @@ const hGreen = "!size-2.5 !rounded-full !border-2 !border-background !bg-emerald
 const hRed = "!size-2.5 !rounded-full !border-2 !border-background !bg-rose-500"
 const hCyan = "!size-2.5 !rounded-full !border-2 !border-background !bg-cyan-500"
 
+/* ── Hook: delete this node ─────────────────────────────────────────── */
+
+function useDeleteNode(id: string) {
+  const { deleteElements } = useReactFlow()
+  return () => {
+    void deleteElements({ nodes: [{ id }] })
+  }
+}
+
 /* ── Nodes ──────────────────────────────────────────────────────────── */
 
-export const StartNode = memo(({ data, selected }: NodeProps) => {
+export const StartNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="source" position={Position.Bottom} className={hSource} />
@@ -72,14 +101,16 @@ export const StartNode = memo(({ data, selected }: NodeProps) => {
         "bg-emerald-500 text-white",
         <CirclePlay className="size-3.5" />,
         d.title || "Start",
+        del,
       )}
     </>
   )
 })
 StartNode.displayName = "StartNode"
 
-export const EndNode = memo(({ data, selected }: NodeProps) => {
+export const EndNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -88,21 +119,26 @@ export const EndNode = memo(({ data, selected }: NodeProps) => {
         "bg-slate-400 text-white dark:bg-slate-500",
         <Flag className="size-3.5" />,
         d.title || "End",
+        del,
       )}
     </>
   )
 })
 EndNode.displayName = "EndNode"
 
-export const NoteNode = memo(({ data, selected }: NodeProps) => {
+export const NoteNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
+  const [hovered, setHovered] = useState(false)
   return (
     <div
       className={cn(
-        "max-w-[240px] rounded-lg bg-amber-100 px-3.5 py-2.5 shadow-sm dark:bg-amber-400/20",
+        "group relative max-w-[240px] rounded-lg bg-amber-100 px-3.5 py-2.5 shadow-sm dark:bg-amber-400/20",
         "border border-amber-300/50 dark:border-amber-500/30",
         selected && "ring-2 ring-amber-400/60 ring-offset-2 ring-offset-background",
       )}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-amber-800 dark:text-amber-200">
         <StickyNote className="size-3.5" />
@@ -111,13 +147,27 @@ export const NoteNode = memo(({ data, selected }: NodeProps) => {
       <p className="whitespace-pre-wrap text-[11px] leading-snug text-amber-900/80 dark:text-amber-100/80">
         {d.prompt || d.title || "Annotation"}
       </p>
+      {hovered && (
+        <button
+          type="button"
+          className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-destructive hover:text-destructive-foreground"
+          onClick={(e) => {
+            e.stopPropagation()
+            del()
+          }}
+          title="Remove note"
+        >
+          <X className="size-3" />
+        </button>
+      )}
     </div>
   )
 })
 NoteNode.displayName = "NoteNode"
 
-export const ClassifyNode = memo(({ data, selected }: NodeProps) => {
+export const ClassifyNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -127,14 +177,16 @@ export const ClassifyNode = memo(({ data, selected }: NodeProps) => {
         "bg-amber-500 text-white",
         <LayoutList className="size-3.5" />,
         d.title || "Classify",
+        del,
       )}
     </>
   )
 })
 ClassifyNode.displayName = "ClassifyNode"
 
-export const UserApprovalNode = memo(({ data, selected }: NodeProps) => {
+export const UserApprovalNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -157,14 +209,16 @@ export const UserApprovalNode = memo(({ data, selected }: NodeProps) => {
         "bg-orange-500 text-white",
         <UserCheck className="size-3.5" />,
         d.title || "User approval",
+        del,
       )}
     </>
   )
 })
 UserApprovalNode.displayName = "UserApprovalNode"
 
-export const LlmNode = memo(({ data, selected }: NodeProps) => {
+export const LlmNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -174,14 +228,16 @@ export const LlmNode = memo(({ data, selected }: NodeProps) => {
         "bg-violet-500 text-white",
         <MessageSquare className="size-3.5" />,
         d.title || "LLM",
+        del,
       )}
     </>
   )
 })
 LlmNode.displayName = "LlmNode"
 
-export const AgentNode = memo(({ data, selected }: NodeProps) => {
+export const AgentNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -191,14 +247,16 @@ export const AgentNode = memo(({ data, selected }: NodeProps) => {
         "bg-amber-500 text-white",
         <Bot className="size-3.5" />,
         d.title || "Agent",
+        del,
       )}
     </>
   )
 })
 AgentNode.displayName = "AgentNode"
 
-export const IfNode = memo(({ data, selected }: NodeProps) => {
+export const IfNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -221,14 +279,16 @@ export const IfNode = memo(({ data, selected }: NodeProps) => {
         "bg-fuchsia-500 text-white",
         <GitBranch className="size-3.5" />,
         d.title || "If / else",
+        del,
       )}
     </>
   )
 })
 IfNode.displayName = "IfNode"
 
-export const WhileNode = memo(({ data, selected }: NodeProps) => {
+export const WhileNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -251,14 +311,16 @@ export const WhileNode = memo(({ data, selected }: NodeProps) => {
         "bg-cyan-500 text-white",
         <Repeat className="size-3.5" />,
         d.title || "While",
+        del,
       )}
     </>
   )
 })
 WhileNode.displayName = "WhileNode"
 
-export const GuardrailsNode = memo(({ data, selected }: NodeProps) => {
+export const GuardrailsNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -281,14 +343,16 @@ export const GuardrailsNode = memo(({ data, selected }: NodeProps) => {
         "bg-orange-500 text-white",
         <Shield className="size-3.5" />,
         d.title || "Guardrails",
+        del,
       )}
     </>
   )
 })
 GuardrailsNode.displayName = "GuardrailsNode"
 
-export const McpNode = memo(({ data, selected }: NodeProps) => {
+export const McpNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -298,14 +362,16 @@ export const McpNode = memo(({ data, selected }: NodeProps) => {
         "bg-indigo-500 text-white",
         <Wrench className="size-3.5" />,
         d.title || d.mcpToolId || "MCP",
+        del,
       )}
     </>
   )
 })
 McpNode.displayName = "McpNode"
 
-export const FileSearchNode = memo(({ data, selected }: NodeProps) => {
+export const FileSearchNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -315,14 +381,16 @@ export const FileSearchNode = memo(({ data, selected }: NodeProps) => {
         "bg-teal-500 text-white",
         <FileSearch className="size-3.5" />,
         d.title || d.vectorCollection || "File search",
+        del,
       )}
     </>
   )
 })
 FileSearchNode.displayName = "FileSearchNode"
 
-export const SetStateNode = memo(({ data, selected }: NodeProps) => {
+export const SetStateNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -332,14 +400,16 @@ export const SetStateNode = memo(({ data, selected }: NodeProps) => {
         "bg-lime-500 text-white",
         <Diamond className="size-3.5" />,
         d.title || d.stateKey || "Set state",
+        del,
       )}
     </>
   )
 })
 SetStateNode.displayName = "SetStateNode"
 
-export const TransformNode = memo(({ data, selected }: NodeProps) => {
+export const TransformNode = memo(({ id, data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
+  const del = useDeleteNode(id)
   return (
     <>
       <Handle type="target" position={Position.Top} className={hTarget} />
@@ -349,6 +419,7 @@ export const TransformNode = memo(({ data, selected }: NodeProps) => {
         "bg-amber-600 text-white",
         <Diamond className="size-3.5" />,
         d.title || "Transform",
+        del,
       )}
     </>
   )

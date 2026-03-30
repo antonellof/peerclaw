@@ -132,7 +132,9 @@ Background automation:
 Web interface and API:
 - **OpenAI Compatible** (`openai.rs`) — `/v1/chat/completions`, `/v1/models`
 - **Dashboard** — Network topology, resource monitoring, job tracking
-- **SSE Streaming** — Real-time updates
+- **Agent Builder** — Visual agent construction with pill nodes, library browser, hover-delete
+- **Agent Library** — Browse and launch multi-step agent templates
+- **WebSocket Streaming** — Real-time updates and agent run streaming
 
 ## Technology Stack
 

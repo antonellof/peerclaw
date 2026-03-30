@@ -401,6 +401,23 @@ Send a message to data-collector: "Fetch latest arxiv papers on LLMs"
 Submit job to network: inference task with llama-3.3-70b, budget 5 PCLAW
 ```
 
+## Multi-Step Agent Templates
+
+Pre-built multi-step flow agents are available in `templates/flows/`:
+
+| Agent | File | Description |
+|-------|------|-------------|
+| **Deep Researcher** | `deep-researcher.toml` | Multi-step research with web search, source evaluation, and synthesis |
+| **Code Reviewer** | `code-reviewer.toml` | Automated code review with style, security, and correctness checks |
+| **Creative Writer** | `creative-writer.toml` | Structured creative writing with outline, draft, and revision stages |
+| **Data Analyst** | `data-analyst.toml` | Data exploration, analysis, and report generation pipeline |
+
+These can be launched from the web UI via the **Agents** tab and **Agent builder**, or from the CLI:
+
+```bash
+peerclaw agent run templates/flows/deep-researcher.toml
+```
+
 ## Example Agents
 
 Ready-to-use agent configurations in `templates/agents/`:
