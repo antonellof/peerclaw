@@ -1,6 +1,23 @@
 import { useMemo, useState } from "react"
 import type { Node } from "@xyflow/react"
-import { Plug, RefreshCw } from "lucide-react"
+import {
+  Bot,
+  CirclePlay,
+  Diamond,
+  FileSearch,
+  Flag,
+  GitBranch,
+  LayoutList,
+  type LucideIcon,
+  MessageSquare,
+  Plug,
+  RefreshCw,
+  Repeat,
+  Shield,
+  StickyNote,
+  UserCheck,
+  Wrench,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -14,22 +31,21 @@ import { cn } from "@/lib/utils"
 import type { FlowNodeData } from "./flowCompile"
 import { GUARD_OPTIONS, guardrailSetFromStr, stringifyGuardSet } from "./flowGuardrailOptions"
 
-const NODE_INSPECTOR_HELP: Partial<Record<string, string>> = {
-  start: "Single entry point for the graph interpreter. Wire one outgoing edge to your first real step.",
-  agent: "Runs the full agent loop with tools. Model blank = first model available on the node.",
-  llm: "One-shot completion. Earlier node outputs are appended as context.",
-  classify: "Dedicated classifier step: categories, optional few-shot JSON, and input template ({{vars}}).",
-  end: "Stops execution and returns recorded steps.",
-  fileSearch: "Queries the shared vectX store. Collection id = vector collection name.",
-  guardrails: "SafetyLayer checks. Use Input template ({{topic}}) or Source node id. Pass / fail edges.",
-  mcp: "Runs a tool from the node MCP catalog (same servers as Settings → MCP and the MCP console). Use server:tool ids.",
-  if: "CEL expression over inputs, outputs, state, input_as_text. Use true / false edge labels.",
-  while: "CEL with iteration variable. Use loop / exit edge labels.",
-  userApproval:
-    "Branches on inputs.human_approval (approve | reject) until real HITL ships. Wire approve and reject edges.",
-  transform: "Copy mode, CEL expressions array, or JSON object merged into state.",
-  setState: "Set state from JSON (with {{var}} interpolation) or from a CEL expression.",
-  note: "Canvas-only annotation; not exported to FlowSpec.",
+const NODE_META: Record<string, { label: string; desc: string; icon: LucideIcon }> = {
+  start: { label: "Start", desc: "Entry point for the workflow.", icon: CirclePlay },
+  agent: { label: "Agent", desc: "Call this model with your instructions and tools.", icon: Bot },
+  llm: { label: "LLM", desc: "Single model completion step.", icon: MessageSquare },
+  classify: { label: "Classify", desc: "Sort messages into categories with a model.", icon: LayoutList },
+  end: { label: "End", desc: "Complete the workflow output.", icon: Flag },
+  fileSearch: { label: "File search", desc: "Query a vector store for relevant information.", icon: FileSearch },
+  guardrails: { label: "Guardrails", desc: "Run moderation, PII detection, or hallucination checks.", icon: Shield },
+  mcp: { label: "MCP", desc: "Invoke a Model Context Protocol tool.", icon: Wrench },
+  if: { label: "If / else", desc: "Create conditions to branch your workflow.", icon: GitBranch },
+  while: { label: "While", desc: "Loop while a condition is true.", icon: Repeat },
+  userApproval: { label: "User approval", desc: "Pause for a human to approve or reject a step.", icon: UserCheck },
+  transform: { label: "Transform", desc: "Restructure data.", icon: Diamond },
+  setState: { label: "Set state", desc: "Assign values to workflow state variables.", icon: Diamond },
+  note: { label: "Note", desc: "Canvas-only annotation.", icon: StickyNote },
 }
 
 function selectCls(disabled: boolean) {
@@ -255,27 +271,41 @@ export function FlowNodeInspector({
 }) {
   const d = (node.data || {}) as FlowNodeData
   const nt = String(node.type ?? "")
-  const blurb = NODE_INSPECTOR_HELP[nt]
+  const meta = NODE_META[nt]
 
   const outFmt = useMemo(
     () => (d.outputFormat === "json" ? "json" : "text"),
     [d.outputFormat],
   )
 
+  const Icon = meta?.icon
+
   return (
     <div className="space-y-3 text-xs">
-      {blurb ? <p className="text-[11px] leading-relaxed text-muted-foreground">{blurb}</p> : null}
+      {/* ── Node type header ──────────────────────────────── */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="text-base font-semibold text-foreground">{meta?.label ?? nt}</h3>
+          {meta?.desc ? (
+            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{meta.desc}</p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          {Icon ? <Icon className="size-4 text-muted-foreground/60" /> : null}
+        </div>
+      </div>
+
+      <Separator className="bg-border/40" />
+
       <div>
         <Label>Name</Label>
         <Input
-          className="mt-1 h-8 text-xs"
+          className="mt-1 h-9 text-xs"
           disabled={disabled}
           value={d.title ?? ""}
           onChange={(e) => onChangeData({ title: e.target.value })}
         />
       </div>
-
-      <Separator className="my-1 bg-border/60" />
 
       {node.type === "agent" && (
         <>

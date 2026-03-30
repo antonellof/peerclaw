@@ -1,0 +1,50 @@
+{
+  "name": "Creative Writer",
+  "nodes": [
+    { "id": "s", "kind": "start", "name": "Start" },
+    {
+      "id": "classify",
+      "kind": "classify",
+      "name": "Classify request",
+      "classify_categories": ["story", "poem", "essay", "script", "other"],
+      "classify_input_template": "{{input_as_text}}",
+      "temperature": 0.1,
+      "max_tokens": 16
+    },
+    {
+      "id": "outline",
+      "kind": "agent",
+      "name": "Outline & plan",
+      "instructions": "You are a creative writing planner. Given the user's request, create a detailed outline:\n- Identify the genre, tone, and target audience\n- Define the structure (acts, sections, stanzas)\n- Sketch key themes, motifs, or arguments\n- Note any constraints from the request (word count, style, etc.)\n- Suggest 2-3 possible approaches with pros/cons\n\nPick the strongest approach and produce a detailed outline.",
+      "prompt": "Create an outline for:\n\n{{input_as_text}}\n\nClassified as: {{classify}}",
+      "temperature": 0.7,
+      "max_tokens": 2048
+    },
+    {
+      "id": "draft",
+      "kind": "agent",
+      "name": "First draft",
+      "instructions": "You are a talented creative writer. Using the outline provided, write a compelling first draft. Focus on:\n- Strong opening hook\n- Vivid, specific language (show, don't tell)\n- Consistent voice and tone\n- Natural flow between sections\n- Satisfying conclusion\n\nWrite the complete piece, not just an excerpt.",
+      "prompt": "Write the full piece based on this outline:\n\nOriginal request: {{input_as_text}}\n\nOutline:\n{{outline}}",
+      "temperature": 0.85,
+      "max_tokens": 4096
+    },
+    {
+      "id": "edit",
+      "kind": "agent",
+      "name": "Editor pass",
+      "instructions": "You are a sharp literary editor. Review the draft and improve it:\n- Tighten prose: cut filler words, strengthen verbs\n- Fix rhythm and pacing issues\n- Ensure consistency in tone and voice\n- Polish transitions between sections\n- Correct any grammar or punctuation\n\nReturn the fully edited final version, not comments about it.",
+      "prompt": "Edit and polish this draft:\n\n{{draft}}",
+      "temperature": 0.4,
+      "max_tokens": 4096
+    },
+    { "id": "e", "kind": "end", "name": "End" }
+  ],
+  "edges": [
+    { "from": "s", "to": "classify" },
+    { "from": "classify", "to": "outline" },
+    { "from": "outline", "to": "draft" },
+    { "from": "draft", "to": "edit" },
+    { "from": "edit", "to": "e" }
+  ]
+}

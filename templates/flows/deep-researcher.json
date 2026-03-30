@@ -1,0 +1,50 @@
+{
+  "name": "Deep Researcher",
+  "nodes": [
+    { "id": "s", "kind": "start", "name": "Start" },
+    {
+      "id": "classify",
+      "kind": "classify",
+      "name": "Classify topic",
+      "classify_categories": ["technical", "scientific", "business", "creative", "general"],
+      "classify_input_template": "{{input_as_text}}",
+      "temperature": 0.1,
+      "max_tokens": 32
+    },
+    {
+      "id": "research",
+      "kind": "agent",
+      "name": "Research agent",
+      "instructions": "You are a thorough research agent. Given the user's query, investigate the topic deeply. Break it into sub-questions, gather evidence for each, note conflicting viewpoints, and cite uncertainty. Use tools when available. Return structured findings with sections: Overview, Key Findings (bulleted), Evidence & Sources, Open Questions.",
+      "prompt": "Research this topic thoroughly:\n\n{{input_as_text}}",
+      "temperature": 0.4,
+      "max_tokens": 4096
+    },
+    {
+      "id": "guardrail",
+      "kind": "guardrails",
+      "name": "Safety check",
+      "guardrail_input_template": "{{input_as_text}}",
+      "guardrail_checks": ["leak", "injection"],
+      "guardrail_continue_on_error": true
+    },
+    {
+      "id": "synthesize",
+      "kind": "agent",
+      "name": "Synthesize & format",
+      "instructions": "You are an expert editor. Take the raw research output and produce a polished, well-structured report. Use markdown with headers, bullet points, and emphasis. Add a TL;DR at the top. If the research mentions uncertainty, frame it honestly. Make it concise but complete.",
+      "prompt": "Polish this research into a clear report:\n\nTopic: {{input_as_text}}\n\nRaw research:\n{{research}}",
+      "temperature": 0.3,
+      "max_tokens": 4096
+    },
+    { "id": "e", "kind": "end", "name": "End" }
+  ],
+  "edges": [
+    { "from": "s", "to": "classify" },
+    { "from": "classify", "to": "guardrail" },
+    { "from": "guardrail", "to": "research", "label": "pass" },
+    { "from": "guardrail", "to": "e", "label": "fail" },
+    { "from": "research", "to": "synthesize" },
+    { "from": "synthesize", "to": "e" }
+  ]
+}

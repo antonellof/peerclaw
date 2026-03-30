@@ -74,7 +74,9 @@ impl Tool for FileReadTool {
     ) -> Result<ToolOutput, ToolError> {
         let start = Instant::now();
 
-        let path_str = require_str(&params, "path")?;
+        // Accept "path" or "file_path" (common alias small models use)
+        let path_str = require_str(&params, "path")
+            .or_else(|_| require_str(&params, "file_path"))?;
         let encoding = optional_str(&params, "encoding").unwrap_or("utf8");
         let offset = optional_i64(&params, "offset", 0) as u64;
         let limit = optional_i64(&params, "limit", MAX_READ_SIZE as i64) as u64;
@@ -218,7 +220,8 @@ impl Tool for FileWriteTool {
     ) -> Result<ToolOutput, ToolError> {
         let start = Instant::now();
 
-        let path_str = require_str(&params, "path")?;
+        let path_str = require_str(&params, "path")
+            .or_else(|_| require_str(&params, "file_path"))?;
         let content = require_str(&params, "content")?;
         let encoding = optional_str(&params, "encoding").unwrap_or("utf8");
         let append = optional_bool(&params, "append", false);

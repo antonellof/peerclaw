@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Bot, ChevronDown, ChevronRight, Copy, Send, Settings2, Terminal, Brain, CheckCircle2, Workflow } from "lucide-react"
+import { Bot, ChevronDown, ChevronRight, Copy, Send, Settings2, Square, Terminal, Brain, CheckCircle2, Workflow } from "lucide-react"
 
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
 import {
@@ -43,31 +43,112 @@ const AGENT_POLL_MAX_MS = 48 * 60 * 60 * 1000
 const FLOW_CHAT_POLL_MS = 450
 const FLOW_CHAT_POLL_MAX = 400
 
-async function runFlowFromChat(spec: FlowSpecJson, message: string): Promise<{ ok: boolean; text: string }> {
+/**
+ * Walk a FlowRunOutput and produce readable markdown from the steps.
+ * The output shape is `{ steps: [{ id, kind, output, branch?, ... }] }`.
+ * We extract the last meaningful agent/llm output as the primary text,
+ * and summarise earlier steps as context.
+ */
+function extractFlowResultText(out: unknown): string {
+  if (!out || typeof out !== "object") return "(no output)"
+  const outObj = out as Record<string, unknown>
+
+  // Direct text fields (non-steps output)
+  if (typeof outObj.final_text === "string") return outObj.final_text
+  if (typeof outObj.result === "string") return outObj.result
+  if (typeof outObj.text === "string") return outObj.text
+
+  const steps = outObj.steps
+  if (!Array.isArray(steps) || steps.length === 0) {
+    return JSON.stringify(out, null, 2)
+  }
+
+  // Walk steps and collect meaningful outputs
+  const parts: string[] = []
+  for (const step of steps as Record<string, unknown>[]) {
+    const kind = String(step.kind ?? step.type ?? "")
+    const id = String(step.id ?? "")
+    const output = step.output
+
+    // Skip start nodes — they just echo inputs
+    if (kind === "start") continue
+
+    // Extract text from the step output
+    let text = ""
+    if (typeof output === "string") {
+      text = output
+    } else if (output && typeof output === "object") {
+      const o = output as Record<string, unknown>
+      // Agent/LLM steps often put the response in .response, .text, .content, or .result
+      if (typeof o.response === "string") text = o.response
+      else if (typeof o.text === "string") text = o.text
+      else if (typeof o.content === "string") text = o.content
+      else if (typeof o.result === "string") text = o.result
+      else if (typeof o.output === "string") text = o.output
+      else if (typeof o.category === "string") text = `**Category:** ${o.category}`
+      else text = JSON.stringify(output, null, 2)
+    }
+
+    if (!text.trim()) continue
+
+    // For the last non-empty step, show it prominently; for others, summarise
+    parts.push({ kind, id, text } as never)
+  }
+
+  if (parts.length === 0) return "(workflow produced no output)"
+
+  type StepOut = { kind: string; id: string; text: string }
+  const typed = parts as unknown as StepOut[]
+
+  // If only one step with output, return it directly
+  if (typed.length === 1) return typed[0]!.text
+
+  // Multiple steps: show the last one as the main result, earlier ones collapsed
+  const last = typed[typed.length - 1]!
+  const earlier = typed.slice(0, -1)
+
+  const sections: string[] = []
+  if (earlier.length > 0) {
+    const summaries = earlier.map(
+      (s) => `**${s.kind}** (${s.id}): ${s.text.length > 200 ? s.text.slice(0, 200) + "…" : s.text}`,
+    )
+    sections.push(`<details><summary>Earlier steps (${earlier.length})</summary>\n\n${summaries.join("\n\n")}\n\n</details>`)
+  }
+  sections.push(last.text)
+
+  return sections.join("\n\n")
+}
+
+/** Kick off a flow and return the run ID (or error). The caller streams via WebSocket. */
+async function startFlowRun(
+  spec: FlowSpecJson,
+  message: string,
+): Promise<{ ok: boolean; runId?: string; error?: string }> {
   const kick = await kickoffFlow({
     spec,
     inputs: { input_as_text: message, topic: message },
   })
   if (!kick.success || !kick.run_id) {
-    return { ok: false, text: kick.error ?? "Flow kickoff failed." }
+    return { ok: false, error: kick.error ?? "Flow kickoff failed." }
   }
-  const runId = kick.run_id
-  for (let i = 0; i < FLOW_CHAT_POLL_MAX; i++) {
-    await new Promise((r) => setTimeout(r, FLOW_CHAT_POLL_MS))
+  return { ok: true, runId: kick.run_id }
+}
+
+/** Fetch the completed flow result and format it as readable text. */
+async function fetchFlowResult(runId: string): Promise<{ ok: boolean; text: string }> {
+  try {
     const run = await fetchFlowRun(runId)
-    if (!run) continue
+    if (!run) return { ok: false, text: "Flow run not found." }
     const st = (run.status || "").toLowerCase()
-    if (st === "failed") {
-      return { ok: false, text: run.error ?? "Flow failed." }
+    if (st === "failed") return { ok: false, text: run.error ?? "Flow failed." }
+    if (st === "completed" || st === "done" || st === "success") {
+      const body = extractFlowResultText(run.output)
+      return { ok: true, text: body.slice(0, 14_000) || "Done." }
     }
-    if (st === "completed") {
-      const body = run.output != null ? JSON.stringify(run.output, null, 2) : "(no output)"
-      const logs = run.logs?.length ? `\n\n--- flow logs ---\n${run.logs.slice(-40).join("\n")}` : ""
-      const combined = (body + logs).slice(0, 14_000)
-      return { ok: true, text: combined || "Done." }
-    }
+    return { ok: false, text: `Flow status: ${run.status}` }
+  } catch {
+    return { ok: false, text: "Could not fetch flow result." }
   }
-  return { ok: false, text: "Flow run timed out (still running or pending)." }
 }
 
 type MsgRole = "user" | "assistant" | "system" | "error"
@@ -330,11 +411,16 @@ export function ChatPanel({ onRegisterControls }: Props) {
   const [typing, setTyping] = useState(false)
   const [streamLocked, setStreamLocked] = useState(false)
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
   const [autocompleteOpen, setAutocompleteOpen] = useState(false)
   const [autocompleteFilter, setAutocompleteFilter] = useState("")
   const [autocompleteIdx, setAutocompleteIdx] = useState(0)
   // agentBudget removed: handled per-workflow in settings
   const [transcriptReady, setTranscriptReady] = useState(false)
+  /** Maps a flow run_id → the chat message ID showing its streamed output. */
+  const activeFlowRunsRef = useRef<Map<string, { msgId: string; logs: string[] }>>(new Map())
+  /** Maps message ID → workflow name for use after async completion. */
+  const prev_workflowNames = useRef<Map<string, string>>(new Map())
   const [agentLibrary, setAgentLibrary] = useState<AgentLibraryEntryJson[]>([])
 
   const refetchAgentLibrary = useCallback(() => {
@@ -628,6 +714,39 @@ export function ChatPanel({ onRegisterControls }: Props) {
       )
     },
     onAgentsLibraryChanged: refetchAgentLibrary,
+    onFlowLog: (event) => {
+      const entry = activeFlowRunsRef.current.get(event.run_id)
+      if (!entry) return
+      // Append log line
+      entry.logs.push(event.line)
+      // Stream logs into the chat message as they arrive
+      const logsPreview = entry.logs
+        .filter((l) => !l.startsWith("[flow] queued"))
+        .slice(-15)
+        .map((l) => `\u25B8 ${l}`)
+        .join("\n")
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === entry.msgId ? { ...m, content: logsPreview || "Running agent…" } : m,
+        ),
+      )
+      // When completed/failed, fetch the final result
+      const st = event.status.toLowerCase()
+      if (st === "completed" || st === "failed" || st === "done") {
+        activeFlowRunsRef.current.delete(event.run_id)
+        const wfName = prev_workflowNames.current.get(entry.msgId) ?? ""
+        void fetchFlowResult(event.run_id).then((r) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === entry.msgId
+                ? { ...m, role: (r.ok ? "assistant" : "error") as MsgRole, content: r.text, workflowRunning: false, workflowName: wfName }
+                : m,
+            ),
+          )
+          setTyping(false)
+        })
+      }
+    },
   })
 
   useEffect(() => {
@@ -736,39 +855,70 @@ export function ChatPanel({ onRegisterControls }: Props) {
       const statusId = newId()
       setMessages((m) => [
         ...m,
-        { id: statusId, role: "system", content: `Running workflow "${wfName}"…`, workflowRunning: true, workflowName: wfName },
+        { id: statusId, role: "system", content: `Running "${wfName}"…`, workflowRunning: true, workflowName: wfName },
       ])
       setTyping(true)
+      if (!selectedLibraryEntry.flow_spec) {
+        setMessages((m) =>
+          m.map((msg) =>
+            msg.id === statusId
+              ? { ...msg, role: "error" as const, content: "This agent has no flow spec. Re-save it from the Agent builder.", workflowRunning: false, workflowName: wfName }
+              : msg,
+          ),
+        )
+        setTyping(false)
+        return
+      }
       try {
-        if (!selectedLibraryEntry.flow_spec) {
+        const result = await startFlowRun(selectedLibraryEntry.flow_spec, content)
+        if (!result.ok || !result.runId) {
           setMessages((m) =>
             m.map((msg) =>
               msg.id === statusId
-                ? { ...msg, role: "error" as const, content: "This workflow has no flow spec. Re-save it from the Workflow builder.", workflowRunning: false, workflowName: wfName }
+                ? { ...msg, role: "error" as const, content: result.error ?? "Agent kickoff failed.", workflowRunning: false, workflowName: wfName }
                 : msg,
             ),
           )
           setTyping(false)
           return
         }
-        const fr = await runFlowFromChat(selectedLibraryEntry.flow_spec, content)
-        setMessages((m) =>
-          m.map((msg) =>
-            msg.id === statusId
-              ? { ...msg, role: (fr.ok ? "assistant" : "error") as MsgRole, content: fr.text, workflowRunning: false, workflowName: wfName }
-              : msg,
-          ),
-        )
+        // Register for WebSocket streaming — the onFlowLog handler will update the message
+        activeFlowRunsRef.current.set(result.runId, { msgId: statusId, logs: [] })
+        prev_workflowNames.current.set(statusId, wfName)
+        // typing stays true — will be set to false when the flow_log handler sees completed/failed
+        // Safety timeout: if WS events never arrive, fall back to polling
+        const runId = result.runId
+        const fallbackTimeout = setTimeout(async () => {
+          if (!activeFlowRunsRef.current.has(runId)) return // already resolved via WS
+          // Try fetching the result directly
+          const fr = await fetchFlowResult(runId)
+          activeFlowRunsRef.current.delete(runId)
+          setMessages((m) =>
+            m.map((msg) =>
+              msg.id === statusId
+                ? { ...msg, role: (fr.ok ? "assistant" : "error") as MsgRole, content: fr.text, workflowRunning: false, workflowName: wfName }
+                : msg,
+            ),
+          )
+          setTyping(false)
+        }, FLOW_CHAT_POLL_MAX * FLOW_CHAT_POLL_MS)
+        // Clean up timeout if WS resolves it first
+        const checkInterval = setInterval(() => {
+          if (!activeFlowRunsRef.current.has(runId)) {
+            clearTimeout(fallbackTimeout)
+            clearInterval(checkInterval)
+          }
+        }, 2000)
       } catch (e) {
         setMessages((m) =>
           m.map((msg) =>
             msg.id === statusId
-              ? { ...msg, role: "error" as const, content: e instanceof Error ? e.message : "Workflow error", workflowRunning: false, workflowName: wfName }
+              ? { ...msg, role: "error" as const, content: e instanceof Error ? e.message : "Agent error", workflowRunning: false, workflowName: wfName }
               : msg,
           ),
         )
+        setTyping(false)
       }
-      setTyping(false)
       return
     }
 
@@ -779,6 +929,8 @@ export function ChatPanel({ onRegisterControls }: Props) {
     setInput("")
     setStreamLocked(true)
     setStreamingMessageId(assistId)
+    const ac = new AbortController()
+    abortRef.current = ac
     try {
       const data = await postChatStream(
         {
@@ -795,6 +947,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
             m.map((x) => (x.id === assistId ? { ...x, content: x.content + text } : x)),
           )
         },
+        ac.signal,
       )
       const meta = [
         data.tokens ? `${data.tokens} tokens` : "",
@@ -828,6 +981,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
         ),
       )
     } finally {
+      abortRef.current = null
       setStreamLocked(false)
       setStreamingMessageId(null)
     }
@@ -970,7 +1124,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   {m.workflowRunning && (
                     <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                       <span className="inline-flex size-2 animate-pulse rounded-full bg-primary" />
-                      Running workflow…
+                      Running agent…
                     </div>
                   )}
                   {m.workflowName && !m.workflowRunning && (
@@ -1087,14 +1241,33 @@ export function ChatPanel({ onRegisterControls }: Props) {
                 className="min-h-[44px] max-h-[min(50dvh,22.5rem)] min-w-0 flex-1 resize-none border-0 bg-transparent py-3 focus-visible:ring-0"
                 disabled={typing || streamLocked}
               />
-              <Button
-                size="icon"
-                className="mb-2 size-9 shrink-0 rounded-full"
-                disabled={typing || streamLocked}
-                onClick={() => void send()}
-              >
-                <Send className="size-4" />
-              </Button>
+              {typing || streamLocked ? (
+                <button
+                  type="button"
+                  className="group relative mb-2 flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive text-destructive-foreground transition-colors hover:bg-destructive/90"
+                  aria-label="Stop generating"
+                  onClick={() => {
+                    abortRef.current?.abort()
+                    abortRef.current = null
+                    setStreamLocked(false)
+                    setStreamingMessageId(null)
+                    setTyping(false)
+                  }}
+                >
+                  {/* Spinning border ring */}
+                  <span className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-destructive-foreground/60" />
+                  <Square className="size-3.5 fill-current" />
+                </button>
+              ) : (
+                <Button
+                  size="icon"
+                  className="mb-2 size-9 shrink-0 rounded-full"
+                  disabled={!input.trim()}
+                  onClick={() => void send()}
+                >
+                  <Send className="size-4" />
+                </Button>
+              )}
             </div>
 
             {/* Bottom toolbar */}
@@ -1178,14 +1351,14 @@ export function ChatPanel({ onRegisterControls }: Props) {
                   >
                     <Bot className="size-3 shrink-0 opacity-80" />
                     <span className="truncate">
-                      {selectedLibraryEntry ? selectedLibraryEntry.name : "Workflows"}
+                      {selectedLibraryEntry ? selectedLibraryEntry.name : "Agents"}
                     </span>
                     <ChevronDown className="size-3 shrink-0 opacity-50" />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="max-h-72 w-72 overflow-y-auto">
                   <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Run a workflow
+                    Run an agent
                   </DropdownMenuLabel>
                   <DropdownMenuRadioGroup
                     value={chatPreferences.selectedAgentLibraryId ?? "__default__"}
@@ -1211,7 +1384,7 @@ export function ChatPanel({ onRegisterControls }: Props) {
                       setView("workflows")
                     }}
                   >
-                    Open Workflow builder…
+                    Open Agent builder…
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

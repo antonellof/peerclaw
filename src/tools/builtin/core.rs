@@ -193,10 +193,14 @@ impl Tool for JsonTool {
     ) -> Result<ToolOutput, ToolError> {
         let start = Instant::now();
 
-        let action = require_str(&params, "action")?;
+        // Accept "action" or default to "format" when missing (small models often omit it)
+        let action = match params.get("action").and_then(|v| v.as_str()) {
+            Some(a) if !a.is_empty() => a.to_string(),
+            _ => "format".to_string(),
+        };
         let input_raw = json_tool_input_raw(&params)?;
 
-        match action {
+        match action.as_str() {
             "parse" | "validate" => {
                 let prepared = prepare_json_text(&input_raw);
                 match serde_json::from_str::<serde_json::Value>(&prepared) {
@@ -272,12 +276,21 @@ impl Tool for JsonTool {
 }
 
 /// Models often pass `input` as a JSON object instead of a quoted string — accept both.
+/// Also accepts `json` as alias for `input` (small models often use this).
 fn json_tool_input_raw(params: &serde_json::Value) -> Result<String, ToolError> {
-    match params.get("input") {
+    // Try "input" first, then "json" as alias
+    let val = params.get("input").or_else(|| params.get("json"));
+    match val {
         Some(serde_json::Value::String(s)) => Ok(s.clone()),
         Some(v) => Ok(v.to_string()),
         None => Err(ToolError::InvalidParameters(
-            "input required for json tool".to_string(),
+            format!(
+                "missing or empty required parameter `action` for `json`. \
+                 Required: `action` (one of parse|format|query|validate), \
+                 `input` (JSON to process: a JSON string, or an object/array \
+                 (accepted as structured input). \
+                 Markdown ```json … ``` fences are stripped automatically.)"
+            ),
         )),
     }
 }

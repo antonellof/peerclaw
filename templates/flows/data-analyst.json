@@ -1,0 +1,41 @@
+{
+  "name": "Data Analyst",
+  "nodes": [
+    { "id": "s", "kind": "start", "name": "Start" },
+    {
+      "id": "understand",
+      "kind": "agent",
+      "name": "Understand data",
+      "instructions": "You are a data analyst. First, understand what the user is asking about their data. Identify:\n- What data is being described or provided\n- What question or analysis is being requested\n- What format the output should take\n- Any constraints or assumptions\n\nProduce a structured analysis plan with: data_description, question, methodology (steps), expected_output_format.",
+      "prompt": "Analyze this data request:\n\n{{input_as_text}}",
+      "output_format": "json",
+      "temperature": 0.2,
+      "max_tokens": 2048
+    },
+    {
+      "id": "analyze",
+      "kind": "agent",
+      "name": "Run analysis",
+      "instructions": "You are an expert data analyst. Execute the analysis plan from the previous step. Show your work:\n- Apply the methodology step by step\n- Calculate statistics, identify patterns, detect anomalies\n- Create tables or summaries where helpful\n- Note limitations and caveats of the analysis\n- Highlight the most important findings\n\nBe quantitative and precise. Use actual numbers, not vague descriptions.",
+      "prompt": "Execute this analysis:\n\nPlan: {{understand}}\n\nOriginal data/request: {{input_as_text}}",
+      "temperature": 0.3,
+      "max_tokens": 4096
+    },
+    {
+      "id": "recommend",
+      "kind": "agent",
+      "name": "Insights & recommendations",
+      "instructions": "You are a business-savvy data interpreter. Given the analysis, produce actionable insights:\n\n## Key Findings\nTop 3-5 findings, each with supporting data.\n\n## Recommendations\nSpecific, actionable recommendations based on the data.\n\n## Next Steps\nWhat additional data or analysis would strengthen these conclusions.\n\nBe concise and direct. Executives should be able to act on this.",
+      "prompt": "Produce insights from this analysis:\n\n{{analyze}}",
+      "temperature": 0.3,
+      "max_tokens": 3072
+    },
+    { "id": "e", "kind": "end", "name": "End" }
+  ],
+  "edges": [
+    { "from": "s", "to": "understand" },
+    { "from": "understand", "to": "analyze" },
+    { "from": "analyze", "to": "recommend" },
+    { "from": "recommend", "to": "e" }
+  ]
+}

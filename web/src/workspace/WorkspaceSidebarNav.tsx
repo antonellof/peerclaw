@@ -9,7 +9,7 @@ type NavItem = { view: WorkspaceView; label: string; icon: typeof MessageSquare 
 /** Primary sidebar destinations. */
 const MAIN_NAV: NavItem[] = [
   { view: "chat", label: "Chat", icon: MessageSquare },
-  { view: "workflows", label: "Workflows", icon: Workflow },
+  { view: "workflows", label: "Agents", icon: Workflow },
   { view: "overview", label: "P2P Network", icon: LayoutGrid },
 ]
 
@@ -33,7 +33,7 @@ export const WORKSPACE_VIEW_TITLES: Record<WorkspaceView, string> = {
   skills: "Skills",
   tools: "Tools",
   mcp: "MCP",
-  workflows: "Workflows",
+  workflows: "Agents",
 }
 
 type Props = {

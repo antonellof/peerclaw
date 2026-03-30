@@ -21,43 +21,56 @@ import { cn } from "@/lib/utils"
 
 import type { FlowNodeData } from "./flowCompile"
 
+/* ── Shared pill node shell ─────────────────────────────────────────── */
+
 function shell(
   selected: boolean,
   accent: string,
   icon: React.ReactNode,
-  subtitle: string,
-  title: string,
-  children?: React.ReactNode,
+  label: string,
 ) {
   return (
     <div
       className={cn(
-        "min-w-[168px] rounded-xl border border-border bg-card px-3 py-2.5 shadow-sm",
+        "flex items-center gap-2.5 rounded-full border bg-card px-3 py-1.5 shadow-sm transition-all",
+        "border-border/60 hover:shadow-md",
         selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
       )}
     >
-      <div className="flex items-start gap-2">
-        <span className={cn("mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg", accent)}>{icon}</span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-semibold leading-tight text-foreground">{title}</p>
-          <p className="text-[10px] text-muted-foreground">{subtitle}</p>
-        </div>
-      </div>
-      {children}
+      <span
+        className={cn(
+          "flex size-7 shrink-0 items-center justify-center rounded-full",
+          accent,
+        )}
+      >
+        {icon}
+      </span>
+      <span className="pr-1 text-[13px] font-medium leading-tight text-foreground">
+        {label}
+      </span>
     </div>
   )
 }
+
+/* ── Handle styles ──────────────────────────────────────────────────── */
+
+const hTarget = "!size-2.5 !rounded-full !border-2 !border-background !bg-muted-foreground/60"
+const hSource = "!size-2.5 !rounded-full !border-2 !border-background !bg-primary"
+const hGreen = "!size-2.5 !rounded-full !border-2 !border-background !bg-emerald-500"
+const hRed = "!size-2.5 !rounded-full !border-2 !border-background !bg-rose-500"
+const hCyan = "!size-2.5 !rounded-full !border-2 !border-background !bg-cyan-500"
+
+/* ── Nodes ──────────────────────────────────────────────────────────── */
 
 export const StartNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="source" position={Position.Bottom} className="!size-2 !border-border !bg-primary" />
+      <Handle type="source" position={Position.Bottom} className={hSource} />
       {shell(
         !!selected,
-        "bg-emerald-500/15 text-emerald-400",
-        <CirclePlay className="size-4" />,
-        "Start",
+        "bg-emerald-500 text-white",
+        <CirclePlay className="size-3.5" />,
         d.title || "Start",
       )}
     </>
@@ -69,12 +82,11 @@ export const EndNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
       {shell(
         !!selected,
-        "bg-slate-500/15 text-slate-300",
-        <Flag className="size-4" />,
-        "End",
+        "bg-slate-400 text-white dark:bg-slate-500",
+        <Flag className="size-3.5" />,
         d.title || "End",
       )}
     </>
@@ -87,15 +99,18 @@ export const NoteNode = memo(({ data, selected }: NodeProps) => {
   return (
     <div
       className={cn(
-        "max-w-[220px] rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90",
-        selected && "ring-2 ring-amber-400/50",
+        "max-w-[240px] rounded-lg bg-amber-100 px-3.5 py-2.5 shadow-sm dark:bg-amber-400/20",
+        "border border-amber-300/50 dark:border-amber-500/30",
+        selected && "ring-2 ring-amber-400/60 ring-offset-2 ring-offset-background",
       )}
     >
-      <div className="mb-1 flex items-center gap-1.5 font-medium text-amber-200/90">
+      <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-amber-800 dark:text-amber-200">
         <StickyNote className="size-3.5" />
-        Note
+        Sticky note
       </div>
-      <p className="whitespace-pre-wrap text-[11px] leading-snug">{d.prompt || d.title || "Annotation"}</p>
+      <p className="whitespace-pre-wrap text-[11px] leading-snug text-amber-900/80 dark:text-amber-100/80">
+        {d.prompt || d.title || "Annotation"}
+      </p>
     </div>
   )
 })
@@ -105,13 +120,12 @@ export const ClassifyNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
-      <Handle type="source" position={Position.Bottom} className="!size-2 !border-border !bg-primary" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
+      <Handle type="source" position={Position.Bottom} className={hSource} />
       {shell(
         !!selected,
-        "bg-amber-500/15 text-amber-300",
-        <LayoutList className="size-4" />,
-        "Classify",
+        "bg-amber-500 text-white",
+        <LayoutList className="size-3.5" />,
         d.title || "Classify",
       )}
     </>
@@ -123,27 +137,26 @@ export const UserApprovalNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
       <Handle
         type="source"
         position={Position.Bottom}
         id="approve"
-        className="!size-2 !border-border !bg-emerald-500"
+        className={hGreen}
         style={{ left: "35%" }}
       />
       <Handle
         type="source"
         position={Position.Bottom}
         id="reject"
-        className="!size-2 !border-border !bg-rose-500"
+        className={hRed}
         style={{ left: "65%" }}
       />
       {shell(
         !!selected,
-        "bg-orange-500/15 text-orange-200",
-        <UserCheck className="size-4" />,
-        "User approval",
-        d.title || "Human gate",
+        "bg-orange-500 text-white",
+        <UserCheck className="size-3.5" />,
+        d.title || "User approval",
       )}
     </>
   )
@@ -154,14 +167,13 @@ export const LlmNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
-      <Handle type="source" position={Position.Bottom} className="!size-2 !border-border !bg-primary" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
+      <Handle type="source" position={Position.Bottom} className={hSource} />
       {shell(
         !!selected,
-        "bg-violet-500/15 text-violet-300",
-        <MessageSquare className="size-4" />,
-        "LLM",
-        d.title || "LLM step",
+        "bg-violet-500 text-white",
+        <MessageSquare className="size-3.5" />,
+        d.title || "LLM",
       )}
     </>
   )
@@ -172,13 +184,12 @@ export const AgentNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
-      <Handle type="source" position={Position.Bottom} className="!size-2 !border-border !bg-primary" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
+      <Handle type="source" position={Position.Bottom} className={hSource} />
       {shell(
         !!selected,
-        "bg-sky-500/15 text-sky-300",
-        <Bot className="size-4" />,
-        "Agent",
+        "bg-amber-500 text-white",
+        <Bot className="size-3.5" />,
         d.title || "Agent",
       )}
     </>
@@ -190,28 +201,26 @@ export const IfNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
       <Handle
         type="source"
         position={Position.Bottom}
         id="true"
-        className="!size-2 !border-border !bg-emerald-500"
+        className={hGreen}
         style={{ left: "35%" }}
       />
       <Handle
         type="source"
         position={Position.Bottom}
         id="false"
-        className="!size-2 !border-border !bg-rose-500"
+        className={hRed}
         style={{ left: "65%" }}
       />
       {shell(
         !!selected,
-        "bg-fuchsia-500/15 text-fuchsia-300",
-        <GitBranch className="size-4" />,
-        "If / else",
-        d.title || "Condition",
-        <p className="mt-1 line-clamp-2 font-mono text-[9px] text-muted-foreground">{d.conditionCel || "true"}</p>,
+        "bg-fuchsia-500 text-white",
+        <GitBranch className="size-3.5" />,
+        d.title || "If / else",
       )}
     </>
   )
@@ -222,28 +231,26 @@ export const WhileNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
       <Handle
         type="source"
         position={Position.Bottom}
         id="loop"
-        className="!size-2 !border-border !bg-cyan-500"
+        className={hCyan}
         style={{ left: "35%" }}
       />
       <Handle
         type="source"
         position={Position.Bottom}
         id="exit"
-        className="!size-2 !border-border !bg-muted-foreground"
+        className={hTarget}
         style={{ left: "65%" }}
       />
       {shell(
         !!selected,
-        "bg-cyan-500/15 text-cyan-300",
-        <Repeat className="size-4" />,
-        "While",
-        d.title || "Loop",
-        <p className="mt-1 line-clamp-2 font-mono text-[9px] text-muted-foreground">{d.conditionCel || ""}</p>,
+        "bg-cyan-500 text-white",
+        <Repeat className="size-3.5" />,
+        d.title || "While",
       )}
     </>
   )
@@ -254,27 +261,26 @@ export const GuardrailsNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
       <Handle
         type="source"
         position={Position.Bottom}
         id="pass"
-        className="!size-2 !border-border !bg-emerald-500"
+        className={hGreen}
         style={{ left: "35%" }}
       />
       <Handle
         type="source"
         position={Position.Bottom}
         id="fail"
-        className="!size-2 !border-border !bg-rose-500"
+        className={hRed}
         style={{ left: "65%" }}
       />
       {shell(
         !!selected,
-        "bg-orange-500/15 text-orange-300",
-        <Shield className="size-4" />,
-        "Guardrails",
-        d.title || "Safety check",
+        "bg-orange-500 text-white",
+        <Shield className="size-3.5" />,
+        d.title || "Guardrails",
       )}
     </>
   )
@@ -285,14 +291,13 @@ export const McpNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
-      <Handle type="source" position={Position.Bottom} className="!size-2 !border-border !bg-primary" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
+      <Handle type="source" position={Position.Bottom} className={hSource} />
       {shell(
         !!selected,
-        "bg-indigo-500/15 text-indigo-300",
-        <Wrench className="size-4" />,
-        "MCP",
-        d.title || d.mcpToolId || "MCP tool",
+        "bg-indigo-500 text-white",
+        <Wrench className="size-3.5" />,
+        d.title || d.mcpToolId || "MCP",
       )}
     </>
   )
@@ -303,14 +308,13 @@ export const FileSearchNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
-      <Handle type="source" position={Position.Bottom} className="!size-2 !border-border !bg-primary" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
+      <Handle type="source" position={Position.Bottom} className={hSource} />
       {shell(
         !!selected,
-        "bg-teal-500/15 text-teal-300",
-        <FileSearch className="size-4" />,
-        "File search",
-        d.title || d.vectorCollection || "Vector search",
+        "bg-teal-500 text-white",
+        <FileSearch className="size-3.5" />,
+        d.title || d.vectorCollection || "File search",
       )}
     </>
   )
@@ -321,14 +325,13 @@ export const SetStateNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
-      <Handle type="source" position={Position.Bottom} className="!size-2 !border-border !bg-primary" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
+      <Handle type="source" position={Position.Bottom} className={hSource} />
       {shell(
         !!selected,
-        "bg-lime-500/15 text-lime-300",
-        <Diamond className="size-4" />,
-        "Set state",
-        d.title || d.stateKey || "state",
+        "bg-lime-500 text-white",
+        <Diamond className="size-3.5" />,
+        d.title || d.stateKey || "Set state",
       )}
     </>
   )
@@ -339,14 +342,13 @@ export const TransformNode = memo(({ data, selected }: NodeProps) => {
   const d = (data || {}) as FlowNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!size-2 !border-border !bg-muted-foreground" />
-      <Handle type="source" position={Position.Bottom} className="!size-2 !border-border !bg-primary" />
+      <Handle type="target" position={Position.Top} className={hTarget} />
+      <Handle type="source" position={Position.Bottom} className={hSource} />
       {shell(
         !!selected,
-        "bg-amber-500/15 text-amber-300",
-        <Diamond className="size-4" />,
-        "Transform",
-        d.title || "Copy to state",
+        "bg-amber-600 text-white",
+        <Diamond className="size-3.5" />,
+        d.title || "Transform",
       )}
     </>
   )

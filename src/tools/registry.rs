@@ -222,6 +222,12 @@ impl ToolRegistry {
 
         // Builtin tools
         for (name, tool) in &self.builtin_tools {
+            let schema = tool.parameters_schema();
+            let required_params = schema
+                .get("required")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
             tools.push(ToolInfo {
                 name: name.clone(),
                 description: tool.description().to_string(),
@@ -229,6 +235,7 @@ impl ToolRegistry {
                 location: ToolLocation::Local,
                 price: 0, // Builtin tools are free
                 peer_id: Some(self.local_peer_id.clone()),
+                required_params,
             });
         }
 
@@ -242,6 +249,7 @@ impl ToolRegistry {
                 location: ToolLocation::Local,
                 price: 0,
                 peer_id: Some(self.local_peer_id.clone()),
+                required_params: vec![],
             });
         }
 
@@ -256,6 +264,7 @@ impl ToolRegistry {
                     location: ToolLocation::Remote,
                     price: best.price_per_call,
                     peer_id: Some(best.peer_id.clone()),
+                    required_params: vec![],
                 });
             }
         }
@@ -392,6 +401,8 @@ pub struct ToolInfo {
     pub location: ToolLocation,
     pub price: u64,
     pub peer_id: Option<String>,
+    /// Required parameter names from the tool schema (for LLM prompt hints).
+    pub required_params: Vec<String>,
 }
 
 #[cfg(test)]

@@ -47,14 +47,32 @@ impl AgentLibraryEntry {
     }
 }
 
+fn load_flow_template(json: &str) -> Option<crate::flow::FlowSpec> {
+    serde_json::from_str(json).ok()
+}
+
 fn minimal_example_flow() -> Option<crate::flow::FlowSpec> {
-    const RAW: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/flows/minimal.json"));
-    serde_json::from_str(RAW).ok()
+    load_flow_template(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/flows/minimal.json")))
 }
 
 fn interpreter_example_flow() -> Option<crate::flow::FlowSpec> {
-    const RAW: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/flows/interpreter-linear.json"));
-    serde_json::from_str(RAW).ok()
+    load_flow_template(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/flows/interpreter-linear.json")))
+}
+
+fn deep_researcher_flow() -> Option<crate::flow::FlowSpec> {
+    load_flow_template(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/flows/deep-researcher.json")))
+}
+
+fn code_reviewer_flow() -> Option<crate::flow::FlowSpec> {
+    load_flow_template(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/flows/code-reviewer.json")))
+}
+
+fn creative_writer_flow() -> Option<crate::flow::FlowSpec> {
+    load_flow_template(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/flows/creative-writer.json")))
+}
+
+fn data_analyst_flow() -> Option<crate::flow::FlowSpec> {
+    load_flow_template(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/flows/data-analyst.json")))
 }
 
 fn crew_example_flow() -> Option<crate::flow::FlowSpec> {
@@ -102,16 +120,58 @@ pub fn builtin_entries() -> Vec<AgentLibraryEntry> {
         });
     }
 
-    // Single-agent presets (minimal flows: Start → Agent → End)
-    let agent_presets: &[(&str, &str, &str, &str)] = &[
-        ("builtin-agent-assistant", "Assistant", "templates/agents/assistant.toml", "Personal assistant workflow."),
-        ("builtin-agent-coder", "Coder", "templates/agents/coder.toml", "Coding-focused workflow."),
-        ("builtin-agent-researcher", "Researcher", "templates/agents/researcher.toml", "Research workflow."),
-        ("builtin-agent-data-analyst", "Data analyst", "templates/agents/data-analyst.toml", "Analysis workflow."),
-        ("builtin-agent-monitor", "Monitor", "templates/agents/monitor.toml", "Monitoring workflow."),
-        ("builtin-agent-telegram-bot", "Telegram bot", "templates/agents/telegram-bot.toml", "Telegram channel bot."),
+    // Multi-step agents (sophisticated flows with classify, guardrails, multi-agent chains)
+    if let Some(spec) = deep_researcher_flow() {
+        v.push(AgentLibraryEntry {
+            id: "builtin-agent-researcher".into(),
+            name: "Deep Researcher".into(),
+            description: "Classify → guardrail → research → synthesize into a polished report.".into(),
+            kind: "flow".into(),
+            flow_spec: Some(spec),
+            task_type: None,
+            source_path: Some("templates/flows/deep-researcher.json".into()),
+        });
+    }
+    if let Some(spec) = code_reviewer_flow() {
+        v.push(AgentLibraryEntry {
+            id: "builtin-agent-coder".into(),
+            name: "Code Reviewer".into(),
+            description: "Analyze → refactor suggestions → formatted review with severity levels.".into(),
+            kind: "flow".into(),
+            flow_spec: Some(spec),
+            task_type: None,
+            source_path: Some("templates/flows/code-reviewer.json".into()),
+        });
+    }
+    if let Some(spec) = creative_writer_flow() {
+        v.push(AgentLibraryEntry {
+            id: "builtin-agent-writer".into(),
+            name: "Creative Writer".into(),
+            description: "Classify → outline → draft → editor pass for polished creative writing.".into(),
+            kind: "flow".into(),
+            flow_spec: Some(spec),
+            task_type: None,
+            source_path: Some("templates/flows/creative-writer.json".into()),
+        });
+    }
+    if let Some(spec) = data_analyst_flow() {
+        v.push(AgentLibraryEntry {
+            id: "builtin-agent-data-analyst".into(),
+            name: "Data Analyst".into(),
+            description: "Understand → analyze → insights & recommendations pipeline.".into(),
+            kind: "flow".into(),
+            flow_spec: Some(spec),
+            task_type: None,
+            source_path: Some("templates/flows/data-analyst.json".into()),
+        });
+    }
+
+    // Simple single-agent presets
+    let simple_presets: &[(&str, &str, &str)] = &[
+        ("builtin-agent-assistant", "Assistant", "General-purpose personal assistant."),
+        ("builtin-agent-monitor", "Monitor", "System monitoring agent."),
     ];
-    for &(id, name, path, desc) in agent_presets {
+    for &(id, name, desc) in simple_presets {
         v.push(AgentLibraryEntry {
             id: id.into(),
             name: name.into(),
@@ -119,7 +179,7 @@ pub fn builtin_entries() -> Vec<AgentLibraryEntry> {
             kind: "flow".into(),
             flow_spec: Some(crate::flow::FlowSpec::single_agent(name)),
             task_type: None,
-            source_path: Some(path.into()),
+            source_path: None,
         });
     }
     v

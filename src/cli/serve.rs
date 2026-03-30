@@ -327,7 +327,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     };
 
     let crew_store = crate::crew::CrewRunStore::new();
-    let flow_store = crate::flow::FlowRunStore::new();
+    let flow_store = crate::flow::FlowRunStore::with_ws(ws_control_tx.clone());
     let agent_library_path = crate::bootstrap::base_dir().join("agent_library.json");
     let agent_library_user = std::sync::Arc::new(tokio::sync::RwLock::new(
         crate::agent_library::load_user_entries(&agent_library_path),
@@ -970,6 +970,7 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
                     let mcp = st.mcp_manager.read().await.clone();
                     fs.update_status(&job.run_id, "running");
                     fs.push_log(&job.run_id, "[flow] started");
+                    crate::web::broadcast_flow_log(&ws, &job.run_id, "[flow] started", "running");
                     crate::web::broadcast_flows_changed(&ws);
                     let extras = crate::agent::AgentTaskExtras {
                         use_mcp: mcp.is_some(),

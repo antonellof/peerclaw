@@ -1,0 +1,41 @@
+{
+  "name": "Code Reviewer",
+  "nodes": [
+    { "id": "s", "kind": "start", "name": "Start" },
+    {
+      "id": "analyze",
+      "kind": "agent",
+      "name": "Code analyzer",
+      "instructions": "You are an expert code analyst. Examine the provided code carefully and produce a structured analysis covering:\n1. **Correctness**: Logic errors, off-by-one, null/undefined risks, race conditions\n2. **Edge cases**: Missing input validation, boundary conditions, error handling gaps\n3. **Performance**: Unnecessary allocations, O(n²) where O(n) is possible, missing memoization\n4. **Security**: Injection risks, improper auth checks, data exposure\n5. **Type safety**: Any/unknown usage, missing null checks, unsafe casts\n\nFor each issue found, specify the exact location and severity (critical/warning/info).\nOutput as structured JSON with fields: issues (array of {severity, location, description, suggestion}), summary.",
+      "prompt": "Analyze this code:\n\n{{input_as_text}}",
+      "output_format": "json",
+      "temperature": 0.2,
+      "max_tokens": 4096
+    },
+    {
+      "id": "refactor",
+      "kind": "agent",
+      "name": "Refactor advisor",
+      "instructions": "You are a senior software engineer focused on code quality. Given the code and the analysis from the previous step, suggest concrete refactors:\n- Identify repeated patterns that could be abstracted\n- Suggest better naming for unclear variables/functions\n- Recommend structural improvements (extract function, simplify conditionals)\n- Propose test cases for uncovered edge cases\n\nBe specific: show before/after code snippets for each suggestion. Prioritize suggestions by impact.",
+      "prompt": "Given this code and analysis, suggest refactors:\n\nCode:\n{{input_as_text}}\n\nAnalysis:\n{{analyze}}",
+      "temperature": 0.3,
+      "max_tokens": 4096
+    },
+    {
+      "id": "format",
+      "kind": "agent",
+      "name": "Format review",
+      "instructions": "You are a code review formatter. Combine the analysis and refactoring suggestions into a clean, actionable code review. Use this structure:\n\n## Summary\nOne paragraph overview.\n\n## Critical Issues\nMust-fix items with code snippets.\n\n## Warnings\nShould-fix items.\n\n## Suggestions\nNice-to-have improvements with before/after.\n\n## Recommended Tests\nTest cases to add.\n\nBe direct and actionable. No fluff.",
+      "prompt": "Format this as a code review:\n\nAnalysis: {{analyze}}\n\nRefactoring suggestions: {{refactor}}",
+      "temperature": 0.2,
+      "max_tokens": 4096
+    },
+    { "id": "e", "kind": "end", "name": "End" }
+  ],
+  "edges": [
+    { "from": "s", "to": "analyze" },
+    { "from": "analyze", "to": "refactor" },
+    { "from": "refactor", "to": "format" },
+    { "from": "format", "to": "e" }
+  ]
+}

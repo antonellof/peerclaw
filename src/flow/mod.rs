@@ -169,13 +169,36 @@ pub struct FlowRunRecord {
 
 pub struct FlowRunStore {
     runs: RwLock<HashMap<String, FlowRunRecord>>,
+    /// Optional WebSocket broadcast sender — when set, every log/status change is
+    /// pushed as a `flow_log` event so the frontend can stream in real-time.
+    ws_tx: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
 }
 
 impl FlowRunStore {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             runs: RwLock::new(HashMap::new()),
+            ws_tx: None,
         })
+    }
+
+    /// Create a store that broadcasts flow log events over the WebSocket control plane.
+    pub fn with_ws(ws_tx: tokio::sync::broadcast::Sender<serde_json::Value>) -> Arc<Self> {
+        Arc::new(Self {
+            runs: RwLock::new(HashMap::new()),
+            ws_tx: Some(ws_tx),
+        })
+    }
+
+    fn broadcast(&self, run_id: &str, line: &str, status: &str) {
+        if let Some(tx) = &self.ws_tx {
+            let _ = tx.send(serde_json::json!({
+                "type": "flow_log",
+                "run_id": run_id,
+                "line": line,
+                "status": status,
+            }));
+        }
     }
 
     pub fn insert_pending(&self, id: impl Into<String>, spec: &FlowSpec) -> String {
@@ -191,6 +214,7 @@ impl FlowRunStore {
             logs: Some(vec!["[flow] queued".to_string()]),
         };
         self.runs.write().insert(id.clone(), rec);
+        self.broadcast(&id, "[flow] queued", "pending");
         id
     }
 
@@ -201,9 +225,18 @@ impl FlowRunStore {
     }
 
     pub fn push_log(&self, id: &str, line: impl Into<String>) {
-        if let Some(r) = self.runs.write().get_mut(id) {
-            r.logs.get_or_insert_with(Vec::new).push(line.into());
+        let line = line.into();
+        let status;
+        {
+            let mut runs = self.runs.write();
+            if let Some(r) = runs.get_mut(id) {
+                r.logs.get_or_insert_with(Vec::new).push(line.clone());
+                status = r.status.clone();
+            } else {
+                return;
+            }
         }
+        self.broadcast(id, &line, &status);
     }
 
     pub fn complete_ok(&self, id: &str, out: FlowRunOutput) {
@@ -216,6 +249,7 @@ impl FlowRunStore {
                 .get_or_insert_with(Vec::new)
                 .push("[flow] completed successfully".to_string());
         }
+        self.broadcast(id, "[flow] completed successfully", "completed");
     }
 
     pub fn complete_err(&self, id: &str, err: impl Into<String>) {
@@ -228,6 +262,7 @@ impl FlowRunStore {
                 .get_or_insert_with(Vec::new)
                 .push(format!("[flow] failed: {msg}"));
         }
+        self.broadcast(id, &format!("[flow] failed: {msg}"), "failed");
     }
 
     pub fn get(&self, id: &str) -> Option<FlowRunRecord> {

@@ -271,6 +271,21 @@ pub fn broadcast_flows_changed(tx: &broadcast::Sender<serde_json::Value>) {
     let _ = tx.send(serde_json::json!({ "type": "flows_changed" }));
 }
 
+/// Push a per-line log event so the frontend can stream flow logs without polling.
+pub fn broadcast_flow_log(
+    tx: &broadcast::Sender<serde_json::Value>,
+    run_id: &str,
+    line: &str,
+    status: &str,
+) {
+    let _ = tx.send(serde_json::json!({
+        "type": "flow_log",
+        "run_id": run_id,
+        "line": line,
+        "status": status,
+    }));
+}
+
 /// Push agentic loop progress into a web [`WebTask`] so the UI can poll live steps.
 #[derive(Clone)]
 struct AgenticTaskProgressSink {

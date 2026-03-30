@@ -10,6 +10,12 @@ type WsStatusPayload = {
   active_jobs?: number
 }
 
+export type FlowLogEvent = {
+  run_id: string
+  line: string
+  status: string
+}
+
 export function useControlWebSocket(handlers: {
   onStatus?: (data: WsStatusPayload) => void
   onTasksChanged?: () => void
@@ -17,6 +23,8 @@ export function useControlWebSocket(handlers: {
   onTaskStreamDelta?: (taskId: string, text: string) => void
   /** Node persisted workflow library updated (`POST/DELETE /api/agents/library`). */
   onAgentsLibraryChanged?: () => void
+  /** Real-time flow/agent run log lines streamed from the node. */
+  onFlowLog?: (event: FlowLogEvent) => void
 }) {
   const handlersRef = useRef(handlers)
 
@@ -34,6 +42,9 @@ export function useControlWebSocket(handlers: {
           data?: WsStatusPayload
           task_id?: string
           text?: string
+          run_id?: string
+          line?: string
+          status?: string
         }
         if (msg.type === "status" && msg.data) {
           handlersRef.current.onStatus?.(msg.data)
@@ -46,6 +57,13 @@ export function useControlWebSocket(handlers: {
         }
         if (msg.type === "agents_library_changed") {
           handlersRef.current.onAgentsLibraryChanged?.()
+        }
+        if (msg.type === "flow_log" && msg.run_id && msg.line != null) {
+          handlersRef.current.onFlowLog?.({
+            run_id: msg.run_id,
+            line: msg.line,
+            status: msg.status ?? "running",
+          })
         }
       } catch {
         /* ignore */

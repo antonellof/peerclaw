@@ -778,7 +778,13 @@ impl AgentRuntime {
             }
             for tool in &available {
                 let desc: String = tool.description.chars().take(200).collect();
-                prompt.push_str(&format!("- {}: {}\n", tool.name, desc));
+                // Include required parameter names so the model knows the schema
+                let params_hint = if tool.required_params.is_empty() {
+                    String::new()
+                } else {
+                    format!(" Params: {}", tool.required_params.join(", "))
+                };
+                prompt.push_str(&format!("- {}: {}{}\n", tool.name, desc, params_hint));
             }
         }
 

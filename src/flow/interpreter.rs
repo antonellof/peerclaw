@@ -971,7 +971,8 @@ async fn run_interpreter(
                     inference_sink.clone(),
                 );
                 let ctx_block = prior_context_block(spec, &cur, &outputs);
-                let user = interpolate_inputs(&node.prompt, inputs);
+                let tpl_ctx = build_template_context(inputs, &outputs);
+                let user = interpolate_context(&node.prompt, &tpl_ctx);
                 let user_block = format!("{ctx_block}\n\n## Task\n{user}\n");
                 let session_id_opt: Option<String> = if node.include_chat_history {
                     Some(if node.agent_session_key.trim().is_empty() {
@@ -1068,7 +1069,8 @@ async fn run_interpreter(
                 continue;
             }
             "" | "llm" => {
-                let prompt = interpolate_inputs(&node.prompt, inputs);
+                let tpl_ctx = build_template_context(inputs, &outputs);
+                let prompt = interpolate_context(&node.prompt, &tpl_ctx);
                 let ctx_block = prior_context_block(spec, &cur, &outputs);
                 let mut full = format!("{ctx_block}\n\n{prompt}");
                 if node.output_format.eq_ignore_ascii_case("json") {

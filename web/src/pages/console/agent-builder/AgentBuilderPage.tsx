@@ -6,7 +6,6 @@ import {
   Controls,
   type Connection,
   type Edge,
-  MiniMap,
   type Node,
   Panel,
   ReactFlow,
@@ -17,24 +16,42 @@ import {
   useStore,
 } from "@xyflow/react"
 import {
+  Bot,
   BookmarkPlus,
   ChevronDown,
   ChevronLeft,
   ChevronUp,
+  CirclePlay,
   Code2,
+  FolderOpen,
+  Diamond,
+  FileSearch,
+  Flag,
+  GitBranch,
   GripHorizontal,
+  LayoutList,
   Loader2,
-  MoreHorizontal,
+  type LucideIcon,
+  MessageSquare,
   Pencil,
   Play,
+  Plus,
+  Redo2,
+  Repeat,
   Settings,
-  SlidersHorizontal,
+  Shield,
   Sparkles,
+  StickyNote,
   Terminal,
-  Workflow,
+  Trash2,
+  Undo2,
+  UserCheck,
+  Wrench,
 } from "lucide-react"
 
 import {
+  deleteAgentLibraryEntry,
+  fetchAgentLibrary,
   fetchFlowRun,
   fetchFlowRuns,
   fetchMcpStatus,
@@ -42,6 +59,7 @@ import {
   kickoffFlow,
   upsertAgentLibraryEntry,
   validateFlow,
+  type AgentLibraryEntryJson,
   type FlowRunRecordJson,
   type FlowSpecJson,
   type McpToolListItem,
@@ -55,12 +73,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -110,36 +122,22 @@ function newId() {
   return `n_${crypto.randomUUID().slice(0, 8)}`
 }
 
-type PaletteItem = { type: string; label: string; section: string; hint: string }
+type PaletteItem = { type: string; label: string; section: string; hint: string; icon: LucideIcon }
 
 const PALETTE: PaletteItem[] = [
-  { section: "Core", type: "start", label: "Start", hint: "Interpreter entry (exactly one per flow)" },
-  { section: "Core", type: "agent", label: "Agent", hint: "ReAct agent with tools" },
-  { section: "Core", type: "classify", label: "Classify", hint: "Routes to LLM with category list" },
-  { section: "Core", type: "llm", label: "LLM", hint: "Single model call" },
-  { section: "Core", type: "end", label: "End", hint: "Stops the run" },
-  { section: "Core", type: "note", label: "Note", hint: "Canvas-only (not exported)" },
-  { section: "Tools", type: "fileSearch", label: "File search", hint: "vectX semantic search" },
-  { section: "Tools", type: "guardrails", label: "Guardrails", hint: "SafetyLayer pass / fail branches" },
-  {
-    section: "Tools",
-    type: "mcp",
-    label: "MCP",
-    hint: "Tools from node MCP config (same as MCP console)",
-  },
-  { section: "Logic", type: "if", label: "If / else", hint: "CEL → true / false edges" },
-  { section: "Logic", type: "while", label: "While", hint: "CEL → loop / exit edges" },
-  { section: "Logic", type: "userApproval", label: "User approval", hint: "inputs.human_approval: approve|reject" },
-  { section: "Data", type: "transform", label: "Transform", hint: "Copy prior output into state" },
-  { section: "Data", type: "setState", label: "Set state", hint: "JSON value into state map" },
+  { section: "Core", type: "agent", label: "Agent", hint: "ReAct agent with tools", icon: Bot },
+  { section: "Core", type: "classify", label: "Classify", hint: "Routes to LLM with category list", icon: LayoutList },
+  { section: "Core", type: "end", label: "End", hint: "Stops the run", icon: Flag },
+  { section: "Core", type: "note", label: "Note", hint: "Canvas-only (not exported)", icon: StickyNote },
+  { section: "Tools", type: "fileSearch", label: "File search", hint: "vectX semantic search", icon: FileSearch },
+  { section: "Tools", type: "guardrails", label: "Guardrails", hint: "SafetyLayer pass / fail branches", icon: Shield },
+  { section: "Tools", type: "mcp", label: "MCP", hint: "Tools from node MCP config", icon: Wrench },
+  { section: "Logic", type: "if", label: "If / else", hint: "CEL → true / false edges", icon: GitBranch },
+  { section: "Logic", type: "while", label: "While", hint: "CEL → loop / exit edges", icon: Repeat },
+  { section: "Logic", type: "userApproval", label: "User approval", hint: "inputs.human_approval: approve|reject", icon: UserCheck },
+  { section: "Data", type: "transform", label: "Transform", hint: "Copy prior output into state", icon: Diamond },
+  { section: "Data", type: "setState", label: "Set state", hint: "JSON value into state map", icon: Diamond },
 ]
-
-const PALETTE_ACCENT: Record<string, string> = {
-  Core: "bg-sky-500/20 text-sky-300",
-  Tools: "bg-amber-500/20 text-amber-200",
-  Logic: "bg-fuchsia-500/20 text-fuchsia-200",
-  Data: "bg-violet-500/20 text-violet-200",
-}
 
 function CanvasSync({ onGraph }: { onGraph: (nodes: Node[], edges: Edge[]) => void }) {
   const nodes = useStore((s) => s.nodes)
@@ -152,36 +150,33 @@ function CanvasSync({ onGraph }: { onGraph: (nodes: Node[], edges: Edge[]) => vo
 
 function PaletteSidebar({ preview, onAdd }: { preview: boolean; onAdd: (type: string) => void }) {
   return (
-    <ScrollArea className="flex-1 px-2 pb-4">
+    <ScrollArea className="flex-1 px-3 pb-4 pt-1">
       {["Core", "Tools", "Logic", "Data"].map((sec) => (
-        <div key={sec} className="mb-3">
-          <p className="mb-1.5 flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span className="size-1 rounded-full bg-primary/50" aria-hidden />
+        <div key={sec} className="mb-4">
+          <p className="mb-2 px-0.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">
             {sec}
           </p>
-          <div className="flex flex-col gap-1">
-            {PALETTE.filter((p) => p.section === sec).map((p) => (
-              <Button
-                key={p.type}
-                type="button"
-                variant="outline"
-                size="sm"
-                title={p.hint}
-                className="h-auto justify-start gap-2 py-2 pr-2 text-left text-xs transition-colors hover:border-primary/25 hover:bg-muted/40"
-                disabled={preview}
-                onClick={() => onAdd(p.type)}
-              >
-                <span
+          <div className="flex flex-col gap-0.5">
+            {PALETTE.filter((p) => p.section === sec).map((p) => {
+              const Icon = p.icon
+              return (
+                <button
+                  key={p.type}
+                  type="button"
+                  title={p.hint}
                   className={cn(
-                    "flex size-7 shrink-0 items-center justify-center rounded-md text-[10px] font-bold",
-                    PALETTE_ACCENT[sec] ?? "bg-muted text-muted-foreground",
+                    "flex items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] transition-colors",
+                    "text-foreground/90 hover:bg-muted/50",
+                    preview && "pointer-events-none opacity-40",
                   )}
+                  disabled={preview}
+                  onClick={() => onAdd(p.type)}
                 >
-                  {p.label.slice(0, 1)}
-                </span>
-                <span className="min-w-0 flex-1 leading-tight">{p.label}</span>
-              </Button>
-            ))}
+                  <Icon className="size-4 shrink-0 text-muted-foreground" />
+                  <span>{p.label}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
       ))}
@@ -209,6 +204,11 @@ function AgentBuilderInner() {
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+
+  // Agent library — load/save/edit existing agents
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [library, setLibrary] = useState<AgentLibraryEntryJson[]>([])
+  const [loadedAgentId, setLoadedAgentId] = useState<string | null>(null)
   const [inputsJson, setInputsJson] = useState(DEMO_INPUTS)
   const [codeOpen, setCodeOpen] = useState(false)
   const [codeText, setCodeText] = useState("")
@@ -304,6 +304,55 @@ function AgentBuilderInner() {
     const t = setInterval(refreshMcpCatalog, 45_000)
     return () => clearInterval(t)
   }, [refreshMcpCatalog])
+
+  const refreshLibrary = useCallback(() => {
+    void fetchAgentLibrary()
+      .then(setLibrary)
+      .catch(() => setLibrary([]))
+  }, [])
+
+  useEffect(() => {
+    refreshLibrary()
+  }, [refreshLibrary])
+
+  const loadAgent = useCallback(
+    (entry: AgentLibraryEntryJson) => {
+      if (!entry.flow_spec) return
+      const { nodes: nn, edges: ee } = flowSpecToReactFlow(entry.flow_spec)
+      setNodes(nn)
+      setEdges(ee)
+      setFlowName(entry.name)
+      setLoadedAgentId(entry.id)
+      setLibraryOpen(false)
+      setSelectedNodeId(null)
+      setSelectedEdgeId(null)
+      setValidateMsg(null)
+    },
+    [setNodes, setEdges],
+  )
+
+  const deleteAgent = useCallback(
+    async (id: string) => {
+      const r = await deleteAgentLibraryEntry(id)
+      if (r.ok) {
+        refreshLibrary()
+        if (loadedAgentId === id) setLoadedAgentId(null)
+      }
+    },
+    [refreshLibrary, loadedAgentId],
+  )
+
+  const newAgent = useCallback(() => {
+    const g = demoGraph()
+    setNodes(g.nodes)
+    setEdges(g.edges)
+    setFlowName("New agent")
+    setLoadedAgentId(null)
+    setLibraryOpen(false)
+    setSelectedNodeId(null)
+    setSelectedEdgeId(null)
+    setValidateMsg(null)
+  }, [setNodes, setEdges])
 
   const spec = useMemo(
     () => compileFlowSpec(nodesSnap, edgesSnap, flowName.trim() || "agent"),
@@ -450,83 +499,72 @@ function AgentBuilderInner() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/80 bg-card/50 px-3 py-2 shadow-sm backdrop-blur-sm md:px-4">
-        <div className="flex min-w-0 flex-1 items-center gap-1">
+      <header className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-card/60 px-3 py-2 backdrop-blur-sm md:px-4">
+        {/* Left: back + name + badge */}
+        <div className="flex min-w-0 items-center gap-1.5">
           <Button
             type="button"
             variant="ghost"
             size="icon"
             className="size-8 shrink-0"
-            aria-label="Back to chat"
+            aria-label="Back"
             onClick={() => setView("chat")}
           >
             <ChevronLeft className="size-4" />
           </Button>
           <Input
-            className="h-8 max-w-[240px] border-0 bg-transparent px-1 text-sm font-semibold tracking-tight focus-visible:ring-0"
+            className="h-8 max-w-[200px] border-0 bg-transparent px-1 text-sm font-semibold tracking-tight focus-visible:ring-0"
             value={flowName}
             onChange={(e) => setFlowName(e.target.value)}
             disabled={preview}
           />
-          <Badge variant="secondary" className="text-[10px] font-normal">
-            Draft
+          <Badge variant="secondary" className="shrink-0 text-[10px] font-normal">
+            {loadedAgentId ? "Saved" : "Draft"}
           </Badge>
         </div>
-        <div className="flex flex-wrap items-center justify-center gap-0.5 rounded-lg border border-border/60 bg-muted/30 p-0.5">
-          <Button
-            type="button"
-            size="sm"
-            variant={!preview ? "secondary" : "ghost"}
-            className="h-7 gap-1 rounded-md px-2.5 text-xs"
-            onClick={() => setPreview(false)}
-          >
-            <Pencil className="size-3.5" />
-            Design
+
+        {/* Center: canvas tools */}
+        <div className="flex items-center gap-1">
+          <Button type="button" variant="ghost" size="icon" className="size-8" title="New agent" onClick={newAgent}>
+            <Plus className="size-3.5" />
           </Button>
           <Button
             type="button"
-            size="sm"
-            variant={preview ? "secondary" : "ghost"}
-            className="h-7 gap-1 rounded-md px-2.5 text-xs"
-            onClick={() => {
-              setPreview(true)
-              setRunPanelTab("logs")
-              setRunPanelCollapsed(false)
-            }}
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            title="Open saved agent"
+            onClick={() => { refreshLibrary(); setLibraryOpen(true) }}
           >
-            <Play className="size-3.5" />
-            Run
+            <FolderOpen className="size-3.5" />
+          </Button>
+          <div className="mx-0.5 h-4 w-px bg-border/40" />
+          <Button type="button" variant="ghost" size="icon" className="size-8" title="Edit name" onClick={() => setSettingsOpen(true)}>
+            <Pencil className="size-3.5" />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className="size-8" title="Undo" disabled>
+            <Undo2 className="size-3.5" />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className="size-8" title="Redo" disabled>
+            <Redo2 className="size-3.5" />
           </Button>
         </div>
-        <div className="flex flex-wrap items-center gap-1 md:flex-1 md:justify-end">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant="ghost" className="size-8 p-0">
-                <MoreHorizontal className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setView("chat")}>Chat</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setView("chat")}>Chat</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setView("overview")}>P2P network</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSettingsOpen(true)}>Settings…</DropdownMenuItem>
-              <DropdownMenuItem onClick={openCode}>Open Flow JSON…</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 px-2"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings className="size-3.5" />
+
+        <div className="flex-1" />
+
+        {/* Right: actions */}
+        <div className="flex items-center gap-1.5">
+          <Button type="button" size="sm" variant="ghost" className="size-8 p-0" title="Settings" onClick={() => setSettingsOpen(true)}>
+            <Settings className="size-4" />
           </Button>
+
+          <div className="mx-1 h-5 w-px bg-border/60" />
+
           <Button
             type="button"
             size="sm"
-            variant="outline"
-            className="h-8 gap-1 text-xs"
+            variant="ghost"
+            className="h-8 gap-1.5 text-xs font-medium"
             disabled={busy !== null}
             onClick={runEvaluate}
           >
@@ -536,10 +574,10 @@ function AgentBuilderInner() {
           <Button
             type="button"
             size="sm"
-            variant="outline"
-            className="h-8 gap-1 text-xs"
+            variant="ghost"
+            className="h-8 gap-1.5 text-xs font-medium"
             disabled={busy !== null || preview}
-            title="Store on the node (agent_library.json) and select this workflow in Chat → Workflows"
+            title="Save to agent library"
             onClick={() => {
               setBusy("l")
               setValidateMsg(null)
@@ -551,18 +589,22 @@ function AgentBuilderInner() {
                   setBusy(null)
                   return
                 }
-                const id = `user-flow-${crypto.randomUUID().slice(0, 12)}`
+                const id = loadedAgentId ?? `user-flow-${crypto.randomUUID().slice(0, 12)}`
                 void upsertAgentLibraryEntry({
                   id,
-                  name: flowName.trim() || "Workflow",
-                  description: "Saved from workflow builder",
+                  name: flowName.trim() || "Agent",
+                  description: "Saved from agent builder",
                   kind: "flow",
                   flow_spec: spec,
                 }).then((r) => {
                   setBusy(null)
+                  if (r.ok) {
+                    setLoadedAgentId(id)
+                    refreshLibrary()
+                  }
                   setValidateMsg(
                     r.ok
-                      ? `Saved to workflow library. In Chat, open Workflows and pick «${flowName.trim() || "Workflow"}».`
+                      ? `Saved «${flowName.trim() || "Agent"}». Select it in Chat → Agents.`
                       : (r.error ?? "Could not save to library."),
                   )
                 })
@@ -570,9 +612,15 @@ function AgentBuilderInner() {
             }}
           >
             {busy === "l" ? <Loader2 className="size-3.5 animate-spin" /> : <BookmarkPlus className="size-3.5" />}
-            Save to library
+            Save
           </Button>
-          <Button type="button" size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={openCode}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 text-xs font-medium"
+            onClick={openCode}
+          >
             <Code2 className="size-3.5" />
             Code
           </Button>
@@ -580,20 +628,13 @@ function AgentBuilderInner() {
             type="button"
             size="sm"
             variant="default"
-            className="h-8 gap-1 text-xs"
-            onClick={openCode}
-          >
-            Publish
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            className="h-8 gap-1 text-xs"
+            className="h-8 gap-1.5 rounded-lg px-4 text-xs font-semibold"
             disabled={busy !== null}
             onClick={() => {
               setBusy("r")
               setRunMsg(null)
               setRunPanelTab("logs")
+              setRunPanelCollapsed(false)
               let inputs: unknown = {}
               try {
                 inputs = JSON.parse(inputsJson || "{}") as unknown
@@ -617,7 +658,7 @@ function AgentBuilderInner() {
             }}
           >
             {busy === "r" ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-            Run
+            Publish
           </Button>
         </div>
       </header>
@@ -627,7 +668,7 @@ function AgentBuilderInner() {
           <DialogHeader>
             <DialogTitle>Agent settings</DialogTitle>
             <DialogDescription>
-              Flows execute on this node using your local models, the same <strong className="text-foreground">MCP</strong>{" "}
+              Agents execute on this node using your local models, the same <strong className="text-foreground">MCP</strong>{" "}
               servers as the MCP console / Settings, and the shared <strong className="text-foreground">vectX</strong> vector
               store. MCP nodes list tools from <code className="text-foreground/90">/api/mcp/status</code>. File search uses
               collection names from the API or console.
@@ -651,12 +692,81 @@ function AgentBuilderInner() {
         </DialogContent>
       </Dialog>
 
+      {/* Agent library browser */}
+      <Dialog open={libraryOpen} onOpenChange={setLibraryOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Saved agents</DialogTitle>
+            <DialogDescription>
+              Load an agent into the builder to edit it, or create a new one.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] space-y-1 overflow-y-auto">
+            {library.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No agents saved yet. Build one and click Save.
+              </p>
+            ) : (
+              library.map((entry) => (
+                <div
+                  key={entry.id}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors",
+                    loadedAgentId === entry.id
+                      ? "border-primary/40 bg-primary/5"
+                      : "border-border/50 hover:bg-muted/40",
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{entry.name}</p>
+                    {entry.description ? (
+                      <p className="truncate text-xs text-muted-foreground">{entry.description}</p>
+                    ) : null}
+                    <p className="mt-0.5 font-mono text-[10px] text-muted-foreground/60">
+                      {entry.id.slice(0, 16)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1 text-xs"
+                      disabled={!entry.flow_spec}
+                      onClick={() => loadAgent(entry)}
+                    >
+                      <FolderOpen className="size-3" />
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="size-7 text-muted-foreground hover:text-destructive"
+                      title="Delete agent"
+                      onClick={() => void deleteAgent(entry.id)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="flex justify-between">
+            <Button type="button" variant="outline" size="sm" className="gap-1.5 text-xs" onClick={newAgent}>
+              <Plus className="size-3.5" />
+              New agent
+            </Button>
+            <Button type="button" variant="ghost" size="sm" className="text-xs" onClick={() => setLibraryOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-52 shrink-0 flex-col border-r border-border/80 bg-gradient-to-b from-card/50 to-card/20 md:flex">
-          <p className="flex items-center gap-2 border-b border-border/50 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <Workflow className="size-3.5 text-primary/80" aria-hidden />
-            Add nodes
-          </p>
+        <aside className="hidden w-48 shrink-0 flex-col border-r border-border/50 bg-card/30 md:flex">
           <PaletteSidebar preview={preview} onAdd={addPaletteNode} />
         </aside>
 
@@ -674,31 +784,27 @@ function AgentBuilderInner() {
             nodesConnectable={!preview}
             elementsSelectable
             fitView
-            fitViewOptions={{ padding: 0.2 }}
+            fitViewOptions={{ padding: 0.25 }}
             deleteKeyCode={preview ? null : ["Backspace", "Delete"]}
-            className="bg-muted/20"
+            defaultEdgeOptions={{ type: "smoothstep", animated: false }}
+            className="bg-muted/10"
           >
-            <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-            <Controls className="!bg-card !border-border !shadow-md" />
-            <MiniMap
-              className="!bg-card/90 !border-border"
-              maskColor="hsl(240 6% 10% / 0.65)"
-              nodeColor={() => "hsl(142 76% 36%)"}
+            <Background variant={BackgroundVariant.Dots} gap={20} size={0.8} className="opacity-40" />
+            <Controls
+              className="!rounded-xl !border-border/50 !bg-card/90 !shadow-lg !backdrop-blur-sm"
+              position="bottom-center"
+              showInteractive={false}
             />
             <Panel position="top-left" className="m-2 md:hidden">
-              <div className="max-h-[50vh] w-40 overflow-hidden rounded-lg border border-border bg-card/95 p-1 shadow-md">
+              <div className="max-h-[50vh] w-40 overflow-hidden rounded-xl border border-border/50 bg-card/95 p-1 shadow-lg backdrop-blur-sm">
                 <PaletteSidebar preview={preview} onAdd={addPaletteNode} />
               </div>
             </Panel>
           </ReactFlow>
         </div>
 
-        <aside className="hidden w-[22rem] shrink-0 flex-col border-l border-border/80 bg-gradient-to-b from-card/50 to-card/20 lg:flex">
-          <p className="flex items-center gap-2 border-b border-border/50 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <SlidersHorizontal className="size-3.5 text-primary/80" aria-hidden />
-            Properties
-          </p>
-          <ScrollArea className="flex-1 p-3">
+        <aside className="hidden w-[21rem] shrink-0 flex-col border-l border-border/50 bg-card/30 lg:flex">
+          <ScrollArea className="flex-1 p-4">
             {selectedEdge ? (
               <EdgeInspector
                 edge={selectedEdge}
@@ -718,16 +824,10 @@ function AgentBuilderInner() {
                 onChangeData={(patch) => updateNodeData(selectedNode.id, patch)}
               />
             ) : (
-              <div className="space-y-3 rounded-lg border border-dashed border-border/60 bg-muted/10 p-3 text-xs text-muted-foreground">
-                <p className="text-sm font-medium text-foreground/80">Nothing selected</p>
+              <div className="space-y-3 py-4 text-center text-xs text-muted-foreground">
+                <p className="text-sm font-medium text-foreground/60">No selection</p>
                 <p className="text-[11px] leading-relaxed">
-                  Click a node or edge on the canvas to edit labels, models, guardrails, and flow logic here.
-                </p>
-                <p className="text-[10px] leading-relaxed">
-                  Include one <strong className="text-foreground/90">Start</strong> node. CEL uses{" "}
-                  <code className="text-foreground/80">inputs</code>, <code className="text-foreground/80">outputs</code>,{" "}
-                  <code className="text-foreground/80">state</code>, <code className="text-foreground/80">input_as_text</code>
-                  , <code className="text-foreground/80">iteration</code>.
+                  Click a node or edge to view and edit its properties.
                 </p>
               </div>
             )}
