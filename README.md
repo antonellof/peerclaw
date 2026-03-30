@@ -40,10 +40,10 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 - **Multi-peer clusters** — Test distributed execution locally
 
 ### Token Economy
-- **Native wallet** — Ed25519-based identity and transactions
-- **Escrow system** — Funds locked until job completion
-- **Dynamic pricing** — Each peer sets their own rates
-- **Payment channels** — Efficient micro-payments between peers
+- **PCLAW token** — Internal accounting for P2P job execution
+- **Wallet** — Ed25519 keypair, persistent balance (redb)
+- **Escrow** — Tokens locked during job execution, auto-swept on timeout
+- **Budget enforcement** — Per-request, hourly, daily, and total spend limits
 
 ### Skills System
 - **SKILL.md prompts** — Markdown-based prompt extensions with YAML frontmatter
