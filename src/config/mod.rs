@@ -431,11 +431,11 @@ impl Default for EconomyConfig {
             charge_for_storage: true,
             charge_for_tools: true,
             charge_for_messages: false,
-            // Default prices (competitive starting points)
-            inference_price_per_1k: 100,  // 0.0001 PCLAW per 1K tokens
-            storage_price_per_mb_day: 10, // 0.00001 PCLAW per MB/day
-            tool_price_per_call: 50,      // 0.00005 PCLAW per call
-            message_price: 1,             // 0.000001 PCLAW per message
+            // Default prices in μPCLAW (aligned with docs/TOKENS.md and job/pricing.rs)
+            inference_price_per_1k: 500_000, // 0.5 PCLAW per 1K tokens (small model rate)
+            storage_price_per_mb_day: 10_000, // 0.01 PCLAW per MB/day
+            tool_price_per_call: 20_000,     // 0.02 PCLAW per tool call
+            message_price: 1_000,            // 0.001 PCLAW per message
             // Payment behavior
             accept_paid_jobs: true,
             max_job_payment: 0,           // Unlimited

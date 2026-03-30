@@ -305,11 +305,15 @@ impl Wallet {
     }
 
     /// Release escrow to the recipient (job completed successfully).
-    pub async fn release_escrow(&self, escrow_id: &EscrowId) -> Result<Transaction, WalletError> {
+    /// Returns the transaction and the (amount, recipient) so the caller can credit the provider.
+    pub async fn release_escrow(
+        &self,
+        escrow_id: &EscrowId,
+    ) -> Result<(Transaction, u64, String), WalletError> {
         let mut state = self.state.write().await;
 
-        // Get amount and check status first
-        let amount = {
+        // Get amount + recipient and check status first
+        let (amount, recipient) = {
             let escrow = state
                 .escrows
                 .get(escrow_id)
@@ -318,10 +322,10 @@ impl Wallet {
             if escrow.status != EscrowStatus::Active {
                 return Err(WalletError::EscrowAlreadyResolved(escrow_id.clone()));
             }
-            escrow.amount
+            (escrow.amount, escrow.recipient.clone())
         };
 
-        // Now mutate
+        // Requester loses the escrowed tokens (paid to provider)
         if let Some(escrow) = state.escrows.get_mut(escrow_id) {
             escrow.status = EscrowStatus::Released;
         }
@@ -333,7 +337,7 @@ impl Wallet {
         drop(state);
         self.save_state().await?;
 
-        Ok(tx)
+        Ok((tx, amount, recipient))
     }
 
     /// Refund escrow back to sender (job failed or timed out).
@@ -442,6 +446,40 @@ impl Wallet {
     /// Verify a signature against the wallet's public key.
     pub fn verify(&self, message: &[u8], signature: &Signature) -> bool {
         self.identity.verify(message, signature)
+    }
+
+    /// Sweep expired escrows: refund any that have passed their `expires_at`.
+    /// Call this periodically (e.g., every 60 seconds) to prevent token lockup.
+    pub async fn sweep_expired_escrows(&self) -> Vec<EscrowId> {
+        let mut state = self.state.write().await;
+        let now = chrono::Utc::now();
+        let mut swept = Vec::new();
+
+        let expired_ids: Vec<EscrowId> = state
+            .escrows
+            .iter()
+            .filter(|(_, e)| e.status == EscrowStatus::Active && e.is_expired_at(now))
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for id in expired_ids {
+            if let Some(escrow) = state.escrows.get_mut(&id) {
+                let amount = escrow.amount;
+                escrow.status = EscrowStatus::Expired;
+                state.in_escrow = state.in_escrow.saturating_sub(amount);
+                state.available += amount;
+                let tx = Transaction::new_escrow_refunded(amount, id.clone());
+                state.transactions.push(tx);
+                swept.push(id);
+            }
+        }
+
+        if !swept.is_empty() {
+            drop(state);
+            let _ = self.save_state().await;
+        }
+
+        swept
     }
 }
 

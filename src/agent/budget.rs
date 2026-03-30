@@ -97,7 +97,8 @@ impl BudgetTracker {
 
 impl Default for BudgetTracker {
     fn default() -> Self {
-        Self::new(2.0, 20.0, 100.0, 1000.0)
+        // With 0.5 PCLAW/1K tokens: 10 PCLAW ≈ 20K tokens per request
+        Self::new(10.0, 100.0, 500.0, 5000.0)
     }
 }
 

@@ -90,10 +90,12 @@ impl Runtime {
             (*database).clone(),
         )?);
 
-        // Credit some initial tokens for testing
-        wallet
-            .credit(crate::wallet::to_micro(1000.0), "initial_balance")
-            .await?;
+        // Credit initial tokens only for new wallets (balance == 0)
+        if wallet.balance().await.total == 0 {
+            wallet
+                .credit(crate::wallet::to_micro(1000.0), "initial_balance")
+                .await?;
+        }
 
         // Create job manager
         let local_peer_id = *identity.peer_id();

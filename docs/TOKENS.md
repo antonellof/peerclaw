@@ -86,10 +86,27 @@ Each peer sets its own pricing. Agents choose based on price, latency, and reput
 2. Matching peer accepts → tokens moved to Escrow
 3. Peer executes job
 4. Result delivered → Agent verifies
-5a. Success → Escrow releases to peer
+5a. Success → Escrow released, provider credited
 5b. Failure → Escrow refunds to agent
-5c. Timeout → Refund + reputation decrement
+5c. Timeout → Expired escrows swept every 60s, tokens auto-refunded
 ```
+
+### Current Implementation Status
+
+| Component | Status |
+|-----------|--------|
+| Wallet (credit, debit, balance, persistence) | Implemented |
+| Escrow (create, release, refund) | Implemented |
+| Expired escrow sweep (periodic refund) | Implemented |
+| Job marketplace (request, bid, accept, settle) | Implemented |
+| Provider settlement (local) | Implemented |
+| Agent budget enforcement | Implemented |
+| Initial balance (1,000 PCLAW for new wallets) | Implemented |
+| Reputation-weighted bid scoring | Partial (scoring works, reputation tracking stub) |
+| Provider sharing earnings | Planned (rate limits work, no token credit yet) |
+| P2P cross-node settlement | Planned (local settlement works) |
+| On-chain settlement | Future (v1.0) |
+| Slashing | Future (v1.0) |
 
 ## Wallet Configuration
 
@@ -111,15 +128,13 @@ auto_restake_rewards = true
 
 ```toml
 [budget]
-max_spend_per_request = 10.0
-max_spend_per_hour = 100.0
-max_spend_per_day = 500.0
-max_spend_total = 50000.0
-
-auto_refill = true
-refill_trigger = 50.0
-refill_amount = 200.0
+per_request = 10.0    # Max PCLAW per single task (~20K tokens at small model rate)
+per_hour = 100.0
+per_day = 500.0
+total = 5000.0
 ```
+
+Budget enforcement runs inside the agent ReAct loop — each LLM call estimates cost as `(tokens / 1000) × 0.5 PCLAW` and checks against all four limits before proceeding.
 
 ## Reputation System
 
@@ -156,11 +171,15 @@ Misbehavior results in stake loss:
 
 ## Local Accounting
 
-Tokens are tracked locally with eventual on-chain settlement:
-- Payment channels between frequent peers
-- HTLC for atomic job payment
-- Reputation affects trust thresholds
+Tokens are tracked locally per-node with persistent wallet state (redb). Current settlement model:
+
+- **Local jobs** — Escrow created on requester wallet, released on success (tokens credited back to same wallet as "job_payment"), refunded on failure
+- **Remote jobs** — Provider node credits itself upon receiving a signed settlement message (planned — currently providers on remote peers are not credited)
+- **Expired escrows** — Background sweep every 60 seconds auto-refunds tokens locked in timed-out escrows
+- **New wallets** — Credited 1,000 PCLAW on first creation (not on restart)
+
+Future: on-chain settlement, payment channels between frequent peers, HTLC for atomic job payment.
 
 ---
 
-*v0.2 — March 2026*
+*Updated March 2026 — pricing unified across EconomyConfig, job marketplace, and agent budget at 0.5 PCLAW/1K tokens base rate*

@@ -113,6 +113,11 @@ impl Escrow {
         Utc::now() > self.expires_at
     }
 
+    /// Check expiry against a given timestamp (avoids repeated Utc::now() in sweeps).
+    pub fn is_expired_at(&self, now: DateTime<Utc>) -> bool {
+        now > self.expires_at
+    }
+
     /// Check if the escrow is still active (not resolved and not expired).
     pub fn is_active(&self) -> bool {
         self.status == EscrowStatus::Active && !self.is_expired()

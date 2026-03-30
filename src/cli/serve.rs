@@ -445,6 +445,9 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     // Interval for advertising provider to network
     let mut provider_advertise_interval = tokio::time::interval(std::time::Duration::from_secs(60));
 
+    // Sweep expired escrows every 60 seconds to prevent token lockup
+    let mut escrow_sweep_interval = tokio::time::interval(std::time::Duration::from_secs(60));
+
     // A2A agent card + resource manifest over GossipSub
     let mut a2a_advertise_interval = tokio::time::interval(std::time::Duration::from_secs(45));
 
@@ -1115,6 +1118,14 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         // Auto-accept bids for our pending requests after bid collection period
         if bid_accept_interval.tick().now_or_never().is_some() {
             auto_accept_bids(runtime.as_ref(), &mut job_creation_times).await;
+        }
+
+        // Sweep expired escrows to prevent token lockup
+        if escrow_sweep_interval.tick().now_or_never().is_some() {
+            let swept = runtime.wallet.sweep_expired_escrows().await;
+            if !swept.is_empty() {
+                tracing::info!(count = swept.len(), "Swept expired escrows, tokens refunded");
+            }
         }
 
         // Periodically advertise our provider manifest

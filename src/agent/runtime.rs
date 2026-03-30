@@ -132,7 +132,8 @@ impl AgenticProgressSink for TaskLogProgressSink {
 const MAX_ITERATIONS: u32 = 20;
 
 /// Estimated cost per 1k tokens (in PCLAW) for budget tracking.
-const COST_PER_1K_TOKENS: f64 = 0.001;
+/// Aligned with EconomyConfig default (0.5 PCLAW / 1K tokens for small models).
+const COST_PER_1K_TOKENS: f64 = 0.5;
 
 /// The core agent runtime.
 pub struct AgentRuntime {

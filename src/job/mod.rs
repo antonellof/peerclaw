@@ -394,8 +394,15 @@ impl JobManager {
         };
 
         if success {
-            // Release escrow to worker
-            self.wallet.release_escrow(&job.escrow_id).await?;
+            // Release escrow — tokens leave requester's wallet
+            let (_tx, amount, _recipient) = self.wallet.release_escrow(&job.escrow_id).await?;
+            // Credit provider wallet (local settlement — same node for now).
+            // In a full P2P flow the provider node would credit itself upon
+            // receiving a signed JobSettled message over GossipSub.
+            let _ = self
+                .wallet
+                .credit(amount, &format!("job_payment:{}", job_id.0))
+                .await;
         } else {
             // Refund escrow to requester
             self.wallet.refund_escrow(&job.escrow_id).await?;
