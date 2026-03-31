@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { ChatPanel } from "@/pages/chat/ChatPanel"
+import { SetupPage, isSetupDone } from "@/pages/setup/SetupPage"
 import { parseWorkspaceView, type WorkspaceView } from "./views"
 import { WorkspaceNavProvider, type ChatControls } from "./WorkspaceNavContext"
 import { ConsolePanel } from "./ConsolePanel"
@@ -43,6 +44,7 @@ export function WorkspaceShell() {
     }
   }, [rawViewParam, navigate])
 
+  const [setupDone, setSetupDone] = useState(isSetupDone)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chatPreferences, setChatPreferencesState] = useState(loadWorkspaceChatPreferences)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -128,6 +130,10 @@ export function WorkspaceShell() {
     chatPreferences,
     setChatPreferences,
     registerChatControls,
+  }
+
+  if (!setupDone) {
+    return <SetupPage onFinish={() => setSetupDone(true)} />
   }
 
   return (

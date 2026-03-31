@@ -214,7 +214,27 @@ Create and edit `SKILL.md` prompt extensions with AI-assisted drafting. Select a
 
 ## Quick Start
 
-### Install
+### Docker (recommended)
+
+```bash
+# Clone and run with Docker Compose (connects to Ollama on your host)
+git clone https://github.com/antonellof/peerclaw.git
+cd peerclaw
+docker compose up --build
+
+# Open http://localhost:8080 — the setup wizard guides you through configuration
+```
+
+Make sure [Ollama](https://ollama.com) is running on your host (`ollama serve`). Docker connects to it via `host.docker.internal:11434`.
+
+Or run standalone:
+
+```bash
+docker build -t peerclaw .
+docker run -p 8080:8080 -e OLLAMA_BASE_URL=http://host.docker.internal:11434 peerclaw
+```
+
+### Build from source
 
 ```bash
 git clone https://github.com/antonellof/peerclaw.git

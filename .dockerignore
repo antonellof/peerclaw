@@ -1,0 +1,12 @@
+target/
+web/node_modules/
+web/dist/
+.git/
+.cursor/
+.claude/
+*.log
+*.swp
+*.swo
+.DS_Store
+docs/screenshots/
+docs/images/
