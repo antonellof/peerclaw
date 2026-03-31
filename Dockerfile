@@ -17,7 +17,6 @@ COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
 COPY prompts/ prompts/
 COPY templates/ templates/
-COPY ironclaw/ ironclaw/
 RUN cargo build --release
 
 # ── Stage 3: Runtime ───────────────────────────────────────────────
