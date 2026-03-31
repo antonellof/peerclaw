@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { Node } from "@xyflow/react"
 import {
   Bot,
@@ -25,7 +25,7 @@ import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import type { McpToolListItem } from "@/lib/api"
+import { fetchTools, type McpToolListItem } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 import type { FlowNodeData } from "./flowCompile"
@@ -247,6 +247,91 @@ function ModelSelect({
   )
 }
 
+/** Multi-select tool checklist — fetches available tools from the node API. */
+function ToolSelector({
+  disabled,
+  value,
+  onChange,
+}: {
+  disabled: boolean
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [allTools, setAllTools] = useState<string[]>([])
+
+  useEffect(() => {
+    void fetchTools()
+      .then((r) => setAllTools(r.tools.map((t) => t.name)))
+      .catch(() => setAllTools([]))
+  }, [])
+
+  const selected = useMemo(() => {
+    if (!value.trim()) return new Set<string>()
+    return new Set(value.split(",").map((s) => s.trim()).filter(Boolean))
+  }, [value])
+
+  const toggle = (name: string) => {
+    const next = new Set(selected)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    onChange(Array.from(next).join(","))
+  }
+
+  const allSelected = value.trim() === ""
+
+  return (
+    <div>
+      <Label>Tools</Label>
+      <p className="mt-0.5 text-[10px] text-muted-foreground">
+        {allSelected ? "All tools enabled (none selected = all)" : `${selected.size} selected`}
+      </p>
+      <div className="mt-1.5 max-h-40 space-y-0.5 overflow-y-auto rounded-md border border-border/50 bg-muted/10 p-1.5">
+        {allTools.length === 0 ? (
+          <p className="px-1 py-2 text-[10px] text-muted-foreground">Loading tools…</p>
+        ) : (
+          allTools.map((name) => (
+            <label
+              key={name}
+              className={cn(
+                "flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-[11px] transition-colors hover:bg-muted/30",
+                disabled && "pointer-events-none opacity-50",
+              )}
+            >
+              <input
+                type="checkbox"
+                className="size-3 shrink-0 rounded border-border accent-primary"
+                disabled={disabled}
+                checked={allSelected || selected.has(name)}
+                onChange={() => {
+                  if (allSelected) {
+                    // Switch from "all" to "all except this one"
+                    const all = new Set(allTools)
+                    all.delete(name)
+                    onChange(Array.from(all).join(","))
+                  } else {
+                    toggle(name)
+                  }
+                }}
+              />
+              <span className="font-mono">{name}</span>
+            </label>
+          ))
+        )}
+      </div>
+      {!allSelected && (
+        <button
+          type="button"
+          className="mt-1 text-[10px] text-primary hover:underline"
+          disabled={disabled}
+          onClick={() => onChange("")}
+        >
+          Reset to all tools
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function FlowNodeInspector({
   node,
   disabled,
@@ -382,16 +467,11 @@ export function FlowNodeInspector({
               />
             </div>
           </div>
-          <div>
-            <Label>Tools (comma-separated builtins)</Label>
-            <Input
-              className="mt-1 h-8 font-mono text-[11px]"
-              disabled={disabled}
-              placeholder="empty = all builtins"
-              value={d.toolsStr ?? ""}
-              onChange={(e) => onChangeData({ toolsStr: e.target.value })}
-            />
-          </div>
+          <ToolSelector
+            disabled={disabled}
+            value={d.toolsStr ?? ""}
+            onChange={(v) => onChangeData({ toolsStr: v })}
+          />
           <div>
             <Label>Output format</Label>
             <select
