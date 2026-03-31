@@ -235,7 +235,7 @@ export function WorkspaceShell() {
             )}
             <div className="flex shrink-0 flex-col items-end gap-0.5 text-right sm:flex-row sm:items-center sm:gap-3">
               <div className="text-[11px] text-muted-foreground">
-                <span className={peerLine === "offline" ? "text-destructive" : "text-emerald-500"}>●</span> {peerLine}
+                <span className={`inline-block size-2 rounded-full ${peerLine === "offline" ? "bg-destructive" : "bg-emerald-500"}`} /> {peerLine}
               </div>
               {peerLine === "offline" && (
                 <div className="rounded bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive">

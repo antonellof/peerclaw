@@ -107,7 +107,9 @@ export function ConsoleHelpPage() {
           ) : (
             steps.map((s) => (
               <div key={s.id} className="flex gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
-                <span className={s.ok ? "text-emerald-400" : "text-amber-400"}>{s.ok ? "✓" : "○"}</span>
+                <span className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full ${s.ok ? "bg-emerald-500/15 text-emerald-500" : "bg-muted-foreground/10 text-muted-foreground/30"}`}>
+                  <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                </span>
                 <div>
                   <div className="font-medium capitalize">{s.id.replace(/_/g, " ")}</div>
                   <div className="text-xs text-muted-foreground">{s.detail}</div>
