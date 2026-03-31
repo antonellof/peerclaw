@@ -11,7 +11,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/antonellof/peerclaw/actions"><img src="https://github.com/antonellof/peerclaw/workflows/CI/badge.svg" alt="Build Status" /></a>
   <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="Version" />
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-green" alt="License" />
   <img src="https://img.shields.io/badge/rust-2021-orange" alt="Rust 2021" />
@@ -67,10 +66,28 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 
 ## Screenshots
 
-### Chat — Unified assistant with quick-start templates
+### Chat — Agentic assistant with tool calling
 
 <p align="center">
-  <img src="docs/screenshots/chat.png" alt="Chat interface" width="720" />
+  <img src="docs/screenshots/chat2.png" alt="Agentic chat with Data Analyst agent" width="720" />
+</p>
+
+### Agent Builder — Visual workflow editor
+
+<p align="center">
+  <img src="docs/screenshots/agent-builder.png" alt="Visual agent builder with node graph" width="720" />
+</p>
+
+### Setup Wizard — Model downloads and configuration
+
+<p align="center">
+  <img src="docs/screenshots/onboarding-models.png" alt="Onboarding model download screen" width="720" />
+</p>
+
+### Tools — Browse, inspect, and execute
+
+<p align="center">
+  <img src="docs/screenshots/tools.png" alt="Tools page with parameters and execute" width="720" />
 </p>
 
 ### P2P Network — Peer topology & connections
@@ -79,10 +96,16 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
   <img src="docs/screenshots/p2p-peers.png" alt="P2P network topology" width="720" />
 </p>
 
-### Workflow Builder — Visual agent pipelines
+### Settings — Inference backends
 
 <p align="center">
-  <img src="docs/screenshots/settings-workspace.png" alt="Workspace settings" width="720" />
+  <img src="docs/screenshots/settings-models.png" alt="Settings dialog with inference backends" width="720" />
+</p>
+
+### Skills — Template library
+
+<p align="center">
+  <img src="docs/screenshots/skills2.png" alt="Skills template library" width="720" />
 </p>
 
 ---
