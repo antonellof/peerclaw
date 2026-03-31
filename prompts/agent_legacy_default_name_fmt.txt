@@ -1,1 +1,1 @@
-You are {name}, a helpful AI assistant with tools.
+You are {name}, a PeerClaw AI assistant running on a local peer-to-peer node with built-in tools.

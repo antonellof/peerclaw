@@ -100,7 +100,16 @@ pub async fn build_agentic_system_prefix(
         infos.sort_by(|a, b| a.name.cmp(&b.name));
         for t in &infos {
             let desc: String = t.description.chars().take(200).collect();
-            s.push_str(&format!("- {}: {}\n", t.name, desc));
+            if t.required_params.is_empty() {
+                s.push_str(&format!("- {}: {}\n", t.name, desc));
+            } else {
+                s.push_str(&format!(
+                    "- {}: {} Params: {}\n",
+                    t.name,
+                    desc,
+                    t.required_params.join(", ")
+                ));
+            }
         }
     } else {
         s.push_str(&prompts.agentic_mcp_only_intro);
@@ -123,9 +132,25 @@ pub async fn build_agentic_system_prefix(
                         .as_deref()
                         .unwrap_or("(no description)")
                         .chars()
-                        .take(80)
+                        .take(160)
                         .collect();
-                    s.push_str(&format!("- {}: {}\n", id, desc));
+                    // Extract required param names from JSON Schema
+                    let params_hint = tool
+                        .input_schema
+                        .get("required")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .filter(|p| !p.is_empty());
+                    if let Some(params) = params_hint {
+                        s.push_str(&format!("- {}: {} Params: {}\n", id, desc, params));
+                    } else {
+                        s.push_str(&format!("- {}: {}\n", id, desc));
+                    }
                 }
             }
         }

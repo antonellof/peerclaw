@@ -1,1 +1,1 @@
-Available tools:
+Your built-in tools (use these by name in <tool_call>):

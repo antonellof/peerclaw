@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
 import {
-  Bot,
   Check,
   ChevronRight,
   Circle,
@@ -21,15 +20,14 @@ import {
   fetchInferenceSettings,
   fetchMcpStatus,
   fetchOllamaModels,
-  fetchOnboarding,
   fetchOpenAiModels,
+  pullOllamaModel,
   putInferenceSettings,
   putMcpConfig,
   type GgufPresetRow,
   type InferenceSettingsResponse,
   type McpConfigJson,
   type OllamaModel,
-  type OnboardingStep,
 } from "@/lib/api"
 import { useControlWebSocket } from "@/hooks/useControlWebSocket"
 import { Button } from "@/components/ui/button"
@@ -98,7 +96,6 @@ function StatusIcon({ ok }: { ok: boolean }) {
 export function SetupPage({ onFinish }: { onFinish: () => void }) {
   const [step, setStep] = useState<Step>("welcome")
   const [settings, setSettings] = useState<InferenceSettingsResponse | null>(null)
-  const [onboarding, setOnboarding] = useState<OnboardingStep[]>([])
   const [models, setModels] = useState<string[]>([])
   const [ggufPresets, setGgufPresets] = useState<GgufPresetRow[]>([])
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
@@ -119,6 +116,9 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
   const [downloadMsg, setDownloadMsg] = useState<string | null>(null)
   const [downloadPct, setDownloadPct] = useState<number | null>(null)
   const [customUrl, setCustomUrl] = useState("")
+  const [ollamaPullName, setOllamaPullName] = useState("")
+  const [ollamaPulling, setOllamaPulling] = useState(false)
+  const [ollamaPullMsg, setOllamaPullMsg] = useState<string | null>(null)
 
   useControlWebSocket({
     onDownloadProgress: (ev) => {
@@ -143,7 +143,6 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
       setRemoteApiModel(s.remote_api_model)
       setGgufPresets(s.gguf_presets || [])
     } catch { /* defaults */ }
-    try { setOnboarding((await fetchOnboarding()).steps) } catch { /* */ }
     try { setModels((await fetchOpenAiModels()).map((x) => x.id)) } catch { setModels([]) }
     try { setOllamaModels(await fetchOllamaModels()) } catch { setOllamaModels([]) }
     try {
@@ -159,6 +158,25 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
   const refreshOllama = useCallback(async () => {
     try { setOllamaModels(await fetchOllamaModels()) } catch { setOllamaModels([]) }
   }, [])
+
+  const handleOllamaPull = async () => {
+    const name = ollamaPullName.trim()
+    if (!name) return
+    setOllamaPulling(true)
+    setOllamaPullMsg(null)
+    try {
+      const r = await pullOllamaModel(name)
+      if (r.success) {
+        setOllamaPullMsg(`Pulled ${name}`)
+        setOllamaPullName("")
+        await refreshOllama()
+      } else {
+        setOllamaPullMsg(r.error ?? "Pull failed")
+      }
+    } catch (e) {
+      setOllamaPullMsg(e instanceof Error ? e.message : "Error")
+    } finally { setOllamaPulling(false) }
+  }
 
   const saveInference = async () => {
     setSaving(true)
@@ -270,21 +288,6 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
                 Decentralized P2P AI agent network. Let's set up your node.
               </p>
             </div>
-            <div className="space-y-1 text-left">
-              {onboarding.map((s) => (
-                <div key={s.id} className="flex items-center gap-2.5 rounded-lg bg-muted/20 px-3 py-2 text-sm">
-                  <div className={cn(
-                    "flex size-5 items-center justify-center rounded-full",
-                    s.ok ? "bg-emerald-500/15" : "bg-muted-foreground/10",
-                  )}>
-                    <Check className={cn("size-3", s.ok ? "text-emerald-500" : "text-muted-foreground/30")} />
-                  </div>
-                  <span className="capitalize text-foreground">
-                    {s.id.replace(/_/g, " ")}
-                  </span>
-                </div>
-              ))}
-            </div>
             <Button size="lg" className="w-full gap-2" onClick={() => setStep("inference")}>
               Get started <ChevronRight className="size-4" />
             </Button>
@@ -375,10 +378,37 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
                     </div>
                   </div>
                 )}
-                {useOllama && ollamaModels.length === 0 && (
-                  <p className="text-[10px] text-amber-500">
-                    No models found. Run <code>ollama pull llama3.2</code> to download one.
-                  </p>
+                {useOllama && (
+                  <div className="mt-2 space-y-1.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Pull a model</p>
+                    <div className="flex gap-2">
+                      <Input
+                        className="h-8 flex-1 font-mono text-[11px]"
+                        placeholder="e.g. llama3.2, mistral, gemma2"
+                        value={ollamaPullName}
+                        onChange={(e) => setOllamaPullName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") void handleOllamaPull() }}
+                      />
+                      <Button
+                        size="sm" variant="outline" className="h-8 gap-1 text-xs"
+                        disabled={ollamaPulling || !ollamaPullName.trim()}
+                        onClick={() => void handleOllamaPull()}
+                      >
+                        {ollamaPulling ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
+                        {ollamaPulling ? "Pulling…" : "Pull"}
+                      </Button>
+                    </div>
+                    {ollamaPullMsg && (
+                      <p className={cn("text-[10px]", ollamaPullMsg.toLowerCase().includes("error") || ollamaPullMsg.toLowerCase().includes("fail") ? "text-destructive" : "text-emerald-500")}>
+                        {ollamaPullMsg}
+                      </p>
+                    )}
+                    {ollamaModels.length === 0 && !ollamaPulling && !ollamaPullMsg && (
+                      <p className="text-[10px] text-amber-500">
+                        No models found. Pull one above or run <code>ollama pull llama3.2</code> in terminal.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </ProviderCard>
@@ -448,7 +478,7 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Download GGUF from HuggingFace
                 </h3>
-                <div className="space-y-1.5">
+                <div className="max-h-48 space-y-1.5 overflow-y-auto">
                   {ggufPresets.map((p) => (
                       <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2">
                         <div className="min-w-0 flex-1">
@@ -612,6 +642,19 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
             <Button size="lg" className="w-full gap-2" onClick={finish}>
               Open PeerClaw <ChevronRight className="size-4" />
             </Button>
+            <div className="flex justify-center gap-3">
+              <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setStep("inference")}>
+                Change AI setup
+              </button>
+              <span className="text-xs text-muted-foreground/40">|</span>
+              <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setStep("models")}>
+                Models
+              </button>
+              <span className="text-xs text-muted-foreground/40">|</span>
+              <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setStep("mcp")}>
+                MCP
+              </button>
+            </div>
           </div>
         )}
       </div>

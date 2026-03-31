@@ -222,6 +222,15 @@ export async function fetchOllamaModels(): Promise<OllamaModel[]> {
   }
 }
 
+export async function pullOllamaModel(model: string): Promise<{ success: boolean; error?: string }> {
+  const r = await apiFetch("/api/ollama/pull", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model }),
+  })
+  return r.json() as Promise<{ success: boolean; error?: string }>
+}
+
 export async function downloadGgufModel(body: {
   preset?: string
   quant?: string

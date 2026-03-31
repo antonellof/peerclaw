@@ -8,7 +8,6 @@
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use crate::tools::tool::{
@@ -240,21 +239,6 @@ impl Tool for CodeExecTool {
     }
 }
 
-/// Returns info about available interpreters on this system.
-pub async fn available_interpreters() -> Vec<(&'static str, &'static str, bool)> {
-    let langs = [
-        ("python", "python3"),
-        ("javascript", "node"),
-        ("bash", "bash"),
-        ("ruby", "ruby"),
-    ];
-    let mut result = Vec::new();
-    for (name, cmd) in langs {
-        let available = check_interpreter(cmd).await;
-        result.push((name, cmd, available));
-    }
-    result
-}
 
 #[cfg(test)]
 mod tests {

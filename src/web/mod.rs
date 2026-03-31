@@ -439,6 +439,7 @@ fn api_router() -> Router<Arc<WebState>> {
         )
         .route("/models/download", post(api_models_download))
         .route("/ollama/models", get(api_ollama_models))
+        .route("/ollama/pull", post(api_ollama_pull))
         // Channel management
         .route("/channels", get(api_list_channels))
         .route("/channels", post(api_register_channel))
@@ -3368,6 +3369,52 @@ async fn api_ollama_models(
         }
         Ok(resp) => Json(serde_json::json!({ "models": [], "error": format!("Ollama returned {}", resp.status()) })),
         Err(e) => Json(serde_json::json!({ "models": [], "error": format!("Cannot reach Ollama at {url}: {e}") })),
+    }
+}
+
+/// POST /api/ollama/pull — pull a model in Ollama.
+async fn api_ollama_pull(
+    State(state): State<Arc<WebState>>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let Some(inf) = &state.inference else {
+        return Json(serde_json::json!({ "success": false, "error": "Inference not available" }));
+    };
+    let live = inf.live_settings();
+    let live_r = live.read().await;
+    let url = live_r.ollama_url.clone();
+    drop(live_r);
+
+    let model = body.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if model.is_empty() {
+        return Json(serde_json::json!({ "success": false, "error": "No model specified" }));
+    }
+    if url.is_empty() {
+        return Json(serde_json::json!({ "success": false, "error": "Ollama not configured" }));
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .unwrap_or_default();
+
+    match client
+        .post(format!("{url}/api/pull"))
+        .json(&serde_json::json!({ "name": model, "stream": false }))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            Json(serde_json::json!({ "success": true, "model": model }))
+        }
+        Ok(resp) => {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            Json(serde_json::json!({ "success": false, "error": format!("Ollama returned {status}: {text}") }))
+        }
+        Err(e) => {
+            Json(serde_json::json!({ "success": false, "error": format!("Cannot reach Ollama at {url}: {e}") }))
+        }
     }
 }
 
