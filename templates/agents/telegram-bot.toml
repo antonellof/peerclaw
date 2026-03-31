@@ -4,7 +4,7 @@
 # Setup:
 #   1. Create a bot via @BotFather on Telegram
 #   2. Set TELEGRAM_BOT_TOKEN in ~/.peerclaw/.env
-#   3. Deploy: peerclaw agent run examples/agents/telegram-bot.toml
+#   3. Deploy: peerclaw serve --ollama --agent templates/agents/telegram-bot.toml
 
 [agent]
 name = "PeerClawBot"

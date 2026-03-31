@@ -56,15 +56,15 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 
 ### Messaging Channels
 
-| Platform | Status |
-|----------|--------|
-| **REPL** | ✅ |
-| **WebSocket** | ✅ |
-| **Webhook** | ✅ |
-| **Discord** | ✅ |
-| **Telegram** | ✅ |
-| **Slack** | ✅ |
-| **Matrix** | ✅ |
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **REPL** | ✅ | CLI stdin/stdout interaction |
+| **WebSocket** | ✅ | Used by the web dashboard chat |
+| **Webhook** | ✅ | HTTP POST endpoint, configurable port |
+| **Telegram** | ✅ | Native Bot API integration (long polling) |
+| **Discord** | ⚠️ Planned | Requires IronClaw adapter — use webhook for now |
+| **Slack** | ⚠️ Planned | Requires IronClaw adapter — use webhook for now |
+| **Matrix** | ⚠️ Planned | Requires IronClaw adapter — use webhook for now |
 
 ---
 
@@ -232,6 +232,97 @@ websocket = true
 ```bash
 peerclaw serve --web 127.0.0.1:8080 --ollama --agent my-agent.toml
 ```
+
+---
+
+## Messaging Channels
+
+Agents can receive and respond to messages across multiple platforms simultaneously. Configure channels in the `[channels]` section of your agent TOML, or via the dashboard under **Workspace → Channels**.
+
+### Telegram
+
+Native integration via the Telegram Bot API (long polling).
+
+**1. Create a bot** — Talk to [@BotFather](https://t.me/BotFather) on Telegram and get your bot token.
+
+**2. Set the token** — Add it to `~/.peerclaw/.env` or export it:
+```bash
+export TELEGRAM_BOT_TOKEN="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+```
+
+**3. Configure your agent:**
+```toml
+[channels]
+telegram = { bot_token_env = "TELEGRAM_BOT_TOKEN" }
+```
+
+**4. Run:**
+```bash
+peerclaw serve --ollama --agent templates/agents/telegram-bot.toml
+```
+
+The bot will poll for messages and respond using your local LLM. See `templates/agents/telegram-bot.toml` for a complete example.
+
+### Webhook
+
+HTTP endpoint that receives POST requests and responds with the agent's reply.
+
+```toml
+[channels]
+webhook = true                  # Default port
+webhook = { port = 8090 }      # Custom port
+```
+
+Send messages to the webhook:
+```bash
+curl -X POST http://localhost:8090/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello!", "user_id": "u1", "conversation_id": "conv1"}'
+```
+
+**Tip:** Discord and Slack both support outgoing webhooks — you can connect them to PeerClaw's webhook channel without any adapter.
+
+### WebSocket
+
+Used by the web dashboard chat. Enable it to allow real-time browser-based interaction:
+
+```toml
+[channels]
+websocket = true
+```
+
+### REPL
+
+CLI stdin/stdout interaction. Useful for local testing:
+
+```toml
+[channels]
+repl = true
+```
+
+### Discord, Slack, Matrix (planned)
+
+Native adapters for these platforms require the **IronClaw** adapter package, which is not yet available. In the meantime, you can connect them via webhooks:
+
+- **Discord** — Create an [Incoming Webhook](https://support.discord.com/hc/en-us/articles/228383668) in your Discord server, then point it at PeerClaw's webhook channel
+- **Slack** — Create an [Incoming Webhook](https://api.slack.com/messaging/webhooks) in your Slack workspace and configure PeerClaw's webhook as an outgoing webhook endpoint
+- **Matrix** — Use a [webhook bridge](https://github.com/turt2live/matrix-appservice-webhooks) to relay messages between Matrix and PeerClaw's webhook
+
+### Multiple channels
+
+An agent can listen on several channels at once:
+
+```toml
+[channels]
+repl = true
+websocket = true
+webhook = { port = 8090 }
+telegram = { bot_token_env = "TELEGRAM_BOT_TOKEN" }
+```
+
+### Dashboard configuration
+
+You can also add channels at runtime from the web dashboard (**Workspace → Channels**) without editing TOML files. The dashboard supports Telegram (bot token), Discord (webhook URL), Slack (webhook URL), and generic webhooks.
 
 ---
 
