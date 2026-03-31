@@ -19,19 +19,7 @@ const PLATFORMS = [
     desc: "Native Bot API integration. Create a bot via @BotFather on Telegram to get a token.",
     configFields: [{ key: "bot_token", label: "Bot token", placeholder: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" }],
   },
-  {
-    id: "discord", label: "Discord",
-    desc: "Connect via Discord webhook. Create an Incoming Webhook in your server settings → Integrations.",
-    configFields: [{ key: "webhook_url", label: "Webhook URL", placeholder: "https://discord.com/api/webhooks/..." }],
-    badge: "webhook",
-  },
-  {
-    id: "slack", label: "Slack",
-    desc: "Connect via Slack webhook. Create an Incoming Webhook in your Slack app settings.",
-    configFields: [{ key: "webhook_url", label: "Webhook URL", placeholder: "https://hooks.slack.com/services/..." }],
-    badge: "webhook",
-  },
-  {
+{
     id: "webhook", label: "Webhook",
     desc: "Generic HTTP endpoint. Send POST requests with JSON messages; the agent responds inline.",
     configFields: [{ key: "url", label: "Endpoint URL", placeholder: "https://..." }],
@@ -210,14 +198,7 @@ export function ConsoleChannelsPage() {
           </div>
 
           {platform.desc && (
-            <p className="text-xs text-muted-foreground">
-              {platform.desc}
-              {"badge" in platform && platform.badge && (
-                <span className="ml-1.5 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-500">
-                  via {platform.badge}
-                </span>
-              )}
-            </p>
+            <p className="text-xs text-muted-foreground">{platform.desc}</p>
           )}
 
           <div className="space-y-2">

@@ -62,9 +62,6 @@ PeerClaw is a peer-to-peer network where AI agents collaborate, share compute re
 | **WebSocket** | ✅ | Used by the web dashboard chat |
 | **Webhook** | ✅ | HTTP POST endpoint, configurable port |
 | **Telegram** | ✅ | Native Bot API integration (long polling) |
-| **Discord** | ⚠️ Planned | Requires IronClaw adapter — use webhook for now |
-| **Slack** | ⚠️ Planned | Requires IronClaw adapter — use webhook for now |
-| **Matrix** | ⚠️ Planned | Requires IronClaw adapter — use webhook for now |
 
 ---
 
@@ -300,14 +297,6 @@ CLI stdin/stdout interaction. Useful for local testing:
 repl = true
 ```
 
-### Discord, Slack, Matrix (planned)
-
-Native adapters for these platforms require the **IronClaw** adapter package, which is not yet available. In the meantime, you can connect them via webhooks:
-
-- **Discord** — Create an [Incoming Webhook](https://support.discord.com/hc/en-us/articles/228383668) in your Discord server, then point it at PeerClaw's webhook channel
-- **Slack** — Create an [Incoming Webhook](https://api.slack.com/messaging/webhooks) in your Slack workspace and configure PeerClaw's webhook as an outgoing webhook endpoint
-- **Matrix** — Use a [webhook bridge](https://github.com/turt2live/matrix-appservice-webhooks) to relay messages between Matrix and PeerClaw's webhook
-
 ### Multiple channels
 
 An agent can listen on several channels at once:
@@ -322,7 +311,7 @@ telegram = { bot_token_env = "TELEGRAM_BOT_TOKEN" }
 
 ### Dashboard configuration
 
-You can also add channels at runtime from the web dashboard (**Workspace → Channels**) without editing TOML files. The dashboard supports Telegram (bot token), Discord (webhook URL), Slack (webhook URL), and generic webhooks.
+You can also add channels at runtime from the web dashboard (**Workspace → Channels**) without editing TOML files. The dashboard supports Telegram (bot token), webhooks, and WebSocket.
 
 ---
 
