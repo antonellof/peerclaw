@@ -22,13 +22,43 @@ const MAX_OUTPUT: usize = 64 * 1024;
 /// Default timeout for code execution.
 const DEFAULT_TIMEOUT_SECS: i64 = 30;
 
-/// macOS sandbox profile: deny network, restrict writes to $TMPDIR subtree.
+/// macOS sandbox profile: deny network, restrict reads to interpreter + tmp, restrict writes to tmp.
 const MACOS_SANDBOX_PROFILE: &str = r#"
 (version 1)
-(allow default)
+(deny default)
+(allow process-exec)
+(allow process-fork)
+(allow sysctl-read)
+(allow mach-lookup)
+(allow signal)
+(allow ipc-posix-shm*)
+;; Read: only interpreters, system libs, and temp dir
+(allow file-read*
+    (subpath "/usr")
+    (subpath "/bin")
+    (subpath "/sbin")
+    (subpath "/opt/homebrew")
+    (subpath "/Library/Frameworks")
+    (subpath "/System")
+    (subpath "/private/tmp")
+    (subpath "/tmp")
+    (subpath "/private/var/tmp")
+    (subpath "/dev")
+    (subpath "/private/etc")
+    (subpath "/etc")
+    (subpath "/var/folders")
+    (literal "/private/var/db/timezone/zoneinfo/posixrules")
+)
+;; Write: only temp directories
+(allow file-write*
+    (subpath "/private/tmp")
+    (subpath "/tmp")
+    (subpath "/private/var/tmp")
+    (subpath "/dev")
+    (subpath "/var/folders")
+)
+;; No network at all
 (deny network*)
-(deny file-write* (subpath "/") (require-not (subpath "/private/tmp")) (require-not (subpath "/tmp")) (require-not (regex #"^/dev/")))
-(allow file-write* (subpath "/private/tmp") (subpath "/tmp") (regex #"^/dev/"))
 "#;
 
 /// Supported languages and their interpreters.
