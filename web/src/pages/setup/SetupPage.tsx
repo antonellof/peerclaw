@@ -252,8 +252,13 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
             <div className="space-y-1 text-left">
               {onboarding.map((s) => (
                 <div key={s.id} className="flex items-center gap-2.5 rounded-lg bg-muted/20 px-3 py-2 text-sm">
-                  <StatusIcon ok={s.ok} />
-                  <span className={cn("capitalize", s.ok ? "text-foreground" : "text-muted-foreground")}>
+                  <div className={cn(
+                    "flex size-5 items-center justify-center rounded-full",
+                    s.ok ? "bg-emerald-500/15" : "bg-muted-foreground/10",
+                  )}>
+                    <Check className={cn("size-3", s.ok ? "text-emerald-500" : "text-muted-foreground/30")} />
+                  </div>
+                  <span className="capitalize text-foreground">
                     {s.id.replace(/_/g, " ")}
                   </span>
                 </div>
