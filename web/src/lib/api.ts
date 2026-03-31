@@ -198,6 +198,23 @@ export type ModelDownloadResponse = {
   error?: string | null
 }
 
+export type OllamaModel = {
+  name: string
+  size: number
+  details?: { parameter_size?: string; quantization_level?: string; family?: string }
+}
+
+export async function fetchOllamaModels(): Promise<OllamaModel[]> {
+  try {
+    const r = await apiFetch("/api/ollama/models")
+    if (!r.ok) return []
+    const j = (await r.json()) as { models?: OllamaModel[] }
+    return j.models ?? []
+  } catch {
+    return []
+  }
+}
+
 export async function downloadGgufModel(body: {
   preset?: string
   quant?: string

@@ -3,15 +3,16 @@ import {
   Bot,
   Check,
   ChevronRight,
+  Circle,
   Cloud,
   Download,
+  ExternalLink,
   HardDrive,
   Loader2,
   Monitor,
   Plug,
   Plus,
   Sparkles,
-  Trash2,
   X,
 } from "lucide-react"
 
@@ -19,6 +20,7 @@ import {
   downloadGgufModel,
   fetchInferenceSettings,
   fetchMcpStatus,
+  fetchOllamaModels,
   fetchOnboarding,
   fetchOpenAiModels,
   putInferenceSettings,
@@ -26,6 +28,7 @@ import {
   type GgufPresetRow,
   type InferenceSettingsResponse,
   type McpConfigJson,
+  type OllamaModel,
   type OnboardingStep,
 } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -53,8 +56,14 @@ export function markSetupDone() {
 
 type Step = "welcome" | "inference" | "models" | "mcp" | "done"
 const STEPS: Step[] = ["welcome", "inference", "models", "mcp", "done"]
+const STEP_LABELS: Record<Step, string> = {
+  welcome: "Welcome",
+  inference: "AI Setup",
+  models: "Models",
+  mcp: "MCP",
+  done: "Done",
+}
 
-/** Popular GGUF models with sizes for the download UI. */
 const MODEL_INFO: Record<string, { label: string; size: string; desc: string }> = {
   "llama-3.2-1b": { label: "Llama 3.2 1B", size: "~770 MB", desc: "Fast, good for testing" },
   "llama-3.2-3b": { label: "Llama 3.2 3B", size: "~2 GB", desc: "Great balance of speed and quality" },
@@ -66,7 +75,6 @@ const MODEL_INFO: Record<string, { label: string; size: string; desc: string }> 
   "tinyllama-1.1b": { label: "TinyLlama 1.1B", size: "~640 MB", desc: "Ultra-light, fast" },
 }
 
-/** Common MCP server presets. */
 const MCP_PRESETS = [
   { name: "filesystem", label: "Filesystem", command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"], desc: "Read/write files" },
   { name: "brave-search", label: "Brave Search", command: "npx", args: ["-y", "@anthropic/mcp-server-brave-search"], desc: "Web search (needs BRAVE_API_KEY)" },
@@ -74,25 +82,47 @@ const MCP_PRESETS = [
   { name: "sqlite", label: "SQLite", command: "npx", args: ["-y", "@anthropic/mcp-server-sqlite", "/tmp/data.db"], desc: "Query SQLite databases" },
 ]
 
+function formatSize(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
+  return `${bytes} B`
+}
+
+/* ── Status icon (uniform) ──────────────────────────────────────── */
+function StatusIcon({ ok }: { ok: boolean }) {
+  return ok ? (
+    <div className="flex size-5 items-center justify-center rounded-full bg-emerald-500/15">
+      <Check className="size-3 text-emerald-500" />
+    </div>
+  ) : (
+    <div className="flex size-5 items-center justify-center rounded-full bg-muted">
+      <Circle className="size-2.5 text-muted-foreground/40" />
+    </div>
+  )
+}
+
+/* ── Main component ─────────────────────────────────────────────── */
+
 export function SetupPage({ onFinish }: { onFinish: () => void }) {
   const [step, setStep] = useState<Step>("welcome")
   const [settings, setSettings] = useState<InferenceSettingsResponse | null>(null)
   const [onboarding, setOnboarding] = useState<OnboardingStep[]>([])
   const [models, setModels] = useState<string[]>([])
   const [ggufPresets, setGgufPresets] = useState<GgufPresetRow[]>([])
+  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Inference form
-  const [useOllama, setUseOllama] = useState(true)
+  const [useLocalGguf, setUseLocalGguf] = useState(true) // default ON
+  const [useOllama, setUseOllama] = useState(false)
   const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434")
-  const [useLocalGguf, setUseLocalGguf] = useState(false)
   const [useRemoteApi, setUseRemoteApi] = useState(false)
   const [remoteApiUrl, setRemoteApiUrl] = useState("")
   const [remoteApiModel, setRemoteApiModel] = useState("")
   const [remoteApiKey, setRemoteApiKey] = useState("")
 
-  // Model downloads
+  // Downloads
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadMsg, setDownloadMsg] = useState<string | null>(null)
 
@@ -105,30 +135,30 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
     try {
       const s = await fetchInferenceSettings()
       setSettings(s)
+      setUseLocalGguf(s.use_local_gguf || !s.use_ollama)
       setUseOllama(s.use_ollama)
       setOllamaUrl(s.ollama_url || "http://localhost:11434")
-      setUseLocalGguf(s.use_local_gguf)
       setUseRemoteApi(s.remote_api_enabled)
       setRemoteApiUrl(s.remote_api_base_url)
       setRemoteApiModel(s.remote_api_model)
       setGgufPresets(s.gguf_presets || [])
     } catch { /* defaults */ }
-    try {
-      const o = await fetchOnboarding()
-      setOnboarding(o.steps)
-    } catch { /* ignore */ }
-    try {
-      const m = await fetchOpenAiModels()
-      setModels(m.map((x) => x.id))
-    } catch { setModels([]) }
+    try { setOnboarding((await fetchOnboarding()).steps) } catch { /* */ }
+    try { setModels((await fetchOpenAiModels()).map((x) => x.id)) } catch { setModels([]) }
+    try { setOllamaModels(await fetchOllamaModels()) } catch { setOllamaModels([]) }
     try {
       const mcp = await fetchMcpStatus()
       setMcpEnabled(mcp.config.enabled)
       setMcpServers(mcp.config.servers || [])
-    } catch { /* ignore */ }
+    } catch { /* */ }
   }, [])
 
   useEffect(() => { void loadAll() }, [loadAll])
+
+  // Refresh Ollama models when URL changes
+  const refreshOllama = useCallback(async () => {
+    try { setOllamaModels(await fetchOllamaModels()) } catch { setOllamaModels([]) }
+  }, [])
 
   const saveInference = async () => {
     setSaving(true)
@@ -145,6 +175,7 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
       })
       const m = await fetchOpenAiModels()
       setModels(m.map((x) => x.id))
+      if (useOllama) await refreshOllama()
       setStep("models")
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save")
@@ -157,44 +188,36 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
     try {
       const r = await downloadGgufModel({ preset: presetId, quant: "Q4_K_M" })
       if (r.success) {
-        setDownloadMsg(`Downloaded ${presetId} (${r.bytes ? (r.bytes / 1e6).toFixed(0) + " MB" : "done"})`)
-        const m = await fetchOpenAiModels()
-        setModels(m.map((x) => x.id))
+        setDownloadMsg(`Downloaded ${presetId}`)
+        setModels((await fetchOpenAiModels()).map((x) => x.id))
       } else {
         setDownloadMsg(r.error ?? "Download failed")
       }
     } catch (e) {
-      setDownloadMsg(e instanceof Error ? e.message : "Download error")
+      setDownloadMsg(e instanceof Error ? e.message : "Error")
     } finally { setDownloading(null) }
   }
 
   const saveMcp = async () => {
     setMcpSaving(true)
-    try {
-      await putMcpConfig({ enabled: mcpEnabled, timeout_secs: 30, auto_reconnect: true, servers: mcpServers })
-    } catch { /* ignore */ }
+    try { await putMcpConfig({ enabled: mcpEnabled, timeout_secs: 30, auto_reconnect: true, servers: mcpServers }) } catch { /* */ }
     setMcpSaving(false)
     setStep("done")
   }
 
-  const addMcpPreset = (preset: typeof MCP_PRESETS[number]) => {
-    if (mcpServers.some((s) => s.name === preset.name)) return
-    setMcpServers([...mcpServers, { name: preset.name, url: "", command: preset.command, args: preset.args }])
+  const addMcpPreset = (p: typeof MCP_PRESETS[number]) => {
+    if (mcpServers.some((s) => s.name === p.name)) return
+    setMcpServers([...mcpServers, { name: p.name, url: "", command: p.command, args: p.args }])
     setMcpEnabled(true)
   }
 
-  const removeMcpServer = (name: string) => {
-    setMcpServers(mcpServers.filter((s) => s.name !== name))
-  }
-
   const finish = () => { markSetupDone(); onFinish() }
-
   const stepIdx = STEPS.indexOf(step)
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-xl space-y-6">
-        {/* Progress */}
+        {/* ── Progress bar ─────────────────────────────── */}
         <div className="flex items-center justify-center gap-1.5">
           {STEPS.map((s, i) => (
             <div key={s} className="flex items-center gap-1.5">
@@ -210,8 +233,11 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
             </div>
           ))}
         </div>
+        <p className="text-center text-xs text-muted-foreground">{STEP_LABELS[step]}</p>
 
-        {/* ── Welcome ──────────────────────────────────── */}
+        {/* ══════════════════════════════════════════════════ */}
+        {/* WELCOME                                           */}
+        {/* ══════════════════════════════════════════════════ */}
         {step === "welcome" && (
           <div className="space-y-5 text-center">
             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary/10">
@@ -220,16 +246,16 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
             <div>
               <h1 className="text-2xl font-bold">Welcome to PeerClaw</h1>
               <p className="mt-1.5 text-sm text-muted-foreground">
-                Decentralized P2P AI agent network. Let's set up your node in a few steps.
+                Decentralized P2P AI agent network. Let's set up your node.
               </p>
             </div>
-            <div className="space-y-1.5 text-left">
+            <div className="space-y-1 text-left">
               {onboarding.map((s) => (
                 <div key={s.id} className="flex items-center gap-2.5 rounded-lg bg-muted/20 px-3 py-2 text-sm">
-                  <span className={s.ok ? "text-emerald-500" : "text-muted-foreground/40"}>
-                    {s.ok ? <Check className="size-4" /> : <span className="inline-block size-4 rounded-full border-2" />}
+                  <StatusIcon ok={s.ok} />
+                  <span className={cn("capitalize", s.ok ? "text-foreground" : "text-muted-foreground")}>
+                    {s.id.replace(/_/g, " ")}
                   </span>
-                  <span className={cn("capitalize", s.ok && "text-foreground")}>{s.id.replace(/_/g, " ")}</span>
                 </div>
               ))}
             </div>
@@ -237,51 +263,98 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
               Get started <ChevronRight className="size-4" />
             </Button>
             <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={finish}>
-              Skip setup — I'll configure later
+              Skip setup
             </button>
           </div>
         )}
 
-        {/* ── Inference ────────────────────────────────── */}
+        {/* ══════════════════════════════════════════════════ */}
+        {/* INFERENCE                                         */}
+        {/* ══════════════════════════════════════════════════ */}
         {step === "inference" && (
           <div className="space-y-4">
             <div>
               <h2 className="text-xl font-bold">Configure AI Models</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Choose one or more inference backends. You can change these anytime in Settings.
+                Choose how PeerClaw runs inference. Enable one or more backends.
               </p>
             </div>
 
-            {/* Ollama */}
-            <ProviderCard
-              checked={useOllama}
-              onChange={setUseOllama}
-              icon={<Monitor className="size-4" />}
-              title="Ollama (local)"
-              desc="Run open-source models locally. Install from ollama.com."
-            >
-              <div className="mt-3 pl-7">
-                <Label className="text-xs">Ollama URL</Label>
-                <Input className="mt-1 h-8 text-xs" value={ollamaUrl} onChange={(e) => setOllamaUrl(e.target.value)} />
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  Docker: <code>http://host.docker.internal:11434</code>
-                </p>
-              </div>
-            </ProviderCard>
-
-            {/* Local GGUF */}
+            {/* Local GGUF — default */}
             <ProviderCard
               checked={useLocalGguf}
               onChange={setUseLocalGguf}
               icon={<HardDrive className="size-4" />}
-              title="Local GGUF models"
-              desc="Download and run GGUF files directly (no Ollama needed)."
+              title="Local GGUF models (recommended)"
+              desc="Download and run GGUF model files directly. No extra software needed."
+              recommended
             >
               {settings?.models_directory && (
                 <p className="mt-2 pl-7 text-[10px] text-muted-foreground">
-                  Models dir: <code>{settings.models_directory}</code>
+                  Models directory: <code>{settings.models_directory}</code>
                 </p>
               )}
+            </ProviderCard>
+
+            {/* Ollama */}
+            <ProviderCard
+              checked={useOllama}
+              onChange={(v) => { setUseOllama(v); if (v) void refreshOllama() }}
+              icon={<Monitor className="size-4" />}
+              title="Ollama"
+              desc="Run models via Ollama. Manages downloads and GPU acceleration for you."
+            >
+              <div className="mt-3 space-y-2 pl-7">
+                <div>
+                  <Label className="text-xs">Ollama URL</Label>
+                  <Input
+                    className="mt-1 h-8 text-xs"
+                    value={ollamaUrl}
+                    onChange={(e) => setOllamaUrl(e.target.value)}
+                    onBlur={() => void refreshOllama()}
+                  />
+                </div>
+                <a
+                  href="https://ollama.com/download"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  Download Ollama <ExternalLink className="size-3" />
+                </a>
+                <span className="mx-2 text-[10px] text-muted-foreground">|</span>
+                <a
+                  href="https://ollama.com/library"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  Browse models <ExternalLink className="size-3" />
+                </a>
+                {ollamaModels.length > 0 && (
+                  <div className="mt-2">
+                    <p className="mb-1 text-[10px] font-medium text-muted-foreground">
+                      {ollamaModels.length} model(s) in Ollama:
+                    </p>
+                    <div className="max-h-28 space-y-0.5 overflow-y-auto rounded-md border border-border/40 p-1">
+                      {ollamaModels.map((m) => (
+                        <div key={m.name} className="flex items-center justify-between rounded px-2 py-1 text-xs">
+                          <span className="font-mono">{m.name}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {formatSize(m.size)}
+                            {m.details?.parameter_size ? ` · ${m.details.parameter_size}` : ""}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {useOllama && ollamaModels.length === 0 && (
+                  <p className="text-[10px] text-amber-500">
+                    No models found. Run <code>ollama pull llama3.2</code> to download one.
+                  </p>
+                )}
+              </div>
             </ProviderCard>
 
             {/* Remote API */}
@@ -290,7 +363,7 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
               onChange={setUseRemoteApi}
               icon={<Cloud className="size-4" />}
               title="Remote API (OpenAI-compatible)"
-              desc="OpenAI, Anthropic, Groq, Together, OpenRouter, etc."
+              desc="OpenAI, Anthropic, Groq, Together, OpenRouter, or any compatible endpoint."
             >
               <div className="mt-3 space-y-2 pl-7">
                 <div>
@@ -318,7 +391,9 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
           </div>
         )}
 
-        {/* ── Models ───────────────────────────────────── */}
+        {/* ══════════════════════════════════════════════════ */}
+        {/* MODELS                                            */}
+        {/* ══════════════════════════════════════════════════ */}
         {step === "models" && (
           <div className="space-y-4">
             <div>
@@ -326,58 +401,57 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
               <p className="mt-1 text-sm text-muted-foreground">
                 {models.length > 0
                   ? `${models.length} model(s) available. Download more or continue.`
-                  : "No models detected yet. Download a GGUF model or pull one in Ollama."}
+                  : "No models detected. Download a GGUF model below or pull one in Ollama."}
               </p>
             </div>
 
-            {/* Detected models */}
             {models.length > 0 && (
-              <div className="max-h-32 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
+              <div className="max-h-28 space-y-0.5 overflow-y-auto rounded-xl border border-border p-1.5">
                 {models.map((m) => (
                   <div key={m} className="flex items-center gap-2 rounded-lg bg-emerald-500/5 px-3 py-1.5 text-xs">
-                    <Check className="size-3.5 text-emerald-500" />
+                    <StatusIcon ok />
                     <span className="font-mono">{m}</span>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Download GGUF models */}
-            <div>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Download from HuggingFace
-              </h3>
-              <div className="space-y-1.5">
-                {ggufPresets.map((p) => {
-                  const info = MODEL_INFO[p.id]
-                  return (
-                    <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium">{info?.label ?? p.id}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {info?.size ?? ""} {info?.desc ? `— ${info.desc}` : ""} <span className="opacity-50">{p.repo}</span>
-                        </p>
+            {/* GGUF downloads */}
+            {ggufPresets.length > 0 && (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Download GGUF from HuggingFace
+                </h3>
+                <div className="space-y-1.5">
+                  {ggufPresets.map((p) => {
+                    const info = MODEL_INFO[p.id]
+                    return (
+                      <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">{info?.label ?? p.id}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {info?.size ?? ""}{info?.desc ? ` — ${info.desc}` : ""}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm" variant="outline" className="h-7 gap-1 text-xs"
+                          disabled={downloading !== null}
+                          onClick={() => void handleDownload(p.id)}
+                        >
+                          {downloading === p.id ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
+                          {downloading === p.id ? "Downloading…" : "Download"}
+                        </Button>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 gap-1 text-xs"
-                        disabled={downloading !== null}
-                        onClick={() => void handleDownload(p.id)}
-                      >
-                        {downloading === p.id ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
-                        {downloading === p.id ? "Downloading…" : "Download"}
-                      </Button>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
+                {downloadMsg && (
+                  <p className={cn("mt-2 text-xs", downloadMsg.toLowerCase().includes("fail") || downloadMsg.toLowerCase().includes("error") ? "text-destructive" : "text-emerald-500")}>
+                    {downloadMsg}
+                  </p>
+                )}
               </div>
-              {downloadMsg && (
-                <p className={cn("mt-2 text-xs", downloadMsg.includes("fail") || downloadMsg.includes("error") ? "text-destructive" : "text-emerald-500")}>
-                  {downloadMsg}
-                </p>
-              )}
-            </div>
+            )}
 
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep("inference")}>Back</Button>
@@ -388,13 +462,15 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
           </div>
         )}
 
-        {/* ── MCP ──────────────────────────────────────── */}
+        {/* ══════════════════════════════════════════════════ */}
+        {/* MCP                                               */}
+        {/* ══════════════════════════════════════════════════ */}
         {step === "mcp" && (
           <div className="space-y-4">
             <div>
               <h2 className="text-xl font-bold">MCP Servers (optional)</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Connect Model Context Protocol servers to give agents external tools — file access, web search, databases, etc.
+                Connect MCP servers to give agents external tools — file access, web search, databases, and more.
               </p>
             </div>
 
@@ -403,27 +479,21 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
               <span className="font-medium">Enable MCP</span>
             </label>
 
-            {/* Quick-add presets */}
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quick add</p>
               <div className="flex flex-wrap gap-1.5">
                 {MCP_PRESETS.map((p) => (
                   <Button
-                    key={p.name}
-                    variant="outline"
-                    size="sm"
-                    className="h-7 gap-1 text-xs"
+                    key={p.name} variant="outline" size="sm" className="h-7 gap-1 text-xs"
                     disabled={mcpServers.some((s) => s.name === p.name)}
                     onClick={() => addMcpPreset(p)}
                   >
-                    <Plus className="size-3" />
-                    {p.label}
+                    <Plus className="size-3" /> {p.label}
                   </Button>
                 ))}
               </div>
             </div>
 
-            {/* Configured servers */}
             {mcpServers.length > 0 && (
               <div className="space-y-1.5">
                 {mcpServers.map((s) => {
@@ -434,14 +504,10 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium">{s.name}</p>
                         <p className="truncate text-[10px] text-muted-foreground">
-                          {s.command} {(s.args ?? []).join(" ")} {preset?.desc ? `— ${preset.desc}` : ""}
+                          {s.command} {(s.args ?? []).join(" ")}{preset?.desc ? ` — ${preset.desc}` : ""}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        className="shrink-0 text-muted-foreground hover:text-destructive"
-                        onClick={() => removeMcpServer(s.name)}
-                      >
+                      <button type="button" className="shrink-0 text-muted-foreground hover:text-destructive" onClick={() => setMcpServers(mcpServers.filter((x) => x.name !== s.name))}>
                         <X className="size-4" />
                       </button>
                     </div>
@@ -460,7 +526,9 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
           </div>
         )}
 
-        {/* ── Done ─────────────────────────────────────── */}
+        {/* ══════════════════════════════════════════════════ */}
+        {/* DONE                                              */}
+        {/* ══════════════════════════════════════════════════ */}
         {step === "done" && (
           <div className="space-y-5 text-center">
             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-emerald-500/10">
@@ -474,7 +542,8 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
             </div>
             <div className="grid grid-cols-2 gap-2 text-left text-xs">
               <StatCard label="Models" value={models.length > 0 ? `${models.length} available` : "None yet"} ok={models.length > 0} />
-              <StatCard label="Ollama" value={useOllama ? "Connected" : "Off"} ok={useOllama} />
+              <StatCard label="Local GGUF" value={useLocalGguf ? "Enabled" : "Off"} ok={useLocalGguf} />
+              <StatCard label="Ollama" value={useOllama ? `${ollamaModels.length} models` : "Off"} ok={useOllama && ollamaModels.length > 0} />
               <StatCard label="Remote API" value={useRemoteApi ? "Configured" : "Off"} ok={useRemoteApi} />
               <StatCard label="MCP" value={mcpEnabled ? `${mcpServers.length} server(s)` : "Off"} ok={mcpEnabled && mcpServers.length > 0} />
             </div>
@@ -488,21 +557,24 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
   )
 }
 
-/* ── Shared sub-components ──────────────────────────────────────── */
+/* ── Sub-components ─────────────────────────────────────────────── */
 
 function ProviderCard({
-  checked, onChange, icon, title, desc, children,
+  checked, onChange, icon, title, desc, recommended, children,
 }: {
   checked: boolean; onChange: (v: boolean) => void
   icon: React.ReactNode; title: string; desc: string
-  children?: React.ReactNode
+  recommended?: boolean; children?: React.ReactNode
 }) {
   return (
     <div className={cn("rounded-xl border p-3.5 transition-colors", checked ? "border-primary/40 bg-primary/5" : "border-border")}>
       <label className="flex cursor-pointer items-start gap-3">
         <input type="checkbox" className="mt-0.5 size-4 accent-primary" checked={checked} onChange={(e) => onChange(e.target.checked)} />
         <div className="flex-1">
-          <div className="flex items-center gap-2 text-sm font-medium">{icon}{title}</div>
+          <div className="flex items-center gap-2 text-sm font-medium">
+            {icon} {title}
+            {recommended && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">Recommended</span>}
+          </div>
           <p className="mt-0.5 text-[11px] text-muted-foreground">{desc}</p>
         </div>
       </label>

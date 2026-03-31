@@ -438,6 +438,7 @@ fn api_router() -> Router<Arc<WebState>> {
             get(api_inference_settings_get).put(api_inference_settings_put),
         )
         .route("/models/download", post(api_models_download))
+        .route("/ollama/models", get(api_ollama_models))
         // Channel management
         .route("/channels", get(api_list_channels))
         .route("/channels", post(api_register_channel))
@@ -3324,6 +3325,39 @@ async fn api_inference_settings_put(
     let live = live_arc.read().await;
     let models_directory = inf.models_directory().display().to_string();
     Ok(Json(inference_settings_from_live(&live, models_directory)))
+}
+
+/// GET /api/ollama/models — list models available in the connected Ollama instance.
+async fn api_ollama_models(
+    State(state): State<Arc<WebState>>,
+) -> Json<serde_json::Value> {
+    let Some(inf) = &state.inference else {
+        return Json(serde_json::json!({ "models": [], "error": "Inference not available" }));
+    };
+    let live = inf.live_settings();
+    let live_r = live.read().await;
+    let url = live_r.ollama_url.clone();
+    drop(live_r);
+
+    if url.is_empty() {
+        return Json(serde_json::json!({ "models": [], "error": "Ollama not configured" }));
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_default();
+
+    match client.get(format!("{url}/api/tags")).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<serde_json::Value>().await {
+                Ok(body) => Json(body),
+                Err(e) => Json(serde_json::json!({ "models": [], "error": format!("Parse error: {e}") })),
+            }
+        }
+        Ok(resp) => Json(serde_json::json!({ "models": [], "error": format!("Ollama returned {}", resp.status()) })),
+        Err(e) => Json(serde_json::json!({ "models": [], "error": format!("Cannot reach Ollama at {url}: {e}") })),
+    }
 }
 
 async fn api_models_download(
