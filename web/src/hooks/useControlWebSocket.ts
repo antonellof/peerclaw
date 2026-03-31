@@ -25,6 +25,8 @@ export function useControlWebSocket(handlers: {
   onAgentsLibraryChanged?: () => void
   /** Real-time flow/agent run log lines streamed from the node. */
   onFlowLog?: (event: FlowLogEvent) => void
+  /** Model download progress events. */
+  onDownloadProgress?: (event: { preset: string; downloaded: number; total: number | null; percent: number | null }) => void
 }) {
   const handlersRef = useRef(handlers)
 
@@ -63,6 +65,14 @@ export function useControlWebSocket(handlers: {
             run_id: msg.run_id,
             line: msg.line,
             status: msg.status ?? "running",
+          })
+        }
+        if (msg.type === "download_progress") {
+          handlersRef.current.onDownloadProgress?.({
+            preset: (msg as Record<string, unknown>).preset as string ?? "",
+            downloaded: (msg as Record<string, unknown>).downloaded as number ?? 0,
+            total: (msg as Record<string, unknown>).total as number | null ?? null,
+            percent: (msg as Record<string, unknown>).percent as number | null ?? null,
           })
         }
       } catch {

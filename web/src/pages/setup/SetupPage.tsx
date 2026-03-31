@@ -31,6 +31,7 @@ import {
   type OllamaModel,
   type OnboardingStep,
 } from "@/lib/api"
+import { useControlWebSocket } from "@/hooks/useControlWebSocket"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -116,6 +117,13 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
   // Downloads
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadMsg, setDownloadMsg] = useState<string | null>(null)
+  const [downloadPct, setDownloadPct] = useState<number | null>(null)
+
+  useControlWebSocket({
+    onDownloadProgress: (ev) => {
+      if (ev.percent != null) setDownloadPct(ev.percent)
+    },
+  })
 
   // MCP
   const [mcpEnabled, setMcpEnabled] = useState(false)
@@ -176,6 +184,7 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
   const handleDownload = async (presetId: string) => {
     setDownloading(presetId)
     setDownloadMsg(null)
+    setDownloadPct(0)
     try {
       const r = await downloadGgufModel({ preset: presetId, quant: "Q4_K_M" })
       if (r.success) {
@@ -186,7 +195,7 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
       }
     } catch (e) {
       setDownloadMsg(e instanceof Error ? e.message : "Error")
-    } finally { setDownloading(null) }
+    } finally { setDownloading(null); setDownloadPct(null) }
   }
 
   const saveMcp = async () => {
@@ -438,11 +447,24 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
                           onClick={() => void handleDownload(p.id)}
                         >
                           {downloading === p.id ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
-                          {downloading === p.id ? "Downloading…" : "Download"}
+                          {downloading === p.id
+                            ? (downloadPct != null ? `${downloadPct}%` : "Starting…")
+                            : "Download"}
                         </Button>
                       </div>
                   ))}
                 </div>
+                {downloading && downloadPct != null && (
+                  <div className="mt-2">
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all duration-300"
+                        style={{ width: `${Math.min(downloadPct, 100)}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{downloadPct}% downloaded</p>
+                  </div>
+                )}
                 {downloadMsg && (
                   <p className={cn("mt-2 text-xs", downloadMsg.toLowerCase().includes("fail") || downloadMsg.toLowerCase().includes("error") ? "text-destructive" : "text-emerald-500")}>
                     {downloadMsg}

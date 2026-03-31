@@ -92,8 +92,15 @@ pub fn preset_to_hf_url(preset: &str, quant: &str) -> Option<(String, String)> {
     Some((url, out_name))
 }
 
-/// Download a URL to a path (async). Returns bytes written.
-pub async fn download_url_to_path(url: &str, dest: &Path) -> Result<u64, String> {
+/// Download a URL to a path with streaming progress.
+/// `on_progress(downloaded_bytes, total_bytes_opt)` is called periodically (~every 500KB).
+pub async fn download_url_to_path<F: Fn(u64, Option<u64>)>(
+    url: &str,
+    dest: &Path,
+    on_progress: Option<F>,
+) -> Result<u64, String> {
+    use tokio::io::AsyncWriteExt;
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(7200))
         .build()
@@ -109,15 +116,39 @@ pub async fn download_url_to_path(url: &str, dest: &Path) -> Result<u64, String>
         return Err(format!("HTTP {}", response.status()));
     }
 
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-    let n = bytes.len() as u64;
+    let total = response.content_length();
 
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    std::fs::write(dest, &bytes).map_err(|e| e.to_string())?;
-    Ok(n)
+    let mut file = tokio::fs::File::create(dest)
+        .await
+        .map_err(|e| format!("create file: {e}"))?;
+
+    let mut stream = response.bytes_stream();
+    let mut downloaded: u64 = 0;
+    let mut last_report: u64 = 0;
+
+    use futures::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("download stream: {e}"))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("write: {e}"))?;
+        downloaded += chunk.len() as u64;
+
+        // Report progress every ~500KB
+        if downloaded - last_report > 512_000 || downloaded == total.unwrap_or(u64::MAX) {
+            if let Some(ref cb) = on_progress {
+                cb(downloaded, total);
+            }
+            last_report = downloaded;
+        }
+    }
+
+    file.flush().await.map_err(|e| format!("flush: {e}"))?;
+    Ok(downloaded)
 }
 
 /// Filename from a HF URL path, or `model.gguf` fallback.

@@ -3424,7 +3424,21 @@ async fn api_models_download(
         });
     }
 
-    match crate::models_hf::download_url_to_path(&url, &dest).await {
+    // Broadcast progress via WebSocket
+    let ws_tx = state.ws_control_tx.clone();
+    let preset_id = dest.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let progress_cb = move |downloaded: u64, total: Option<u64>| {
+        let pct = total.map(|t| if t > 0 { (downloaded as f64 / t as f64 * 100.0) as u32 } else { 0 });
+        let _ = ws_tx.send(serde_json::json!({
+            "type": "download_progress",
+            "preset": &preset_id,
+            "downloaded": downloaded,
+            "total": total,
+            "percent": pct,
+        }));
+    };
+
+    match crate::models_hf::download_url_to_path(&url, &dest, Some(&progress_cb)).await {
         Ok(n) => {
             let _ = inf.scan_models().await;
             Json(ModelDownloadResponse {

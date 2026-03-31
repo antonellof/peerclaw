@@ -489,7 +489,7 @@ export function WorkspaceSettingsDialog({
                             >
                               {inf.gguf_presets.map((p) => (
                                 <option key={p.id} value={p.id}>
-                                  {p.id}
+                                  {p.label || p.id}{p.size ? ` (${p.size})` : ""}{p.recommended ? " ★" : ""}
                                 </option>
                               ))}
                             </select>

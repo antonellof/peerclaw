@@ -138,9 +138,18 @@ async fn download_model(model: &str, quant: &str) -> anyhow::Result<()> {
     println!("\x1b[33mDownloading...\x1b[0m (this may take a while)");
     println!();
 
-    let downloaded = crate::models_hf::download_url_to_path(&url, &output_path)
+    let cli_progress = |downloaded: u64, total: Option<u64>| {
+        if let Some(t) = total {
+            let pct = if t > 0 { downloaded * 100 / t } else { 0 };
+            eprint!("\r  {pct}% ({:.0} / {:.0} MB)   ", downloaded as f64 / 1e6, t as f64 / 1e6);
+        } else {
+            eprint!("\r  {:.0} MB downloaded   ", downloaded as f64 / 1e6);
+        }
+    };
+    let downloaded = crate::models_hf::download_url_to_path(&url, &output_path, Some(&cli_progress))
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
+    eprintln!();
 
     let downloaded_mb = downloaded as f64 / 1_048_576.0;
     println!("  Downloaded: {:.0} MB", downloaded_mb);
