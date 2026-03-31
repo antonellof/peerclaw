@@ -1,74 +1,75 @@
 //! Hugging Face GGUF presets and download helpers (shared by CLI and web API).
+//!
+//! Model presets and aliases are loaded from JSON files at compile time:
+//! - `templates/models/gguf-presets.json` — downloadable GGUF models
+//! - `templates/models/aliases.json` — short name → preset ID mapping
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
-/// Preset id, HF repo, file stem, and quant separator (`-` or `.`).
-/// URL: `https://huggingface.co/{repo}/resolve/main/{stem}{sep}{quant_tag}.gguf`
-pub const KNOWN_GGUF_PRESETS: &[(&str, &str, &str, &str)] = &[
-    (
-        "llama-3.2-1b",
-        "bartowski/Llama-3.2-1B-Instruct-GGUF",
-        "Llama-3.2-1B-Instruct",
-        "-",
-    ),
-    (
-        "llama-3.2-3b",
-        "bartowski/Llama-3.2-3B-Instruct-GGUF",
-        "Llama-3.2-3B-Instruct",
-        "-",
-    ),
-    (
-        "phi-3-mini",
-        "microsoft/Phi-3-mini-4k-instruct-gguf",
-        "Phi-3-mini-4k-instruct",
-        "-",
-    ),
-    (
-        "qwen2.5-0.5b",
-        "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
-        "qwen2.5-0.5b-instruct",
-        "-",
-    ),
-    (
-        "qwen2.5-1.5b",
-        "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
-        "qwen2.5-1.5b-instruct",
-        "-",
-    ),
-    (
-        "qwen2.5-3b",
-        "Qwen/Qwen2.5-3B-Instruct-GGUF",
-        "qwen2.5-3b-instruct",
-        "-",
-    ),
-    (
-        "gemma-2-2b",
-        "bartowski/gemma-2-2b-it-GGUF",
-        "gemma-2-2b-it",
-        "-",
-    ),
-    (
-        "tinyllama-1.1b",
-        "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
-        "tinyllama-1.1b-chat-v1.0",
-        ".",
-    ),
-];
+use serde::Deserialize;
+
+/// A GGUF model preset from `templates/models/gguf-presets.json`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GgufPreset {
+    pub id: String,
+    pub repo: String,
+    pub stem: String,
+    #[serde(default = "default_sep")]
+    pub sep: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub size: String,
+    #[serde(default)]
+    pub desc: String,
+    #[serde(default)]
+    pub recommended: bool,
+}
+
+fn default_sep() -> String {
+    "-".into()
+}
+
+/// All GGUF presets, loaded from the embedded JSON at compile time.
+static GGUF_PRESETS: LazyLock<Vec<GgufPreset>> = LazyLock::new(|| {
+    const RAW: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/templates/models/gguf-presets.json"
+    ));
+    serde_json::from_str(RAW).unwrap_or_default()
+});
+
+/// Model name aliases, loaded from the embedded JSON at compile time.
+static MODEL_ALIASES: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+    const RAW: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/templates/models/aliases.json"
+    ));
+    serde_json::from_str(RAW).unwrap_or_default()
+});
+
+/// Get the list of all GGUF presets.
+pub fn gguf_presets() -> &'static [GgufPreset] {
+    &GGUF_PRESETS
+}
+
+/// Resolve a model name alias (e.g., "llama" → "llama-3.2-3b").
+/// Returns the input unchanged if no alias matches.
+pub fn resolve_model_alias(name: &str) -> String {
+    let lower = name.to_lowercase();
+    MODEL_ALIASES
+        .get(&lower)
+        .cloned()
+        .unwrap_or_else(|| name.to_string())
+}
 
 /// Resolve a named preset + quantization to a Hugging Face `resolve` URL and output filename.
-///
-/// HF GGUF repos use `STEM-QUANT.gguf` where QUANT is uppercase with underscores (`Q4_K_M`).
-/// Some repos (Phi-3 Microsoft) use a shorter quant tag (`q4` instead of `Q4_K_M`); those are
-/// handled via a per-preset override table.
 pub fn preset_to_hf_url(preset: &str, quant: &str) -> Option<(String, String)> {
-    let (_, repo, stem, sep) = KNOWN_GGUF_PRESETS
-        .iter()
-        .find(|(n, _, _, _)| *n == preset)?;
+    let p = GGUF_PRESETS.iter().find(|p| p.id == preset)?;
 
-    // Per-repo quant tag conventions:
-    // - Phi-3 Microsoft: short tags (q4, fp16)
-    // - Qwen: lowercase with underscores (q4_k_m)
-    // - bartowski/TheBloke: uppercase with underscores (Q4_K_M)
+    // Per-repo quant tag conventions
     let quant_tag = if preset.starts_with("phi-3") {
         match quant.to_lowercase().as_str() {
             "q4_k_m" | "q4_k" | "q4" => "q4".to_string(),
@@ -77,15 +78,16 @@ pub fn preset_to_hf_url(preset: &str, quant: &str) -> Option<(String, String)> {
             other => other.to_string(),
         }
     } else if preset.starts_with("qwen") {
-        // Qwen repos use lowercase: qwen2.5-0.5b-instruct-q4_k_m.gguf
         quant.to_lowercase().replace('-', "_")
+    } else if p.sep == "." {
+        // TheBloke style: lowercase with dots
+        quant.to_uppercase().replace('-', "_")
     } else {
-        // bartowski / TheBloke: uppercase, underscores (Q4_K_M)
         quant.to_uppercase().replace('-', "_")
     };
 
-    let file = format!("{}{}{}.gguf", stem, sep, quant_tag);
-    let url = format!("https://huggingface.co/{repo}/resolve/main/{file}");
+    let file = format!("{}{}{}.gguf", p.stem, p.sep, quant_tag);
+    let url = format!("https://huggingface.co/{}/resolve/main/{file}", p.repo);
     let out_name = format!("{}-{}.gguf", preset, quant);
     Some((url, out_name))
 }

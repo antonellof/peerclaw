@@ -1,0 +1,67 @@
+[
+  {
+    "id": "llama-3.2-3b",
+    "repo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
+    "stem": "Llama-3.2-3B-Instruct",
+    "sep": "-",
+    "label": "Llama 3.2 3B",
+    "size": "~2 GB",
+    "desc": "Best balance of speed and quality",
+    "recommended": true
+  },
+  {
+    "id": "qwen2.5-3b",
+    "repo": "Qwen/Qwen2.5-3B-Instruct-GGUF",
+    "stem": "qwen2.5-3b-instruct",
+    "sep": "-",
+    "label": "Qwen 2.5 3B",
+    "size": "~2 GB",
+    "desc": "Multilingual, strong coding and tools",
+    "recommended": true
+  },
+  {
+    "id": "phi-3-mini",
+    "repo": "microsoft/Phi-3-mini-4k-instruct-gguf",
+    "stem": "Phi-3-mini-4k-instruct",
+    "sep": "-",
+    "label": "Phi-3 Mini 4K",
+    "size": "~2.4 GB",
+    "desc": "Microsoft, strong reasoning"
+  },
+  {
+    "id": "gemma-2-2b",
+    "repo": "bartowski/gemma-2-2b-it-GGUF",
+    "stem": "gemma-2-2b-it",
+    "sep": "-",
+    "label": "Gemma 2 2B",
+    "size": "~1.6 GB",
+    "desc": "Google, efficient for its size"
+  },
+  {
+    "id": "mistral-7b",
+    "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
+    "stem": "mistral-7b-instruct-v0.2",
+    "sep": ".",
+    "label": "Mistral 7B v0.2",
+    "size": "~4.4 GB",
+    "desc": "Excellent quality, needs more RAM"
+  },
+  {
+    "id": "llama-3.2-1b",
+    "repo": "bartowski/Llama-3.2-1B-Instruct-GGUF",
+    "stem": "Llama-3.2-1B-Instruct",
+    "sep": "-",
+    "label": "Llama 3.2 1B",
+    "size": "~770 MB",
+    "desc": "Fast chat, limited tool-use"
+  },
+  {
+    "id": "qwen2.5-1.5b",
+    "repo": "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+    "stem": "qwen2.5-1.5b-instruct",
+    "sep": "-",
+    "label": "Qwen 2.5 1.5B",
+    "size": "~1 GB",
+    "desc": "Small but capable"
+  }
+]

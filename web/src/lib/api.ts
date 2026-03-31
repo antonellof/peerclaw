@@ -144,7 +144,14 @@ export async function fetchOnboarding(): Promise<OnboardingResponse> {
   return r.json()
 }
 
-export type GgufPresetRow = { id: string; repo: string }
+export type GgufPresetRow = {
+  id: string
+  repo: string
+  label?: string
+  size?: string
+  desc?: string
+  recommended?: boolean
+}
 
 export type InferenceSettingsResponse = {
   use_local_gguf: boolean

@@ -3211,8 +3211,12 @@ struct InferenceSettingsResponse {
 
 #[derive(Serialize)]
 struct GgufPresetRow {
-    id: &'static str,
-    repo: &'static str,
+    id: String,
+    repo: String,
+    label: String,
+    size: String,
+    desc: String,
+    recommended: bool,
 }
 
 #[derive(Deserialize)]
@@ -3252,9 +3256,16 @@ fn inference_settings_from_live(
     live: &crate::inference::InferenceLiveSettings,
     models_directory: String,
 ) -> InferenceSettingsResponse {
-    let gguf_presets = crate::models_hf::KNOWN_GGUF_PRESETS
+    let gguf_presets = crate::models_hf::gguf_presets()
         .iter()
-        .map(|(id, repo, _, _)| GgufPresetRow { id, repo })
+        .map(|p| GgufPresetRow {
+            id: p.id.clone(),
+            repo: p.repo.clone(),
+            label: p.label.clone(),
+            size: p.size.clone(),
+            desc: p.desc.clone(),
+            recommended: p.recommended,
+        })
         .collect();
     InferenceSettingsResponse {
         use_local_gguf: live.use_local_gguf,

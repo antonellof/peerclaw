@@ -64,16 +64,7 @@ const STEP_LABELS: Record<Step, string> = {
   done: "Done",
 }
 
-const MODEL_INFO: Record<string, { label: string; size: string; desc: string }> = {
-  "llama-3.2-1b": { label: "Llama 3.2 1B", size: "~770 MB", desc: "Fast, good for testing" },
-  "llama-3.2-3b": { label: "Llama 3.2 3B", size: "~2 GB", desc: "Great balance of speed and quality" },
-  "phi-3-mini": { label: "Phi-3 Mini 4K", size: "~2.4 GB", desc: "Microsoft, strong reasoning" },
-  "qwen2.5-0.5b": { label: "Qwen 2.5 0.5B", size: "~400 MB", desc: "Tiny, very fast" },
-  "qwen2.5-1.5b": { label: "Qwen 2.5 1.5B", size: "~1 GB", desc: "Small and capable" },
-  "qwen2.5-3b": { label: "Qwen 2.5 3B", size: "~2 GB", desc: "Multilingual, strong coding" },
-  "gemma-2-2b": { label: "Gemma 2 2B", size: "~1.6 GB", desc: "Google, efficient" },
-  "tinyllama-1.1b": { label: "TinyLlama 1.1B", size: "~640 MB", desc: "Ultra-light, fast" },
-}
+// Model info now comes from the server via gguf_presets (loaded from templates/models/gguf-presets.json)
 
 const MCP_PRESETS = [
   { name: "filesystem", label: "Filesystem", command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"], desc: "Read/write files" },
@@ -428,14 +419,17 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
                   Download GGUF from HuggingFace
                 </h3>
                 <div className="space-y-1.5">
-                  {ggufPresets.map((p) => {
-                    const info = MODEL_INFO[p.id]
-                    return (
+                  {ggufPresets.map((p) => (
                       <div key={p.id} className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2">
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium">{info?.label ?? p.id}</p>
+                          <p className="flex items-center gap-2 text-sm font-medium">
+                            {p.label || p.id}
+                            {p.recommended && (
+                              <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">Recommended</span>
+                            )}
+                          </p>
                           <p className="text-[11px] text-muted-foreground">
-                            {info?.size ?? ""}{info?.desc ? ` — ${info.desc}` : ""}
+                            {p.size ?? ""}{p.desc ? ` — ${p.desc}` : ""}
                           </p>
                         </div>
                         <Button
@@ -447,8 +441,7 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
                           {downloading === p.id ? "Downloading…" : "Download"}
                         </Button>
                       </div>
-                    )
-                  })}
+                  ))}
                 </div>
                 {downloadMsg && (
                   <p className={cn("mt-2 text-xs", downloadMsg.toLowerCase().includes("fail") || downloadMsg.toLowerCase().includes("error") ? "text-destructive" : "text-emerald-500")}>

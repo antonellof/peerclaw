@@ -252,19 +252,9 @@ pub async fn ps() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Resolve model name to actual file path
+/// Resolve model name using aliases from `templates/models/aliases.json`.
 fn resolve_model_name(name: &str) -> String {
-    // Handle common aliases
-    match name.to_lowercase().as_str() {
-        "llama2" | "llama" => "llama-3.2-3b".to_string(),
-        "llama:7b" | "llama2:7b" => "llama-3.2-3b".to_string(),
-        "llama:13b" | "llama2:13b" => "llama-3.2-3b".to_string(),
-        "phi" | "phi3" => "phi-3-mini".to_string(),
-        "qwen" | "qwen2" => "qwen2.5-3b".to_string(),
-        "gemma" | "gemma2" => "gemma-2-2b".to_string(),
-        "tinyllama" => "tinyllama-1.1b".to_string(),
-        _ => name.to_string(),
-    }
+    crate::models_hf::resolve_model_alias(name)
 }
 
 fn build_prompt(system: &str, history: &[(String, String)], user_input: &str) -> String {

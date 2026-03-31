@@ -8,6 +8,12 @@ use std::path::PathBuf;
 
 use crate::bootstrap;
 
+/// Default model name used as fallback across the codebase.
+/// The actual model is configured via `config.toml` → `[agent].default_model`,
+/// CLI `--model`, or the web settings UI. This constant is only the fallback
+/// when no configuration is available.
+pub const DEFAULT_MODEL_NAME: &str = "llama-3.2-3b";
+
 /// Root configuration for PeerClaw.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {

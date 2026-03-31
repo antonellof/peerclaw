@@ -1,0 +1,15 @@
+{
+  "llama2": "llama-3.2-3b",
+  "llama": "llama-3.2-3b",
+  "llama:7b": "llama-3.2-3b",
+  "llama2:7b": "llama-3.2-3b",
+  "llama:13b": "llama-3.2-3b",
+  "llama2:13b": "llama-3.2-3b",
+  "phi": "phi-3-mini",
+  "phi3": "phi-3-mini",
+  "qwen": "qwen2.5-3b",
+  "qwen2": "qwen2.5-3b",
+  "gemma": "gemma-2-2b",
+  "gemma2": "gemma-2-2b",
+  "mistral": "mistral-7b"
+}
