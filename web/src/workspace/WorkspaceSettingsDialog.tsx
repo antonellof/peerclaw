@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
 import {
-  Check,
   ChevronRight,
   Cloud,
   Download,
@@ -8,7 +7,6 @@ import {
   HardDrive,
   Loader2,
   Monitor,
-  Terminal,
 } from "lucide-react"
 
 import { DEFAULT_MODEL } from "@/lib/defaults"
