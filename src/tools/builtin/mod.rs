@@ -9,6 +9,7 @@
 //! - P2P: memory, job, peer_discovery, wallet
 
 mod browser;
+mod code_exec;
 mod core;
 mod file;
 mod http;
@@ -22,6 +23,7 @@ mod shell;
 mod subagent;
 
 pub use browser::BrowserTool;
+pub use code_exec::CodeExecTool;
 pub use core::{EchoTool, JsonTool, TimeTool};
 pub use file::{FileListTool, FileReadTool, FileWriteTool};
 pub use http::{HttpTool, WebFetchTool};

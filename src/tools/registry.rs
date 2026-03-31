@@ -109,8 +109,9 @@ impl ToolRegistry {
         self.register_builtin(Arc::new(builtin::FileWriteTool));
         self.register_builtin(Arc::new(builtin::FileListTool));
 
-        // Shell tool
+        // Shell + code execution
         self.register_builtin(Arc::new(builtin::ShellTool::new()));
+        self.register_builtin(Arc::new(builtin::CodeExecTool));
 
         // Search tool
         self.register_builtin(Arc::new(builtin::WebSearchTool::new()));
