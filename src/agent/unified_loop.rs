@@ -18,7 +18,7 @@ use super::runtime::{extract_answer, parse_tool_calls, ToolCallRecord};
 /// Upper bound on LLM↔tool rounds.
 pub const AGENTIC_MAX_ITERS: u32 = 20;
 /// Cap parallel tool calls per model response.
-pub const AGENTIC_MAX_TOOL_CALLS_PER_PASS: usize = 10;
+pub const AGENTIC_MAX_TOOL_CALLS_PER_PASS: usize = 4;
 
 /// One inference turn result (mirrors web `InferenceResponse` fields).
 #[derive(Clone, Debug)]
