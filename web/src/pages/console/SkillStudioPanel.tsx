@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import { DEFAULT_MODEL } from "@/lib/defaults"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Loader2, Sparkles, Wand2 } from "lucide-react"
@@ -62,7 +63,7 @@ export function SkillStudioPanel({ onSaved }: SkillStudioPanelProps) {
   const [aiNote, setAiNote] = useState<string | null>(null)
   const [instruction, setInstruction] = useState("Review for clarity, valid YAML frontmatter, and PeerClaw SKILL.md conventions.")
   const [models, setModels] = useState<string[]>([])
-  const [aiModel, setAiModel] = useState("llama-3.2-3b")
+  const [aiModel, setAiModel] = useState(DEFAULT_MODEL)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
 
   const refreshList = useCallback(async () => {
@@ -87,7 +88,7 @@ export function SkillStudioPanel({ onSaved }: SkillStudioPanelProps) {
           setAiModel((cur) => (ids.includes(cur) ? cur : ids[0]!))
         }
       } catch {
-        setModels(["llama-3.2-3b"])
+        setModels([DEFAULT_MODEL])
       }
     })()
   }, [])
@@ -246,7 +247,7 @@ export function SkillStudioPanel({ onSaved }: SkillStudioPanelProps) {
                 value={aiModel}
                 onChange={(e) => setAiModel(e.target.value)}
               >
-                {(models.length ? models : ["llama-3.2-3b"]).map((m) => (
+                {(models.length ? models : [DEFAULT_MODEL]).map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>

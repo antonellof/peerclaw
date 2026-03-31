@@ -17,8 +17,10 @@ export type WorkspaceChatPreferences = {
   selectedAgentLibraryId: string | null
 }
 
+import { DEFAULT_MODEL } from "@/lib/defaults"
+
 const DEFAULTS: WorkspaceChatPreferences = {
-  model: "llama-3.2-3b",
+  model: DEFAULT_MODEL,
   temperature: 0.7,
   maxTokens: 500,
   distributed: false,

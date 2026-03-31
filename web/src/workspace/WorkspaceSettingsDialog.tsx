@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Briefcase, BookOpen, CircleHelp, Cpu, HardDrive, LayoutGrid, Plug, Radio, Terminal, Workflow } from "lucide-react"
 
+import { DEFAULT_MODEL } from "@/lib/defaults"
 import {
   downloadGgufModel,
   fetchInferenceSettings,
@@ -48,7 +49,7 @@ export function WorkspaceSettingsDialog({
   const [infErr, setInfErr] = useState<string | null>(null)
   const [infSaving, setInfSaving] = useState(false)
   const [remoteKeyDraft, setRemoteKeyDraft] = useState("")
-  const [dlPreset, setDlPreset] = useState("llama-3.2-3b")
+  const [dlPreset, setDlPreset] = useState(DEFAULT_MODEL)
   const [dlQuant, setDlQuant] = useState("q4_k_m")
   const [dlUrl, setDlUrl] = useState("")
   const [dlFilename, setDlFilename] = useState("")
@@ -71,9 +72,9 @@ export function WorkspaceSettingsDialog({
     try {
       const list = await fetchOpenAiModels()
       const ids = list.map((m) => m.id).filter(Boolean)
-      setModels(ids.length ? ids : ["llama-3.2-3b", "llama-3.2-1b", "phi-3-mini"])
+      setModels(ids.length ? ids : [DEFAULT_MODEL])
     } catch {
-      setModels(["llama-3.2-3b", "llama-3.2-1b", "phi-3-mini"])
+      setModels([DEFAULT_MODEL])
     }
   }, [])
 
