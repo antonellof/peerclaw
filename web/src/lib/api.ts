@@ -1016,6 +1016,21 @@ export type ToolInfo = {
   description: string
   location: string
   category?: string
+  required_params?: string[]
+}
+
+export type ToolDetailInfo = ToolInfo & {
+  domain?: string
+  price?: number
+  peer_id?: string
+  parameters_schema?: Record<string, unknown>
+  stats?: { total_calls: number; successful_calls: number; failed_calls: number; total_time_ms: number }
+}
+
+export async function fetchToolDetail(name: string): Promise<ToolDetailInfo | null> {
+  const r = await apiFetch(`/api/tools/${encodeURIComponent(name)}`)
+  if (!r.ok) return null
+  return r.json()
 }
 
 export type ToolExecResult = {
@@ -1047,7 +1062,18 @@ export async function executeTool(payload: {
     const t = await r.text().catch(() => "Tool execution failed")
     return { ok: false, success: false, data: null, output: null, error: t, message: t, duration_ms: 0 }
   }
-  return r.json()
+  const j = (await r.json()) as Record<string, unknown>
+  // API returns `success` not `ok` — normalize
+  const ok = (j.ok as boolean) ?? (j.success as boolean) ?? false
+  return {
+    ok,
+    success: ok,
+    data: j.data ?? null,
+    output: j.data ?? j.output ?? null,
+    error: (j.error as string) ?? null,
+    message: (j.message as string) ?? null,
+    duration_ms: (j.duration_ms as number) ?? 0,
+  }
 }
 
 // ── Crews ───────────────────────────────────────────────────────────────────

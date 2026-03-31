@@ -2013,6 +2013,7 @@ async fn api_tools(State(state): State<Arc<WebState>>) -> Json<serde_json::Value
                 "name": t.name,
                 "description": t.description,
                 "location": format!("{:?}", t.location),
+                "required_params": t.required_params,
             })
         })
         .collect();
