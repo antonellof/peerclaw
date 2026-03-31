@@ -51,7 +51,7 @@ export function WorkspaceShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [peerLine, setPeerLine] = useState("…")
   const [balanceLine, setBalanceLine] = useState("")
-  const [onboardingChips, setOnboardingChips] = useState<string[]>(["Loading…"])
+  const [nodeOk, setNodeOk] = useState(false)
 
   const chatControlsRef = useRef<ChatControls | null>(null)
 
@@ -89,14 +89,9 @@ export function WorkspaceShell() {
   }, [refreshSidebar])
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const o = await fetchOnboarding()
-        setOnboardingChips(o.steps.map((s) => `${s.ok ? "✓" : "○"} ${s.id.replace(/_/g, " ")}`))
-      } catch {
-        setOnboardingChips(["Could not load onboarding"])
-      }
-    })()
+    void fetchOnboarding()
+      .then((o) => setNodeOk(o.steps.filter((s) => s.ok).length >= 2))
+      .catch(() => setNodeOk(false))
   }, [])
 
   useControlWebSocket({
@@ -187,20 +182,16 @@ export function WorkspaceShell() {
             <WorkspaceSidebarAgentRuns sidebarCollapsed={sidebarCollapsed} />
 
             {!sidebarCollapsed && (
-              <div className="mx-2 mb-2 rounded-xl border border-border/50 bg-background/30 p-3">
-                <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Node
+              <div className="mx-3 mb-2 space-y-1">
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <span className={`inline-block size-1.5 rounded-full ${nodeOk ? "bg-emerald-500" : "bg-amber-500"}`} />
+                  {peerLine}
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {onboardingChips.map((c) => (
-                    <span
-                      key={c}
-                      className="rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground"
-                    >
-                      {c}
-                    </span>
-                  ))}
-                </div>
+                {balanceLine && (
+                  <div className="text-[11px] font-mono text-muted-foreground/60">
+                    {balanceLine}
+                  </div>
+                )}
               </div>
             )}
           </div>
