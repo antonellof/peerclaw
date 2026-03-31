@@ -118,6 +118,7 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadMsg, setDownloadMsg] = useState<string | null>(null)
   const [downloadPct, setDownloadPct] = useState<number | null>(null)
+  const [customUrl, setCustomUrl] = useState("")
 
   useControlWebSocket({
     onDownloadProgress: (ev) => {
@@ -148,7 +149,7 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
     try {
       const mcp = await fetchMcpStatus()
       setMcpEnabled(mcp.config.enabled)
-      setMcpServers(mcp.config.servers || [])
+      setMcpServers((mcp.config.servers || []).map((s) => ({ ...s, command: s.command ?? undefined })))
     } catch { /* */ }
   }, [])
 
@@ -190,6 +191,26 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
       if (r.success) {
         setDownloadMsg(`Downloaded ${presetId}`)
         setModels((await fetchOpenAiModels()).map((x) => x.id))
+      } else {
+        setDownloadMsg(r.error ?? "Download failed")
+      }
+    } catch (e) {
+      setDownloadMsg(e instanceof Error ? e.message : "Error")
+    } finally { setDownloading(null); setDownloadPct(null) }
+  }
+
+  const handleUrlDownload = async () => {
+    const url = customUrl.trim()
+    if (!url) return
+    setDownloading("custom")
+    setDownloadMsg(null)
+    setDownloadPct(0)
+    try {
+      const r = await downloadGgufModel({ url })
+      if (r.success) {
+        setDownloadMsg(`Downloaded to ${r.path ?? "models dir"}`)
+        setModels((await fetchOpenAiModels()).map((x) => x.id))
+        setCustomUrl("")
       } else {
         setDownloadMsg(r.error ?? "Download failed")
       }
@@ -454,6 +475,27 @@ export function SetupPage({ onFinish }: { onFinish: () => void }) {
                       </div>
                   ))}
                 </div>
+                {/* Custom URL */}
+                <div className="mt-3 space-y-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Or paste a .gguf URL</p>
+                  <div className="flex gap-2">
+                    <Input
+                      className="h-8 flex-1 font-mono text-[11px]"
+                      placeholder="https://huggingface.co/…/resolve/main/model.gguf"
+                      value={customUrl}
+                      onChange={(e) => setCustomUrl(e.target.value)}
+                    />
+                    <Button
+                      size="sm" variant="outline" className="h-8 gap-1 text-xs"
+                      disabled={downloading !== null || !customUrl.trim()}
+                      onClick={() => void handleUrlDownload()}
+                    >
+                      {downloading === "custom" ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
+                      {downloading === "custom" ? (downloadPct != null ? `${downloadPct}%` : "…") : "Download"}
+                    </Button>
+                  </div>
+                </div>
+
                 {downloading && downloadPct != null && (
                   <div className="mt-2">
                     <div className="h-2 overflow-hidden rounded-full bg-muted">

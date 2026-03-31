@@ -74,6 +74,7 @@ export function WorkspaceSettingsDialog({
   const [dlBusy, setDlBusy] = useState(false)
   const [dlMsg, setDlMsg] = useState<string | null>(null)
   const [dlPct, setDlPct] = useState<number | null>(null)
+  const [dlUrl, setDlUrl] = useState("")
 
   useControlWebSocket({
     onDownloadProgress: (ev) => {
@@ -148,6 +149,27 @@ export function WorkspaceSettingsDialog({
     try {
       const r = await downloadGgufModel({ preset: presetId, quant: "Q4_K_M" })
       if (r.success) setDlMsg(`Downloaded ${presetId}`)
+      else setDlMsg(r.error ?? "Download failed")
+    } catch (e) {
+      setDlMsg(e instanceof Error ? e.message : "Download failed")
+    } finally {
+      setDlBusy(false)
+      setDlPct(null)
+      void loadInf()
+      void loadModels()
+      onModelsChanged?.()
+    }
+  }
+
+  const handleUrlDownload = async () => {
+    const url = dlUrl.trim()
+    if (!url) return
+    setDlBusy(true)
+    setDlMsg(null)
+    setDlPct(0)
+    try {
+      const r = await downloadGgufModel({ url })
+      if (r.success) { setDlMsg(`Downloaded to ${r.path ?? "models dir"}`); setDlUrl("") }
       else setDlMsg(r.error ?? "Download failed")
     } catch (e) {
       setDlMsg(e instanceof Error ? e.message : "Download failed")
@@ -298,6 +320,18 @@ export function WorkspaceSettingsDialog({
                             <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${Math.min(dlPct, 100)}%` }} />
                           </div>
                         )}
+                        {/* Custom URL */}
+                        <div className="mt-2 space-y-1">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Or paste a .gguf URL</p>
+                          <div className="flex gap-1.5">
+                            <Input className="h-7 flex-1 font-mono text-[10px]" placeholder="https://huggingface.co/…/resolve/main/model.gguf" value={dlUrl} onChange={(e) => setDlUrl(e.target.value)} />
+                            <Button size="sm" variant="outline" className="h-7 gap-1 text-[10px]" disabled={dlBusy || !dlUrl.trim()} onClick={() => void handleUrlDownload()}>
+                              {dlBusy ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
+                              Get
+                            </Button>
+                          </div>
+                        </div>
+
                         {dlMsg && (
                           <p className={cn("text-xs", dlMsg.toLowerCase().includes("fail") || dlMsg.toLowerCase().includes("error") ? "text-destructive" : "text-emerald-500")}>{dlMsg}</p>
                         )}
